@@ -518,7 +518,7 @@ export default function FlowRunsPage() {
         </div>
         <div className="flex flex-col gap-2" aria-hidden="true">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-[62px] w-full rounded-[10px]" />
+            <Skeleton key={i} className="h-[62px] w-full rounded-field" />
           ))}
         </div>
       </PageBody>
@@ -669,7 +669,7 @@ export default function FlowRunsPage() {
       </PageToolbar>
 
       {/* Seleção + ações em massa */}
-      <div className="flex min-h-[38px] flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-1.5">
+      <div className="flex min-h-[38px] flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-card px-4 py-1.5">
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           <Checkbox
             checked={allVisibleSelected}
@@ -717,7 +717,7 @@ export default function FlowRunsPage() {
           onRetry={() => setReloadKey((k) => k + 1)}
         />
       ) : runs.length === 0 ? (
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
           <p className="text-[13.5px] font-semibold text-foreground">
             {hasActiveFilters ? "Nada encontrado" : "Nenhuma execução ainda"}
           </p>
@@ -730,7 +730,7 @@ export default function FlowRunsPage() {
       ) : (
         <div className="ddm-stagger relative flex flex-col gap-2">
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-background/60">
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-field bg-background/60">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           )}
@@ -892,7 +892,7 @@ function RunCard({
     <div
       id={`run-${run.id}`}
       className={cn(
-        "scroll-mt-4 rounded-[10px] border bg-card transition-[border-color,box-shadow] duration-200 ease-ddm",
+        "scroll-mt-4 rounded-card border bg-card transition-[border-color,box-shadow] duration-200 ease-ddm",
         focused ? "border-primary shadow-[0_0_0_3px_var(--primary-soft-2)]" : "border-border hover:border-border-strong",
       )}
     >

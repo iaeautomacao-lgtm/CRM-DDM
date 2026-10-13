@@ -203,7 +203,7 @@ function ErrosContent() {
       {/* Filtros */}
       <section
         aria-label="Filtros"
-        className="grid grid-cols-1 gap-3 rounded-[10px] border border-border bg-card px-[18px] py-4 sm:grid-cols-2 lg:grid-cols-6"
+        className="grid grid-cols-1 gap-3 rounded-card border border-border bg-card px-[18px] py-4 sm:grid-cols-2 lg:grid-cols-6"
       >
         <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
           Campanha
@@ -325,7 +325,7 @@ function ErrosContent() {
                 (summary.source === "rpc" ? " (a partir de 20.000, contando os mais recentes)" : " (amostra dos 5.000 mais recentes)")}
             </p>
           </div>
-          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-px overflow-hidden rounded-[10px] border border-border bg-border p-0">
+          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-px overflow-hidden rounded-card border border-border bg-border p-0">
             {summary.rows.map((r) => {
               const key = codeKey(r.code);
               const active = filters.code === key;

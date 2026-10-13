@@ -20,7 +20,7 @@ export function PushSettingsCard() {
   if (!canInbox) return null;
 
   return (
-    <section className="flex flex-col gap-3 rounded-[10px] border border-border bg-card p-5">
+    <section className="flex flex-col gap-3 rounded-card border border-border bg-card p-5">
       <div className="flex items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-text" aria-hidden="true">
           <Bell className="size-[18px]" />

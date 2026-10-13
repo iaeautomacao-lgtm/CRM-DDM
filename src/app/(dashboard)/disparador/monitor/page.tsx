@@ -200,8 +200,8 @@ export default function MonitorV2Page() {
 
       {loading && !s ? (
         <div className="flex flex-col gap-3.5" aria-busy="true" aria-label="Carregando monitor">
-          <Skeleton className="h-[112px] w-full rounded-[10px]" />
-          <Skeleton className="h-64 w-full rounded-[10px]" />
+          <Skeleton className="h-[112px] w-full rounded-field" />
+          <Skeleton className="h-64 w-full rounded-field" />
         </div>
       ) : !s ? (
         error ? <ErrorState title="Não foi possível carregar o monitor" onRetry={() => void load()} /> : null
@@ -247,7 +247,7 @@ export default function MonitorV2Page() {
           {/* Indicadores */}
           <section
             aria-label="Indicadores"
-            className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-px overflow-hidden rounded-[10px] border border-border bg-border"
+            className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-px overflow-hidden rounded-card border border-border bg-border"
           >
             <MonitorKpi
               title="Envios por minuto (agora)"

@@ -200,7 +200,7 @@ export function FeedbackButton() {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         aria-label="Reportar problema"
-        className={`fixed z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[#FF5706] text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[#FF5706]/50 ${
+        className={`fixed z-40 flex h-12 w-12 items-center justify-center rounded-full bg-primary-solid text-white shadow-orange transition-[transform,background-color] duration-150 ease-out hover:-translate-y-px hover:bg-primary-solid-hover focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/50 ${
           isDragging ? "cursor-grab opacity-80" : ""
         }`}
         style={triggerStyle}
@@ -211,7 +211,7 @@ export function FeedbackButton() {
       </PopoverTrigger>
       <PopoverContent className="w-80" side="top" align="end" sideOffset={10}>
         {sent ? (
-          <p className="py-4 text-center text-sm font-medium text-[#FF5706]">
+          <p className="py-4 text-center text-sm font-medium text-primary-text">
             Obrigado! Problema reportado.
           </p>
         ) : (
@@ -234,7 +234,6 @@ export function FeedbackButton() {
               </Button>
               <Button
                 size="sm"
-                className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
                 disabled={!message.trim() || sending}
                 onClick={handleSubmit}
               >

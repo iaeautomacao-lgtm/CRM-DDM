@@ -195,7 +195,7 @@ export function HistoryExportDialog({
           ) : jobs.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhuma exportação do histórico ainda.</p>
           ) : (
-            <ul className="divide-y divide-border overflow-hidden rounded-[10px] border border-border">
+            <ul className="divide-y divide-border overflow-hidden rounded-card border border-border">
               {jobs.map((j) => (
                 <li key={j.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
                   <div className="min-w-0 flex-1">

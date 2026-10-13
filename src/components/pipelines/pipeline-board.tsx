@@ -255,7 +255,7 @@ function StageColumn({
     // a drag over the column header doesn't highlight the whole column.
     <section
       aria-label={stage.name}
-      className="flex min-h-[440px] w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-[10px] border border-border bg-card lg:w-auto lg:max-w-none lg:flex-1 lg:basis-[260px] lg:shrink lg:snap-none"
+      className="flex min-h-[440px] w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-card border border-border bg-card lg:w-auto lg:max-w-none lg:flex-1 lg:basis-[260px] lg:shrink lg:snap-none"
     >
       {/* Fio de 3px na cor da etapa */}
       <div className="h-[3px] shrink-0" style={{ backgroundColor: stage.color }} />

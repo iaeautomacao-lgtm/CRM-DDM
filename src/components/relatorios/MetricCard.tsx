@@ -8,7 +8,7 @@ export interface MetricCardProps {
 
 export function MetricCard({ title, icon: Icon, metrics }: MetricCardProps) {
   return (
-    <div className="animate-ddm-up rounded-[10px] border border-border bg-card p-4">
+    <div className="animate-ddm-up rounded-card border border-border bg-card p-4">
       <div className="mb-3 flex items-center gap-2">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
           <Icon className="size-4" />

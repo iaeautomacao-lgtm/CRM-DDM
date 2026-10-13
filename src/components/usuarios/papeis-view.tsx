@@ -385,7 +385,7 @@ function RoleDrawer({
           ) : null}
 
           {editable && (
-            <div role="status" className="flex animate-ddm-fade items-start gap-2.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3">
+            <div role="status" className="flex animate-ddm-fade items-start gap-2.5 rounded-field border border-warning-border bg-warning-soft px-3.5 py-3">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
               <p className="text-[13px] text-foreground">
                 <span className="font-semibold">No acesso aos dados, este papel equivale a {ROLE_META[compat].label}.</span>{' '}
@@ -413,7 +413,7 @@ function RoleDrawer({
               return (
                 <section key={g.key} aria-label={g.label} className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.label}</h3>
-                  <ul className="divide-y divide-border overflow-hidden rounded-[10px] border border-border">
+                  <ul className="divide-y divide-border overflow-hidden rounded-card border border-border">
                     {visible.map((p) => {
                       const blocked = blockedReason(p);
                       const checked = selected.has(p.key);

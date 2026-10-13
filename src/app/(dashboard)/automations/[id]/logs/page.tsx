@@ -131,7 +131,7 @@ export default function AutomationLogsPage({
         </div>
         <div className="flex flex-col gap-2" aria-hidden="true">
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-[58px] w-full rounded-[10px]" />
+            <Skeleton key={i} className="h-[58px] w-full rounded-field" />
           ))}
         </div>
       </PageBody>
@@ -142,7 +142,7 @@ export default function AutomationLogsPage({
     return (
       <PageBody>
         <div className="pt-1">{back}</div>
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
           <p className="text-[13.5px] font-semibold text-foreground">Automação não encontrada</p>
           <p className="text-[12.5px] text-muted-foreground">Ela pode ter sido excluída.</p>
         </div>
@@ -177,7 +177,7 @@ export default function AutomationLogsPage({
       )}
 
       {logs.length === 0 ? (
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
           <p className="text-[13.5px] font-semibold text-foreground">Nenhuma execução ainda</p>
           <p className="text-[12.5px] text-muted-foreground">
             Dispare esta automação para ver as execuções aqui.
@@ -190,7 +190,7 @@ export default function AutomationLogsPage({
             return (
               <li
                 key={log.id}
-                className="rounded-[10px] border border-border bg-card transition-[border-color] duration-200 ease-ddm hover:border-border-strong"
+                className="rounded-card border border-border bg-card transition-[border-color] duration-200 ease-ddm hover:border-border-strong"
               >
                 <button
                   type="button"

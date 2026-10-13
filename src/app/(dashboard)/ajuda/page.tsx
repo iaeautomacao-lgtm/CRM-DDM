@@ -91,7 +91,7 @@ export default function HelpPage() {
         id={PANEL_ID}
         role="tabpanel"
         aria-labelledby={tabDomId(activeTab)}
-        className="min-h-[400px] rounded-[10px] border border-border bg-card p-6"
+        className="min-h-[400px] rounded-card border border-border bg-card p-6"
       >
 
         {/* TAB 1: WHATSAPP */}

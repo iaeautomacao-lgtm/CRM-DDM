@@ -318,17 +318,17 @@ function InteligenciaChat() {
       {/* Conversa */}
       <section
         aria-label="Conversa com o DDM Intelligence"
-        className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-[10px] border bg-card"
+        className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-card border bg-card"
       >
         <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto overflow-x-hidden p-4" aria-live="polite">
           {loadingChat ? (
             <div className="flex flex-col gap-3" aria-busy>
-              <Skeleton className="ml-auto h-10 w-2/5 rounded-[10px]" />
-              <Skeleton className="h-24 w-3/4 rounded-[10px]" />
+              <Skeleton className="ml-auto h-10 w-2/5 rounded-field" />
+              <Skeleton className="h-24 w-3/4 rounded-field" />
             </div>
           ) : messages.length === 0 ? (
             <div className="animate-ddm-fade m-auto flex max-w-[560px] flex-col items-center gap-4 py-6 text-center">
-              <span className="flex size-10 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+              <span className="flex size-10 items-center justify-center rounded-field bg-primary-soft text-primary">
                 <Sparkles className="size-5" />
               </span>
               <div className="flex flex-col gap-1.5">

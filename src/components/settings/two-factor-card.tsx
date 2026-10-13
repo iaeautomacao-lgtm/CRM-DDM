@@ -159,7 +159,7 @@ export function TwoFactorCard() {
   }
 
   return (
-    <section className="overflow-hidden rounded-[10px] border bg-card" aria-labelledby="mfa-title">
+    <section className="overflow-hidden rounded-card border bg-card" aria-labelledby="mfa-title">
       <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

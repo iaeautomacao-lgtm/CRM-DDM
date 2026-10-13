@@ -645,7 +645,7 @@ export function MessageComposer({
         </div>
       )}
       {sessionExpired && (
-        <div className="mb-2.5 flex animate-ddm-fade flex-wrap items-center gap-3 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
+        <div className="mb-2.5 flex animate-ddm-fade flex-wrap items-center gap-3 rounded-field border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
           <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-semibold text-foreground">Janela de 24 horas expirada</p>
@@ -698,7 +698,7 @@ export function MessageComposer({
         }}
       />
 
-      <div className="rounded-[10px] border border-border bg-card focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--primary-soft-2)]">
+      <div className="rounded-card border border-border bg-card focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--primary-soft-2)]">
       {draft ? (
         <MediaDraftPreview
           draft={draft}

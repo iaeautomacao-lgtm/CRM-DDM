@@ -60,7 +60,7 @@ async function readError(res: Response): Promise<string> {
   return (body && typeof body.error === 'string' && body.error) || `Erro HTTP ${res.status}`;
 }
 
-const sectionCard = 'rounded-[10px] border border-border bg-card';
+const sectionCard = 'rounded-card border border-border bg-card';
 
 export function OrganizationPanel() {
   const canEdit = usePermission('settings.account');
