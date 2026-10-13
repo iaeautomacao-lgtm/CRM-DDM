@@ -758,7 +758,12 @@ export interface DispatchInboundResult {
      * disparar IA global/automações em paralelo; a mensagem fica para o
      * atendente no inbox.
      */
-    | "other_channel_run";
+    | "other_channel_run"
+    /**
+     * A entrega ao fluxo falhou (exceção): ninguém responde por cima (consumed=true) e a conversa foi para a fila com o motivo registrado
+     * (decisão do dono, 13/10).
+     */
+    | "dispatch_error_queued";
 }
 
 // ============================================================
