@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { badRequest, notFound } from '@/lib/api/v1/respond';
+import { chatMediaPath } from '@/lib/storage/chat-media';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -25,7 +26,7 @@ export function timestampParam(value: string | null, label: string): string | nu
 }
 export function dayParam(value: string | null, label: string): string | null {
   if (!value) return null;
-  if (!DATE.test(value) || !Number.isFinite(Date.parse(value))) throw badRequest(label + ' must be YYYY-MM-DD');
+  if (!DATE.test(value) || Number.isNaN(Date.parse(value + 'T00:00:00Z')) || new Date(value + 'T00:00:00Z').toISOString().slice(0,10) !== value) throw badRequest(label + ' must be YYYY-MM-DD');
   return value;
 }
 export function cursorDecode(raw: string | null): { at: string; id: string } | null {
@@ -35,7 +36,7 @@ export function cursorDecode(raw: string | null): { at: string; id: string } | n
   catch { throw badRequest('Invalid cursor'); }
   if (!parsed || typeof parsed !== 'object') throw badRequest('Invalid cursor');
   const x = parsed as { at?: unknown; id?: unknown };
-  if (typeof x.at !== 'string' || typeof x.id !== 'string' || !UUID.test(x.id) || !Number.isFinite(Date.parse(x.at))) throw badRequest('Invalid cursor');
+  if (typeof x.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(x.at) || typeof x.id !== 'string' || !UUID.test(x.id) || !Number.isFinite(Date.parse(x.at))) throw badRequest('Invalid cursor');
   return { at: x.at, id: x.id };
 }
 export function cursorEncode(at: string, id: string): string { return Buffer.from(JSON.stringify({ at, id })).toString('base64url'); }
@@ -45,7 +46,7 @@ export async function getConversation(db: SupabaseClient, accountId: string, id:
   if (!data) throw notFound('Conversation not found');
   return data;
 }
-export async function listConversations(db: SupabaseClient, accountId: string, params: URLSearchParams) {
+export async function listConversations(db: SupabaseClient, accountId: string, params: URLSearchParams, snapshotAt?: string) {
   const limit = limitParam(params.get('limit'));
   const cursor = cursorDecode(params.get('cursor'));
   const status = params.get('status');
@@ -65,6 +66,8 @@ export async function listConversations(db: SupabaseClient, accountId: string, p
   if (channel) q=q.eq('channel_type',channel);
   if (from) q=q.gte('created_at',from+'T00:00:00-03:00');
   if (to) q=q.lt('created_at',new Date(Date.parse(to+'T00:00:00-03:00')+86400000).toISOString());
+  if (snapshotAt) q=q.lte('created_at',snapshotAt);
+  if (snapshotAt) q=q.lte('created_at',snapshotAt);
   if (cursor) q=q.or(`created_at.gt.${cursor.at},and(created_at.eq.${cursor.at},id.gt.${cursor.id})`);
   const {data,error}=await q; if(error)throw error;
   const records=(data??[]) as Array<{created_at:string;id:string}>;
@@ -72,11 +75,11 @@ export async function listConversations(db: SupabaseClient, accountId: string, p
   const last=page[page.length-1];
   return { items:page, next_cursor:records.length>limit&&last?cursorEncode(last.created_at,last.id):null };
 }
-export async function listMessages(db: SupabaseClient, accountId: string, conversationId: string, limit: number, cursor: string | null) {
+export async function listMessages(db: SupabaseClient, accountId: string, conversationId: string, limit: number, cursor: string | null, snapshotAt?: string) {
   await getConversation(db,accountId,conversationId);
-  return loadVerifiedMessages(db,accountId,conversationId,limit,cursor);
+  return loadVerifiedMessages(db,accountId,conversationId,limit,cursor,snapshotAt);
 }
-async function loadVerifiedMessages(db: SupabaseClient, accountId: string, conversationId: string, limit: number, rawCursor: string | null) {
+async function loadVerifiedMessages(db: SupabaseClient, accountId: string, conversationId: string, limit: number, rawCursor: string | null, snapshotAt?: string) {
   const cursor=cursorDecode(rawCursor);
   let q=db.from('messages').select(MESSAGE_FIELDS).eq('account_id',accountId).eq('conversation_id',conversationId)
     .order('created_at',{ascending:true}).order('id',{ascending:true}).limit(limit+1);
@@ -84,7 +87,12 @@ async function loadVerifiedMessages(db: SupabaseClient, accountId: string, conve
   const {data,error}=await q;if(error)throw error;
   const items=(data??[]) as Array<{created_at:string;id:string}>;
   const page=items.slice(0,limit),last=page[page.length-1];
-  return { conversation_id:conversationId, items:page, next_cursor:items.length>limit&&last?cursorEncode(last.created_at,last.id):null };
+  const safeItems=page.map((message) => ({
+    ...message,
+    media_download_url: 'media_url' in message && typeof message.media_url === 'string' && chatMediaPath(message.media_url)
+      ? `/api/v1/conversations/${conversationId}/messages/${message.id}/media` : null,
+  }));
+  return { conversation_id:conversationId, items:safeItems, next_cursor:items.length>limit&&last?cursorEncode(last.created_at,last.id):null };
 }
 export async function batchMessages(db: SupabaseClient, accountId: string, input: unknown) {
   if (!input || typeof input !== 'object') throw badRequest('Expected JSON object');
