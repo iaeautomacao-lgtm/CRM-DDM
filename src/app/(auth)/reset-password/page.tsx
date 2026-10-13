@@ -94,7 +94,8 @@ export default function ResetPasswordPage() {
     // Encerra a sessão de recuperação (e as outras sessões da conta) e volta
     // ao login, que mostra o aviso de sucesso. Falha ao sair não impede o
     // redirecionamento — a senha já foi trocada.
-    await supabase.auth.signOut().catch(() => undefined);
+    // scope 'global' explícito (revisão de segurança 13/10): TODAS as sessões do usuário caem, não só esta.
+    await supabase.auth.signOut({ scope: "global" }).catch(() => undefined);
     router.replace(LOGIN_AFTER_RESET_PATH);
   };
 
