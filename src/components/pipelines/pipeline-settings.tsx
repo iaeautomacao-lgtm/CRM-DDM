@@ -160,14 +160,14 @@ export function PipelineSettings({
     setSaving(false);
 
     if (renameRes.error || stagesRes.error) {
-      toast.error("Falha ao salvar pipeline");
+      toast.error("Falha ao salvar funil");
       return;
     }
 
     onOpenChange(false);
     onPipelinesChanged();
     onStagesChanged();
-    toast.success("Pipeline salvo");
+    toast.success("Funil salvo");
   }
 
   async function handleAddStage() {
@@ -244,12 +244,12 @@ export function PipelineSettings({
       .eq("id", pipeline.id);
     setDeleting(false);
     if (error) {
-      toast.error("Falha ao excluir pipeline");
+      toast.error("Falha ao excluir funil");
       return;
     }
     onOpenChange(false);
     onPipelinesChanged();
-    toast.success("Pipeline excluído");
+    toast.success("Funil excluído");
   }
 
   return (
@@ -284,7 +284,7 @@ export function PipelineSettings({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md bg-popover border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-popover-foreground">Gerenciar Pipeline</DialogTitle>
+          <DialogTitle className="text-popover-foreground">Gerenciar funil</DialogTitle>
         </DialogHeader>
 
         {showDeleteConfirm ? (
@@ -292,7 +292,7 @@ export function PipelineSettings({
             <div role="alert" className="flex items-center gap-3 rounded-lg border border-danger/30 bg-danger-soft p-4">
               <AlertTriangle className="h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
               <div>
-                <p className="text-sm font-semibold text-danger">Excluir pipeline definitivamente</p>
+                <p className="text-sm font-semibold text-danger">Excluir funil definitivamente</p>
                 <p className="mt-1 text-xs text-foreground">
                   {dealCountLoading
                     ? "Contando os negócios deste funil…"
@@ -336,7 +336,7 @@ export function PipelineSettings({
           <>
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
-                <Label htmlFor="pipeline-settings-name" className="text-muted-foreground">Nome do Pipeline</Label>
+                <Label htmlFor="pipeline-settings-name" className="text-muted-foreground">Nome do funil</Label>
                 <Input
                   id="pipeline-settings-name"
                   value={name}
@@ -429,7 +429,7 @@ export function PipelineSettings({
                 className="w-full border-border bg-transparent text-muted-foreground hover:bg-muted"
               >
                 <Plus className="mr-1 h-3 w-3" />
-                Criar um novo pipeline
+                Criar um novo funil
               </Button>
             </div>
 
@@ -439,7 +439,7 @@ export function PipelineSettings({
                 onClick={openDeleteConfirm}
                 className="mr-auto"
               >
-                Excluir Pipeline
+                Excluir funil
               </Button>
               <Button
                 variant="outline"
