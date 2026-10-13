@@ -329,7 +329,7 @@ export interface AnchorNodeConfig {
 
 /**
  * Unconditional jump to another node in the SAME flow (typically an
- * `anchor`). Guarded by `flow_runs.hops_count` (MAX 50) so a cyclical
+ * `anchor`). Guarded by `flow_runs.hops_count` (MAX 50 per customer message; reset when a new message arrives) so a cyclical
  * go_to chain fails the run instead of looping forever.
  */
 export interface GoToNodeConfig {
