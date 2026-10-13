@@ -422,6 +422,10 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "338_dispatch_waha_rate",
+      "kind": "registry"
     }
   ]
 }
