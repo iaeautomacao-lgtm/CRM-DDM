@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { ErrorState, ForbiddenState, Skeleton } from '@/components/ddm/states';
 import { StatusChip } from '@/components/ddm/status-chip';
 import { SettingsPanelHead } from './settings-panel-head';
@@ -79,6 +80,8 @@ export function OrganizationPanel() {
   const [tz, setTz] = useState(DEFAULT_TIMEZONE);
   const [tzSource, setTzSource] = useState<'account' | 'default'>('default');
   const [savingTz, setSavingTz] = useState(false);
+  const [confirmResetTz, setConfirmResetTz] = useState(false);
+  const [confirmResetHours, setConfirmResetHours] = useState(false);
 
   // Horário
   const [savedHours, setSavedHours] = useState<HoursForm>(emptyHoursForm());
@@ -328,7 +331,7 @@ export function OrganizationPanel() {
           {canEdit && (
             <div className="flex gap-2">
               {tzSource === 'account' && (
-                <Button variant="outline" onClick={() => void resetTz()} disabled={savingTz}>
+                <Button variant="outline" onClick={() => setConfirmResetTz(true)} disabled={savingTz}>
                   Voltar ao padrão
                 </Button>
               )}
@@ -436,7 +439,7 @@ export function OrganizationPanel() {
         {canEdit && (
           <div className="flex flex-wrap justify-end gap-2 border-t border-border px-[18px] py-3">
             {hoursSource === 'account' && (
-              <Button variant="outline" onClick={() => void resetHours()} disabled={savingHours}>
+              <Button variant="outline" onClick={() => setConfirmResetHours(true)} disabled={savingHours}>
                 Remover horário
               </Button>
             )}
@@ -447,6 +450,25 @@ export function OrganizationPanel() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmResetTz}
+        onOpenChange={setConfirmResetTz}
+        title="Restaurar o padrão?"
+        description="O fuso horário da conta volta ao padrão do sistema e o fuso escolhido será perdido."
+        confirmLabel="Restaurar padrão"
+        destructive={false}
+        onConfirm={resetTz}
+      />
+      <ConfirmDialog
+        open={confirmResetHours}
+        onOpenChange={setConfirmResetHours}
+        title="Restaurar o padrão?"
+        description="O horário de atendimento definido para a conta será removido e voltará ao padrão."
+        confirmLabel="Restaurar padrão"
+        destructive={false}
+        onConfirm={resetHours}
+      />
     </section>
   );
 }
