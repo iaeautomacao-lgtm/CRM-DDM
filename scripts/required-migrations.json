@@ -398,6 +398,10 @@
       "kind": "registry"
     },
     {
+      "version": "328_trigger_functions_search_path",
+      "kind": "registry"
+    },
+    {
       "version": "330_api_v1_conversation_extract",
       "kind": "registry"
     },
