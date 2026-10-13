@@ -242,7 +242,8 @@ const MESSAGE_FIELDS =
   'template_name,message_id,status,created_at,received_at,reply_to_message_id,' +
   'interactive_reply_id,interactive_payload,campaign_id,attribution_method';
 type MessageRow = { id: string; created_at: string; sender_id: string | null; sender_type: string;
-  content_type: string; media_url: string | null; [key: string]: unknown };
+  content_type: string; content_text: string | null; media_url: string | null;
+  template_name: string | null; status: string | null; [key: string]: unknown };
 
 export async function readMessagePage(
   db: SupabaseClient, accountId: string, conversationId: string, opts: MessageOptions,
