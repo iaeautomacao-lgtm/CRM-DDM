@@ -3,7 +3,7 @@
 //
 // De onde o NAVEGADOR realmente carrega/chama coisas (levantado no código, 13/10):
 //   - scripts/estilos próprios + Next (hidratação inline) + o script de tema do layout (inline);
-//   - Scalar API Reference (docs públicas /docs/api) via jsDelivr, versão FIXA (a mesma de src/components/docs/api-reference.tsx);
+//   - docs públicas /docs/api: renderizadas pelo próprio app (sem CDN; o Scalar saiu no redesenho de 13/10);
 //   - Supabase (REST, realtime em wss, storage público de avatares/áudio/vídeo): https://*.supabase.co e wss://*.supabase.co;
 //   - Meta/WhatsApp/OpenAI/ElevenLabs/WAHA/DDM NÃO são chamados pelo navegador (só pelo servidor): ficam de fora de propósito;
 //   - mídia do chat e avatares passam pelo próprio servidor (/api/chat-media, /api/whatsapp/*) → 'self'; avatares de contato podem ser
@@ -13,9 +13,6 @@
 //   - iframes: o Extrator de Leads (LEAD_EXTRACTOR_URL, padrão lovable.app) e pré-visualização de arquivo do chat (mesma origem/Supabase);
 //   - fontes: next/font/google já é auto-hospedada no build → 'self'.
 // 'unsafe-eval' SÓ em desenvolvimento (React/Turbopack dev). Em produção nunca.
-
-/** Versão fixa do Scalar (igual a SCALAR_VERSION em src/components/docs/api-reference.tsx — o teste csp.test.ts confere). */
-export const SCALAR_CDN = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.73.0/";
 
 /** Origem do Extrator de Leads quando LEAD_EXTRACTOR_URL não está definida (mesmo padrão de /api/whatsapp/external-urls). */
 export const DEFAULT_LEAD_EXTRACTOR_URL = "https://grupoddmlead.lovable.app";
@@ -52,7 +49,7 @@ export function buildContentSecurityPolicy(options: CspOptions = {}): string {
   const scriptSrc = ["'self'"];
   if (nonce) scriptSrc.push(`'nonce-${nonce}'`, "'strict-dynamic'");
   else scriptSrc.push("'unsafe-inline'");
-  scriptSrc.push("'wasm-unsafe-eval'", SCALAR_CDN);
+  scriptSrc.push("'wasm-unsafe-eval'");
   if (isDev) scriptSrc.push("'unsafe-eval'");
 
   const connectSrc = ["'self'", "https://*.supabase.co", "wss://*.supabase.co"];
@@ -65,7 +62,7 @@ export function buildContentSecurityPolicy(options: CspOptions = {}): string {
     ["default-src", ["'self'"]],
     ["script-src", scriptSrc],
     // atributos style="" de dezenas de componentes e Tailwind: 'unsafe-inline' em estilo segue necessário (o risco de XSS por CSS é baixo)
-    ["style-src", ["'self'", "'unsafe-inline'", SCALAR_CDN]],
+    ["style-src", ["'self'", "'unsafe-inline'"]],
     ["img-src", ["'self'", "data:", "blob:", "https:"]],
     ["media-src", ["'self'", "blob:", "https://*.supabase.co"]],
     ["font-src", ["'self'", "data:"]],

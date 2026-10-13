@@ -1,6 +1,6 @@
 // Estrutura do guia amigável (/docs/api): seções, tabelas e a COBERTURA de cada operação da spec.
 // Regra: toda operação nova em openapi.ts precisa aparecer em GUIDE_COVERAGE (o teste
-// docs-guide.test.ts falha se faltar) — e a referência (Scalar) já a lista, pois lê o openapi.json.
+// docs-guide.test.ts falha se faltar) — e a referência (docs-reference.ts) já a lista, pois lê a mesma spec.
 
 import { openApiSpec } from './openapi';
 import { apiBaseUrl, buildSnippets, requestFromOperation, type Snippets } from './docs-examples';
@@ -69,7 +69,7 @@ export interface ErrorRow {
 /** Tabela de erros em português. O teste garante que todo `error.code` da spec tem linha aqui. */
 export const ERROR_ROWS: ErrorRow[] = [
   { http: '400', code: 'bad_request', significa: 'Algo no pedido está errado (campo faltando, telefone inválido, template não aprovado, nenhum contato válido…).', fazer: 'Leia `error.message` (e `invalid_sample`, quando vier), corrija e envie de novo. No envio avulso, a Idempotency-Key NÃO é consumida.' },
-  { http: '401', code: 'unauthorized', significa: 'Chave ausente, errada, revogada ou expirada.', fazer: 'Confira o header `Authorization: Bearer …` e se a chave ainda existe em Configurações → Chaves de API.' },
+  { http: '401', code: 'unauthorized', significa: 'Chave ausente, errada, revogada ou expirada.', fazer: 'Confira o header `Authorization: Bearer …` e se a chave ainda existe em Integrações → Chaves de API.' },
   { http: '403', code: 'forbidden', significa: 'A chave não tem o escopo necessário.', fazer: 'Peça a um admin uma chave com o escopo da tabela de escopos.' },
   { http: '404', code: 'not_found', significa: 'Recurso não existe (ou é de outra conta).', fazer: 'Confira o id. Campanha de outra conta também devolve 404.' },
   { http: '409', code: 'conflict', significa: 'A Idempotency-Key / external_id já foi usada com outro conteúdo, ou o envio anterior está em andamento / com resultado desconhecido.', fazer: 'Não mude a chave para "forçar". Reenvie exatamente o mesmo corpo; se vier `provider_outcome_unknown`, aguarde e NÃO reenvie.' },

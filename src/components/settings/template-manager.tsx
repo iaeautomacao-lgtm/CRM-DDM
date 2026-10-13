@@ -23,7 +23,11 @@ import {
   Video,
   FileText,
   Search,
+  ArrowUp,
+  ArrowDown,
+  FolderInput,
 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { createClient } from '@/lib/supabase/client';
 import {
   uploadAccountMedia,
@@ -54,6 +58,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuGroup,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -270,6 +276,9 @@ export function TemplateManager() {
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [folderToDelete, setFolderToDelete] = useState<TemplateFolder | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState(false);
+  // Erros por campo do formulário de template (validação inline).
+  const [formErrors, setFormErrors] = useState<{ name?: string; channel?: string; body?: string }>({});
 
   // Body variable indices — `[1, 2, 3]` for "{{1}} {{2}} {{3}}". We
   // re-run the extractor on every render to keep the sample-value rows
@@ -543,7 +552,8 @@ export function TemplateManager() {
 
   async function confirmDeleteFolder() {
     const target = folderToDelete;
-    if (!target) return;
+    if (!target || deletingFolder) return;
+    setDeletingFolder(true);
     try {
       const res = await apiFetch(`/api/whatsapp/templates/folders/${target.id}`, {
         method: 'DELETE',
@@ -559,6 +569,7 @@ export function TemplateManager() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao excluir pasta');
     } finally {
+      setDeletingFolder(false);
       setFolderToDelete(null);
     }
   }
@@ -679,6 +690,7 @@ export function TemplateManager() {
 
   function openEdit(template: MessageTemplate) {
     setEditingId(template.id);
+    setFormErrors({});
     const matchingChannel = template.waba_id
       ? channels.find((c) => c.waba_id === template.waba_id)
       : undefined;
@@ -703,6 +715,7 @@ export function TemplateManager() {
 
   function openCreate() {
     setEditingId(null);
+    setFormErrors({});
     setForm({
       ...emptyForm,
       // Convenience only — still requires an explicit pick when there's
@@ -718,10 +731,20 @@ export function TemplateManager() {
     // submit button; this is a defensive second line of defense.
     if (form.category === 'Authentication') return;
     const isEdit = editingId !== null;
-    // Required for new templates only — edits keep whichever channel
-    // the template was originally submitted to (see openEdit).
-    if (!isEdit && !form.channel_id) {
-      toast.error('Selecione um canal');
+    // Validação inline por campo. Canal só é obrigatório em template novo —
+    // edições mantêm o canal original (ver openEdit).
+    const errors: { name?: string; channel?: string; body?: string } = {};
+    if (!isEdit && !form.name.trim()) errors.name = 'Informe o nome do template.';
+    if (!isEdit && !form.channel_id) errors.channel = 'Selecione um canal.';
+    if (!form.body_text.trim()) errors.body = 'Informe o texto do corpo.';
+    setFormErrors(errors);
+    if (errors.name || errors.channel || errors.body) {
+      const firstId = errors.name
+        ? 'template-name'
+        : errors.channel
+          ? 'template-channel'
+          : 'template-body';
+      requestAnimationFrame(() => document.getElementById(firstId)?.focus());
       return;
     }
     try {
@@ -919,14 +942,6 @@ export function TemplateManager() {
     }));
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="size-6 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   const headerNeedsMedia =
     form.header_format !== 'none' && form.header_format !== 'text';
 
@@ -1030,7 +1045,7 @@ export function TemplateManager() {
             <ul className="space-y-0.5">
               {[...folders]
                 .sort((a, b) => a.position - b.position)
-                .map((folder) => (
+                .map((folder, folderIdx, sortedFolders) => (
                   <li
                     key={folder.id}
                     draggable={canManage && renamingFolderId !== folder.id}
@@ -1141,6 +1156,21 @@ export function TemplateManager() {
                         >
                           <Pencil className="size-3.5" />
                           Renomear
+                        </DropdownMenuItem>
+                        {/* Alternativa ao arrastar: mesma função reorderFolders. */}
+                        <DropdownMenuItem
+                          disabled={folderIdx === 0}
+                          onClick={() => void reorderFolders(folder.id, sortedFolders[folderIdx - 1].id)}
+                        >
+                          <ArrowUp className="size-3.5" />
+                          Mover para cima
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={folderIdx === sortedFolders.length - 1}
+                          onClick={() => void reorderFolders(folder.id, sortedFolders[folderIdx + 1].id)}
+                        >
+                          <ArrowDown className="size-3.5" />
+                          Mover para baixo
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setFolderToDelete(folder)}>
                           <Trash2 className="size-3.5" />
@@ -1295,7 +1325,13 @@ export function TemplateManager() {
             </div>
 
             <TableCard label="Templates">
-              {loadError ? (
+              {loading ? (
+                <div role="status" aria-busy="true" aria-label="Carregando templates" className="space-y-3 p-4">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : loadError ? (
                 <div className="p-4">
                   <ErrorState
                     title={loadError}
@@ -1437,6 +1473,49 @@ export function TemplateManager() {
                                   <span className="hidden sm:inline">Reenviar</span>
                                 </Button>
                               )}
+                              {canManage && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger
+                                    render={
+                                      <button
+                                        type="button"
+                                        aria-label={`Mover ${template.name} para pasta`}
+                                        title="Mover para pasta…"
+                                        className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+                                      >
+                                        <FolderInput className="size-4" />
+                                      </button>
+                                    }
+                                  />
+                                  <DropdownMenuContent
+                                    align="end"
+                                    className="bg-popover text-popover-foreground border-border"
+                                  >
+                                    {/* Alternativa ao arrastar: mesma função moveTemplateToFolder. */}
+                                    <DropdownMenuGroup>
+                                      <DropdownMenuLabel>Mover para pasta…</DropdownMenuLabel>
+                                      <DropdownMenuItem
+                                        disabled={!template.folder_id}
+                                        onClick={() => void moveTemplateToFolder(template.id, null)}
+                                      >
+                                        Sem pasta
+                                      </DropdownMenuItem>
+                                      {[...folders]
+                                        .sort((a, b) => a.position - b.position)
+                                        .map((f) => (
+                                          <DropdownMenuItem
+                                            key={f.id}
+                                            disabled={template.folder_id === f.id}
+                                            onClick={() => void moveTemplateToFolder(template.id, f.id)}
+                                          >
+                                            <Folder className="size-3.5" />
+                                            {f.name}
+                                          </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuGroup>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
                               {canManage && <button
                                 type="button"
                                 onClick={() => setTemplateToDelete(template)}
@@ -1504,15 +1583,27 @@ export function TemplateManager() {
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="template-name" className="text-muted-foreground">Nome do Template</Label>
+              <Label htmlFor="template-name" className="text-muted-foreground">
+                Nome do Template
+                {editingId === null && <span aria-hidden="true" className="text-danger"> *</span>}
+              </Label>
               <Input
                 id="template-name"
                 placeholder="ex.: order_confirmation"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, name: e.target.value });
+                  if (formErrors.name) setFormErrors((p) => ({ ...p, name: undefined }));
+                }}
                 disabled={editingId !== null}
+                aria-required={editingId === null}
+                aria-invalid={formErrors.name ? true : undefined}
+                aria-describedby={formErrors.name ? 'template-name-error' : undefined}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
               />
+              {formErrors.name && (
+                <p id="template-name-error" role="alert" className="text-xs text-danger">{formErrors.name}</p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 {editingId
                   ? 'O nome é fixo depois que o template existe no Meta — crie um novo template para alterá-lo.'
@@ -1521,13 +1612,23 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="template-channel" className="text-muted-foreground">Canal</Label>
+              <Label htmlFor="template-channel" className="text-muted-foreground">
+                Canal
+                {editingId === null && <span aria-hidden="true" className="text-danger"> *</span>}
+              </Label>
               <Select
                 value={form.channel_id}
-                onValueChange={(val) => val && setForm({ ...form, channel_id: val })}
+                onValueChange={(val) => {
+                  if (!val) return;
+                  setForm({ ...form, channel_id: val });
+                  if (formErrors.channel) setFormErrors((p) => ({ ...p, channel: undefined }));
+                }}
               >
                 <SelectTrigger
                   id="template-channel"
+                  aria-required={editingId === null}
+                  aria-invalid={formErrors.channel ? true : undefined}
+                  aria-describedby={formErrors.channel ? 'template-channel-error' : undefined}
                   className="w-full bg-muted border-border text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                   disabled={editingId !== null}
                 >
@@ -1559,6 +1660,9 @@ export function TemplateManager() {
                   ))}
                 </SelectContent>
               </Select>
+              {formErrors.channel && (
+                <p id="template-channel-error" role="alert" className="text-xs text-danger">{formErrors.channel}</p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 {editingId
                   ? 'O canal é fixo depois que o template existe no Meta.'
@@ -1767,7 +1871,9 @@ export function TemplateManager() {
 
             <div className="space-y-2">
               <span className="flex items-baseline justify-between gap-2">
-                <Label htmlFor="template-body" className="text-muted-foreground">Texto do Corpo</Label>
+                <Label htmlFor="template-body" className="text-muted-foreground">
+                  Texto do Corpo<span aria-hidden="true" className="text-danger"> *</span>
+                </Label>
                 <span className="text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
                   {form.body_text.length}/{TEMPLATE_LIMITS.bodyMaxLength}
                 </span>
@@ -1776,13 +1882,20 @@ export function TemplateManager() {
                 id="template-body"
                 placeholder="Olá {{1}}, seu pedido {{2}} está confirmado."
                 value={form.body_text}
-                onChange={(e) =>
-                  setForm({ ...form, body_text: e.target.value })
-                }
+                onChange={(e) => {
+                  setForm({ ...form, body_text: e.target.value });
+                  if (formErrors.body) setFormErrors((p) => ({ ...p, body: undefined }));
+                }}
                 rows={4}
                 maxLength={TEMPLATE_LIMITS.bodyMaxLength}
+                aria-required
+                aria-invalid={formErrors.body ? true : undefined}
+                aria-describedby={formErrors.body ? 'template-body-error' : undefined}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground resize-none"
               />
+              {formErrors.body && (
+                <p id="template-body-error" role="alert" className="text-xs text-danger">{formErrors.body}</p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 Use {`{{1}}`}, {`{{2}}`} para variáveis (devem ser contíguas,
                 começando em {`{{1}}`}).
@@ -2093,7 +2206,7 @@ export function TemplateManager() {
       <Dialog
         open={folderToDelete !== null}
         onOpenChange={(open) => {
-          if (!open) setFolderToDelete(null);
+          if (!open && !deletingFolder) setFolderToDelete(null);
         }}
       >
         <DialogContent className="bg-popover border-border sm:max-w-sm">
@@ -2107,15 +2220,24 @@ export function TemplateManager() {
             <Button
               variant="outline"
               onClick={() => setFolderToDelete(null)}
+              disabled={deletingFolder}
               className="border-border text-muted-foreground hover:bg-muted"
             >
               Cancelar
             </Button>
             <Button
               onClick={confirmDeleteFolder}
+              disabled={deletingFolder}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              Excluir
+              {deletingFolder ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Excluindo…
+                </>
+              ) : (
+                'Excluir'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

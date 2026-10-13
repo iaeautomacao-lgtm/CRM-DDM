@@ -564,7 +564,7 @@ function SendButtonsForm({
                 variant="ghost"
                 size="sm"
                 onClick={() => removeButton(i)}
-                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                className="text-danger hover:bg-danger-soft hover:text-danger"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -747,7 +747,7 @@ function SendListForm({
                   variant="ghost"
                   size="sm"
                   onClick={() => removeSection(sIdx)}
-                  className="shrink-0 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  className="shrink-0 text-danger hover:bg-danger-soft hover:text-danger"
                   aria-label="Remover seção"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -801,7 +801,7 @@ function SendListForm({
                   variant="ghost"
                   size="sm"
                   onClick={() => removeRow(sIdx, rIdx)}
-                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  className="text-danger hover:bg-danger-soft hover:text-danger"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -1288,7 +1288,7 @@ function SwitchForm({
                     variant="ghost"
                     size="sm"
                     onClick={() => removeBranch(bIdx)}
-                    className="shrink-0 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    className="shrink-0 text-danger hover:bg-danger-soft hover:text-danger"
                     aria-label="Remover ramo"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -1492,7 +1492,7 @@ function SwitchConditionRow({
           variant="ghost"
           size="sm"
           onClick={onRemove}
-          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          className="text-danger hover:bg-danger-soft hover:text-danger"
           aria-label="Remover condição"
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -2364,7 +2364,7 @@ function HttpFetchForm({
           className="bg-muted font-mono text-xs"
         />
         {headersError && (
-          <p className="mt-1 text-[10px] text-red-400">{headersError}</p>
+          <p className="mt-1 text-[10px] text-danger">{headersError}</p>
         )}
       </div>
       {method !== "GET" && (
@@ -2469,7 +2469,7 @@ function SetVariableForm({
                 variant="ghost"
                 size="sm"
                 onClick={() => removeAssignment(i)}
-                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                className="text-danger hover:bg-danger-soft hover:text-danger"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -3164,7 +3164,7 @@ function AiAgentForm({
         Deixe vazio para usar o prompt da configuração de IA
       </p>
       {!cfg.system_prompt_override?.trim() && (
-        <p className="-mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+        <p className="-mt-1 rounded-md border border-warning/30 bg-warning-soft px-2 py-1.5 text-[10px] text-warning">
           Sem instruções aqui, a IA usa o prompt da conta (Configurações → IA)
           e, nas contas DDM, também blocos fixos do sistema (Sabrina/Aleh) que
           não aparecem neste editor e só mudam com atualização do sistema.

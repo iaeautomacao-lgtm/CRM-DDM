@@ -8,7 +8,16 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { DisparadorMessageTemplate } from "@/types";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -80,6 +89,7 @@ export function MessageTemplatePicker({
   const { accountId, user } = useAuth();
   const [templates, setTemplates] = useState<PickerTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<PickerTemplate | null>(null);
   const [mode, setMode] = useState<Mode>("list");
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -259,9 +269,6 @@ export function MessageTemplatePicker({
   }
 
   async function handleDelete(template: PickerTemplate) {
-    const confirmed = window.confirm(`Excluir o template "${template.nome}"?`);
-    if (!confirmed) return;
-
     const supabase = createClient();
     const { error } = await supabase
       .from("disparador_message_templates")
@@ -280,6 +287,7 @@ export function MessageTemplatePicker({
   );
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="border-border bg-popover sm:max-w-lg">
         <DialogHeader>
@@ -440,7 +448,7 @@ export function MessageTemplatePicker({
                           variant="ghost"
                           size="icon"
                           className="h-9 w-9 shrink-0 text-danger hover:bg-danger-soft"
-                          onClick={() => handleDelete(t)}
+                          onClick={() => setDeleteTarget(t)}
                           aria-label={`Excluir template ${t.nome}`}
                           title="Excluir template"
                         >
@@ -547,5 +555,26 @@ export function MessageTemplatePicker({
         )}
       </DialogContent>
     </Dialog>
+    <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir o template &quot;{deleteTarget?.nome}&quot;?</AlertDialogTitle>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            className={buttonVariants({ variant: "destructive" })}
+            onClick={() => {
+              const target = deleteTarget;
+              setDeleteTarget(null);
+              if (target) void handleDelete(target);
+            }}
+          >
+            Excluir
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

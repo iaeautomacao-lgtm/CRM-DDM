@@ -101,8 +101,9 @@ function FlowEditorLoader() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div role="status" className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+        <span className="sr-only">Carregando o fluxo…</span>
       </div>
     );
   }
@@ -128,7 +129,7 @@ function FlowEditorLoader() {
         <button
           type="button"
           onClick={() => router.push("/flows")}
-          className="text-sm text-primary hover:opacity-80"
+          className="text-sm text-primary-text hover:opacity-80"
         >
           ← Voltar para fluxos
         </button>

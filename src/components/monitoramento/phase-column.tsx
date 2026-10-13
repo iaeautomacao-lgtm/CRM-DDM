@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
@@ -9,12 +11,8 @@ import { PHASE_META, type MonitorPhase } from "@/lib/monitoramento/phases";
 import { ConversationCard } from "./conversation-card";
 import type { ConversationCardActions } from "./card-actions";
 
-// Display cap per column — no pagination in this first slice. Lists are
-// already sorted newest-updated-first by the query, so this simply
-// hides the tail past the cap rather than dropping the most relevant
-// (most recently touched) conversations.
-// TODO(monitoramento): replace with real pagination/virtualization once
-// a column routinely exceeds this in practice.
+// Display cap per column. Lists are already sorted newest-updated-first by
+// the query, so the tail is what stays hidden; "Ver mais" reveals it in steps.
 const COLUMN_DISPLAY_LIMIT = 100;
 
 export function PhaseColumn({
@@ -30,7 +28,9 @@ export function PhaseColumn({
 }) {
   const meta = PHASE_META[phase];
   const Icon = meta.icon;
-  const visible = conversations.slice(0, COLUMN_DISPLAY_LIMIT);
+  const [limit, setLimit] = useState(COLUMN_DISPLAY_LIMIT);
+  const visible = conversations.slice(0, limit);
+  const hidden = conversations.length - visible.length;
 
   const visibleIds = visible.map((c) => c.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => actions.selectedIds.has(id));
@@ -110,6 +110,16 @@ export function PhaseColumn({
               onHistoryClick={actions.onHistoryClick}
             />
           ))
+        )}
+        {hidden > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => setLimit((n) => n + COLUMN_DISPLAY_LIMIT)}
+          >
+            Ver mais ({hidden} {hidden === 1 ? "restante" : "restantes"})
+          </Button>
         )}
       </div>
     </section>

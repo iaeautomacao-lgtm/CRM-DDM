@@ -3,7 +3,7 @@
 // Recuperar senha — visual do Acesso redesenhado (AuthShell). Mesma lógica: resetPasswordForEmail com o
 // retorno por /auth/callback?next=/reset-password.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -21,7 +21,13 @@ export default function ForgotPasswordPage() {
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const successTitleRef = useRef<HTMLSpanElement>(null);
   const supabase = createClient();
+
+  // A tela troca inteira ao enviar: leva o foco ao novo título (leitor de tela anuncia).
+  useEffect(() => {
+    if (success) successTitleRef.current?.focus();
+  }, [success]);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +59,11 @@ export default function ForgotPasswordPage() {
             <MailCheck className="size-5" aria-hidden="true" />
           </span>
         }
-        title="Verifique seu e-mail"
+        title={
+          <span ref={successTitleRef} tabIndex={-1} className="outline-none">
+            Verifique seu e-mail
+          </span>
+        }
         description={
           <span role="status">
             {RECOVERY_SENT_MESSAGE} Verifique a caixa de entrada de{" "}

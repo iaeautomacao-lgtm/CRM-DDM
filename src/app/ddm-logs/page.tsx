@@ -242,10 +242,10 @@ function getInitials(name?: string | null): string {
 const ACTION_BADGE_PALETTE = [
   "bg-info-soft text-info border-info/40",
   "bg-success-soft text-success border-success/40",
-  "bg-purple-500/15 text-purple-300 [html[data-mode=light]_&]:text-purple-700 border-purple-500/40",
+  "bg-primary/15 text-primary-text border-primary/40",
   "bg-warning-soft text-warning border-warning/40",
-  "bg-pink-500/15 text-pink-300 [html[data-mode=light]_&]:text-pink-700 border-pink-500/40",
-  "bg-cyan-500/15 text-cyan-300 [html[data-mode=light]_&]:text-cyan-700 border-cyan-500/40",
+  "bg-surface-3 text-foreground-2 border-border",
+  "bg-info-soft text-info border-info/40",
 ];
 
 // user_name vem da RPC get_action_logs (LEFT JOIN em profiles,
@@ -279,11 +279,11 @@ function highlightJson(value: unknown): string {
   return escaped.replace(
     /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
-      let cls = "text-orange-300 [html[data-mode=light]_&]:text-orange-700"; // número
+      let cls = "text-warning"; // número
       if (/^"/.test(match)) {
         cls = /:\s*$/.test(match) ? "text-info" : "text-success"; // chave vs. valor string
       } else if (/^(true|false)$/.test(match)) {
-        cls = "text-purple-300 [html[data-mode=light]_&]:text-purple-700";
+        cls = "text-primary-text";
       } else if (match === "null") {
         cls = "text-muted-foreground";
       }
@@ -1099,13 +1099,29 @@ export default function DdmLogsPage() {
         role="tablist"
         aria-label="Seções dos logs"
         className="flex items-center gap-1 overflow-x-auto border-b border-border bg-surface-3/40 px-4 pt-2"
+        onKeyDown={(e) => {
+          // Setas, Home e End movem a seleção entre as abas (padrão WAI-ARIA tablist).
+          const i = TAB_OPTIONS.findIndex((t) => t.value === tab);
+          let next = -1;
+          if (e.key === "ArrowRight") next = (i + 1) % TAB_OPTIONS.length;
+          else if (e.key === "ArrowLeft") next = (i - 1 + TAB_OPTIONS.length) % TAB_OPTIONS.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = TAB_OPTIONS.length - 1;
+          if (next < 0) return;
+          e.preventDefault();
+          setTab(TAB_OPTIONS[next].value);
+          document.getElementById(`logs-tab-${TAB_OPTIONS[next].value}`)?.focus();
+        }}
       >
         {TAB_OPTIONS.map((t) => (
           <button
             key={t.value}
+            id={`logs-tab-${t.value}`}
             type="button"
             role="tab"
             aria-selected={tab === t.value}
+            aria-controls="logs-tabpanel"
+            tabIndex={tab === t.value ? 0 : -1}
             onClick={() => setTab(t.value)}
             className={`shrink-0 whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               tab === t.value
@@ -1118,6 +1134,7 @@ export default function DdmLogsPage() {
         ))}
       </div>
 
+      <div role="tabpanel" id="logs-tabpanel" aria-labelledby={`logs-tab-${tab}`} className="flex flex-1 flex-col">
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface-3/40 px-4 py-3">
         {tab === "events" && (
@@ -1691,7 +1708,7 @@ export default function DdmLogsPage() {
               </div>
             ) : feedbackLogs.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-                Nenhum problema reportado. 🎉
+                Nenhum problema reportado.
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -1770,6 +1787,7 @@ export default function DdmLogsPage() {
           </>
         )}
       </main>
+      </div>
     </div>
   );
 }

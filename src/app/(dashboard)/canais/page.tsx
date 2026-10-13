@@ -134,6 +134,7 @@ export default function CanaisPage() {
   const [stopBusyId, setStopBusyId] = useState<string | null>(null);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [clientsOpen, setClientsOpen] = useState(false);
+  const [clientBusyId, setClientBusyId] = useState<string | null>(null);
 
   // Clientes (migration 128): leitura direta, a RLS libera para membros.
   const fetchClients = useCallback(async () => {
@@ -163,16 +164,25 @@ export default function CanaisPage() {
   }, []);
 
   async function handleClientChange(c: ChannelConfig, clientId: string | null) {
-    const res = await apiFetch("/api/whatsapp/config", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: c.id, client_id: clientId }),
-    });
-    if (!res.ok) {
+    if (clientBusyId) return;
+    setClientBusyId(c.id);
+    try {
+      const res = await apiFetch("/api/whatsapp/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, client_id: clientId }),
+      });
+      if (!res.ok) {
+        toast.error("Falha ao definir o cliente da linha");
+        return;
+      }
+      setConfigs((prev) => prev.map((row) => (row.id === c.id ? { ...row, client_id: clientId } : row)));
+      toast.success("Cliente da linha atualizado.");
+    } catch {
       toast.error("Falha ao definir o cliente da linha");
-      return;
+    } finally {
+      setClientBusyId(null);
     }
-    setConfigs((prev) => prev.map((row) => (row.id === c.id ? { ...row, client_id: clientId } : row)));
   }
 
   const fetchConfigs = useCallback(async (): Promise<ChannelConfig[]> => {
@@ -591,8 +601,8 @@ export default function CanaisPage() {
                       <select
                         value={c.client_id ?? ""}
                         onChange={(e) => handleClientChange(c, e.target.value || null)}
-                        disabled={!canManage}
-                        aria-label={`Cliente — ${channelName(c)}`}
+                        disabled={!canManage || clientBusyId === c.id}
+                        aria-label={`Cliente —${channelName(c)}`}
                         className="h-8 max-w-[160px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
                       >
                         <option value="">—</option>
