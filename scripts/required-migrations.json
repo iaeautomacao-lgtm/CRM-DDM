@@ -418,6 +418,10 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "350_internal_messages_media_ref",
+      "kind": "registry"
     }
   ]
 }
