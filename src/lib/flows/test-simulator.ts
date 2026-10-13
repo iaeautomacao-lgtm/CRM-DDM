@@ -81,11 +81,6 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function obj(value: unknown): Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown> : {};
-}
-
 function records(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((v) => !!v && typeof v === "object" && !Array.isArray(v)) : [];
 }
@@ -365,7 +360,8 @@ export function respondToFlowTest(
     trace: [...original.trace],
     aiTurns: { ...original.aiTurns },
   };
-  const wait = session.wait;
+  // Read the narrowed wait from the original: the clone's field is nullable.
+  const wait = original.wait;
   const node = nodes.find((item) => item.node_key === wait.node_key);
   if (!node) return finish(session, "blocked", "O nó em execução foi removido.");
 
