@@ -17,7 +17,7 @@ import { formatCappedTotal, pageCount, readCappedTotal } from "@/lib/reports/cap
 // /historico.
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Bot, ChevronLeft, ChevronRight, Download, Eye, Loader2, Search } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -97,11 +97,12 @@ function FilterSelect({
   onChange: (v: string) => void;
   width?: string;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1">
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground">{label}</label>
       <Select value={value} onValueChange={(v) => v && onChange(v)}>
-        <SelectTrigger className={width}>
+        <SelectTrigger id={id} className={width}>
           {/* Base UI mostra o valor cru sem o render: resolve o rótulo aqui. */}
           <SelectValue>{(v: string) => options.find((o) => o.value === v)?.label ?? v}</SelectValue>
         </SelectTrigger>
@@ -118,6 +119,7 @@ function FilterSelect({
 }
 
 export default function AuditoriaPage() {
+  const uid = useId();
   // Exportar exige reports.export; o servidor revalida.
   const perms = usePermissions();
   const canExport = perms.can("reports.export");
@@ -239,7 +241,7 @@ export default function AuditoriaPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Auditoria</h1>
+          <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Auditoria</h2>
           <p className="text-sm text-muted-foreground">
             Quem fez o quê, quando e de onde — conversas, contatos, campanhas, fluxos, automações, canais e equipe.
           </p>
@@ -264,8 +266,9 @@ export default function AuditoriaPage() {
           <FilterSelect label="Evento" value={draft.eventType} options={EVENT_OPTIONS} onChange={(v) => set({ eventType: v })} width="w-36" />
           <FilterSelect label="Recurso" value={draft.resourceType} options={RESOURCE_OPTIONS} onChange={(v) => set({ resourceType: v })} width="w-40" />
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Buscar</label>
+            <label htmlFor={`${uid}-busca`} className="text-xs font-medium text-muted-foreground">Buscar</label>
             <Input
+              id={`${uid}-busca`}
               value={draft.q}
               onChange={(e) => set({ q: e.target.value })}
               onKeyDown={(e) => e.key === "Enter" && handlePesquisar()}

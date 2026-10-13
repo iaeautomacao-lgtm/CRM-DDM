@@ -57,7 +57,7 @@ export function AttendanceTable<T>({
                           render={
                             <button
                               type="button"
-                              className="text-muted-foreground hover:text-foreground"
+                              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
                               aria-label={`Sobre ${col.header}`}
                             />
                           }
@@ -83,7 +83,7 @@ export function AttendanceTable<T>({
               </Tr>
             ) : (
               rows.map((row) => (
-                <Tr key={getRowKey(row)}>
+                <Tr key={getRowKey(row)} interactive={false}>
                   {columns.map((col) => (
                     <Td key={col.key} align={col.align === "right" ? "right" : "left"}>
                       {col.render(row)}

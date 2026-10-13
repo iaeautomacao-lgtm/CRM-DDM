@@ -28,6 +28,10 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getReportTeams: 'relatorios',
   getReportAgents: 'relatorios',
   getReportTabulations: 'relatorios',
+  // Extração de conversas e mensagens (TASK38): o texto completo está no guia da spec (EXTRACT_GUIDE); no guia amigável entra na seção de BI.
+  listConversations: 'relatorios',
+  listConversationMessages: 'relatorios',
+  listMessages: 'relatorios',
   listWebhooks: 'webhooks',
   createWebhook: 'webhooks',
   getWebhook: 'webhooks',

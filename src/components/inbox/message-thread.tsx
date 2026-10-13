@@ -354,7 +354,7 @@ export function MessageThread({
     const supabase = createClient();
     supabase
       .from("profiles")
-      .select("*")
+      .select("id, user_id, full_name, avatar_url, account_role")
       .eq("account_role", "agent")
       .order("full_name")
       .then(({ data, error }) => {
@@ -363,7 +363,7 @@ export function MessageThread({
           console.error("Failed to fetch profiles:", error);
           return;
         }
-        setProfiles((data as Profile[]) ?? []);
+        setProfiles((data as unknown as Profile[]) ?? []);
       });
     return () => {
       cancelled = true;

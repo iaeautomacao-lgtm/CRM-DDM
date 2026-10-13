@@ -328,11 +328,23 @@
       "kind": "registry"
     },
     {
+      "version": "306_profiles_email_hidden",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
     {
       "version": "311_member_deactivation_last_access",
+      "kind": "registry"
+    },
+    {
+      "version": "312_custom_role_validation",
+      "kind": "registry"
+    },
+    {
+      "version": "313_custom_roles",
       "kind": "registry"
     },
     {
@@ -379,6 +391,32 @@
     },
     {
       "version": "326_teams_templates_channels_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "330_api_v1_conversation_extract",
+      "kind": "registry"
+    },
+    {
+      "version": "330b_conversations_account_updated_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_updated"
+    },
+    {
+      "version": "331b_conversations_account_closed_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_closed"
+    },
+    {
+      "version": "332_dispatch_provider_call_marker",
+      "kind": "registry"
+    },
+    {
+      "version": "333_dispatch_131026_pending_counts",
+      "kind": "registry"
+    },
+    {
+      "version": "334_cron_heartbeat",
       "kind": "registry"
     }
   ]

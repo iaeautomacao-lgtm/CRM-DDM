@@ -149,7 +149,10 @@ function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
     // comando que continua na linha seguinte (ex.: lista de funções num DROP FUNCTION de várias linhas): aceita a continuação
     const open = kept.length > 0 && !/;\s*$/.test(kept[kept.length - 1]);
     if (open && !inDollar && !t.startsWith("(") && !t.startsWith("--")) {
-      kept.push(t.replace(/\s+--\s.*$/, ""));
+      const cont = t.replace(/\s+--\s.*$/, "");
+      kept.push(cont);
+      // "AS $$" na continuação abre o corpo da função: dali em diante tudo é SQL até o $$ de fechamento
+      if (((cont.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar;
       return;
     }
     if (t.startsWith("--")) return; // comentário dentro do bloco de rollback
@@ -267,6 +270,8 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         for (const name of [...c.tables, ...c.functions]) {
           if (baselineExisting.get(later)!.has(`tabela ${name}`) || baselineExisting.get(later)!.has(`função ${name}`)) continue; // já existe antes da rodada
           if (own.tables.includes(name) || own.functions.includes(name)) continue;
+          // uso protegido por pré-checagem pelo nome em pg_proc (ex.: a 334 só chama apply_mfa_policy se a 310 já existir)
+          if (new RegExp(`proname\\s*=\\s*'${name}'`, "i").test(code)) continue;
           if (new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
         }
       }

@@ -57,11 +57,11 @@ export async function GET(request: Request) {
     if (userIds.length > 0) {
       const { data: profiles } = await ctx.supabase
         .from("profiles")
-        .select("user_id, full_name, email")
+        .select("user_id, full_name")
         .eq("account_id", ctx.accountId)
         .in("user_id", userIds);
-      for (const p of (profiles ?? []) as Array<{ user_id: string; full_name: string | null; email: string | null }>) {
-        names.set(p.user_id, p.full_name?.trim() || p.email || "");
+      for (const p of (profiles ?? []) as Array<{ user_id: string; full_name: string | null }>) {
+        names.set(p.user_id, p.full_name?.trim() || "");
       }
     }
 

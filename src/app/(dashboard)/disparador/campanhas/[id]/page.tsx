@@ -226,7 +226,7 @@ export default function CampanhaContatosPage({
     ? [
         { key: "lido", label: "Lidos", value: m.total_lidos, cls: "bg-primary" },
         { key: "entregue", label: "Entregues (sem leitura)", value: Math.max(0, m.total_entregues - m.total_lidos), cls: "bg-success" },
-        { key: "enviado", label: "Enviados (sem confirmação)", value: Math.max(0, m.total_enviados - m.total_entregues), cls: "bg-[#5B8DEF] [html[data-mode=light]_&]:bg-[#3B6FD8]" },
+        { key: "enviado", label: "Enviados (sem confirmação)", value: Math.max(0, m.total_enviados - m.total_entregues), cls: "bg-info" },
         { key: "erro", label: "Erros", value: m.total_erros, cls: "bg-danger" },
         { key: "restante", label: "Ainda não enviados", value: Math.max(0, total - m.total_enviados - m.total_erros - m.total_blacklist), cls: "bg-surface-3" },
       ]

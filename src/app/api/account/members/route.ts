@@ -38,9 +38,9 @@ export async function GET() {
   try {
     const ctx = await requirePermission("members.view");
 
-    // RLS on profiles allows reading any row whose account matches
-    // the caller's, so this query is naturally account-scoped.
-    const { data, error } = await ctx.supabase
+    // Service role escopado pela conta do chamador (já validada em requirePermission): o cliente do usuário não lê mais
+    // profiles.email (migration 306); o e-mail é mascarado abaixo para quem não tem members.view_emails.
+    const { data, error } = await supabaseAdmin()
       .from("profiles")
       // "*": inclui deactivated_at (migration 311) sem quebrar enquanto ela não foi aplicada.
       .select("*")

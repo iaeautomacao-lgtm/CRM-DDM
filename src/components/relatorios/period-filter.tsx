@@ -38,7 +38,7 @@ export function PeriodFilter({
           onChange={(v) => v !== "custom" && onChange(presetRange(v))}
           options={PERIOD_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
         />
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Input
             type="date"
             aria-label="Período (de)"
@@ -46,7 +46,7 @@ export function PeriodFilter({
             aria-describedby={error ? errorId : undefined}
             value={value.dateFrom}
             onChange={(e) => onChange({ ...value, dateFrom: e.target.value })}
-            className="w-38"
+            className="min-w-[8.5rem] flex-1 sm:w-38 sm:flex-none"
           />
           <span className="text-xs text-muted-foreground">até</span>
           <Input
@@ -56,7 +56,7 @@ export function PeriodFilter({
             aria-describedby={error ? errorId : undefined}
             value={value.dateTo}
             onChange={(e) => onChange({ ...value, dateTo: e.target.value })}
-            className="w-38"
+            className="min-w-[8.5rem] flex-1 sm:w-38 sm:flex-none"
           />
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat"
 import { timingSafeEqual } from 'node:crypto'
 import { registerAuditActor } from '@/lib/audit/context'
 import { NextResponse } from 'next/server'
@@ -30,7 +31,7 @@ import { sweepStalledAiConversations } from '@/lib/flows/ai-watchdog'
  * default; once per hour would also be acceptable for low-volume
  * tenants.
  */
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   // Auditoria: escritas desta requisição saem como "flow" (cron_fluxos).
   await registerAuditActor({ actorType: 'flow', source: 'cron_fluxos' })
   const expected = process.env.AUTOMATION_CRON_SECRET
@@ -139,4 +140,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { error } = await supabaseAdmin().from('flow_runs').select('id').limit(1);
   return NextResponse.json({ status: error ? 'unavailable' : 'healthy' }, { status: error ? 503 : 200 });
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("flows", () => handlePost(request))
 }
