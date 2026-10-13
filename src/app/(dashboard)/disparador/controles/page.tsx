@@ -3,6 +3,8 @@
 // /disparador/controles — editar por número: vagas (max_in_flight), limite por hora e pausar/retomar.
 // Toda mudança mostra o "antes → depois", pede o MOTIVO e confirmação, é auditada e vale no próximo tick
 // (sem restart). Os ajustes globais (variáveis de ambiente) aparecem só para leitura, com explicação.
+// Ritmo por segundo: Meta pela qualidade (/api/disparador/rate-limits); WAHA editável por sessão
+// (/api/disparador/waha-rate, padrão 1/s — decisão do dono 13/10, item 20).
 // Visual do redesenho DDM; o modelo continua por número (o protótipo global foi descartado — PRD 22, 3.4).
 
 import { useCallback, useEffect, useState } from "react";
@@ -43,6 +45,31 @@ interface Pending {
   lines: Array<{ label: string; before: string; after: string }>;
   warnings: string[];
 }
+
+/** GET /api/disparador/waha-rate (permissão campaigns.rate_limit). */
+interface WahaRateChannel {
+  session_id: string;
+  label: string;
+  rate_per_second: number;
+  source: "default" | "custom";
+  reason: string | null;
+  updated_at: string | null;
+}
+interface WahaRateView {
+  default_rate_per_second: number;
+  min_rate_per_second: number;
+  max_rate_per_second: number;
+  channels: WahaRateChannel[];
+}
+/** ok = carregou; unavailable = 503 (migration 338); forbidden = 403 (sem campaigns.rate_limit). */
+type WahaRateState =
+  | { status: "loading" }
+  | { status: "ok"; view: WahaRateView }
+  | { status: "unavailable" }
+  | { status: "forbidden" }
+  | { status: "error"; message: string };
+
+const fmtRate = (v: number) => `${String(v).replace(".", ",")}/s`;
 
 const show = (v: number | null) => (v === null ? "sem limite" : formatInt(v));
 
@@ -157,6 +184,76 @@ function RateBlock(props: {
   );
 }
 
+function WahaRateBlock(props: {
+  number: NumberLimits;
+  state: WahaRateState;
+  draft: string;
+  onDraft: (v: string) => void;
+  onReview: (n: NumberLimits, channel: WahaRateChannel, view: WahaRateView) => void;
+  onReset: (n: NumberLimits, channel: WahaRateChannel, view: WahaRateView) => void;
+}) {
+  const { number: n, state, draft } = props;
+  // Sem a permissão a rota responde 403: o bloco não aparece (a tela segue com o resto).
+  if (state.status === "forbidden" || state.status === "loading") return null;
+  if (state.status === "unavailable") {
+    return (
+      <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">
+        Ritmo do WAHA indisponível: aplique a migration 338.
+      </p>
+    );
+  }
+  if (state.status === "error") {
+    return <p className="m-0 rounded-lg bg-danger-soft px-3 py-2 text-xs text-foreground">Não foi possível ler o ritmo do WAHA: {state.message}</p>;
+  }
+  const view = state.view;
+  const channel = view.channels.find((c) => c.session_id === n.id);
+  if (!channel) {
+    return <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">Sem leitura de ritmo para esta sessão.</p>;
+  }
+  const custom = channel.source === "custom";
+  const inputId = `waha-rate-${n.id}`;
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="m-0 font-sans text-[13px] font-semibold text-foreground">Ritmo do WAHA</h4>
+        <StatusChip tone={custom ? "info" : "mute"}>{custom ? "Personalizado" : "Padrão"}</StatusChip>
+      </div>
+      <dl className="m-0 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-xs">
+        <div className="bg-card px-3 py-2">
+          <dt className="text-muted-foreground">Padrão</dt>
+          <dd className="m-0 font-semibold tabular-nums text-foreground">{fmtRate(view.default_rate_per_second)}</dd>
+        </div>
+        <div className="bg-card px-3 py-2">
+          <dt className="text-muted-foreground">Vale agora</dt>
+          <dd className="m-0 text-sm font-semibold tabular-nums text-foreground">{fmtRate(channel.rate_per_second)}</dd>
+        </div>
+      </dl>
+      {custom && channel.reason && <p className="m-0 text-[11.5px] text-muted-foreground">Motivo: {channel.reason}</p>}
+      <div className="flex flex-wrap items-end gap-2">
+        <label htmlFor={inputId} className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Novo ritmo (mensagens/s, de {String(view.min_rate_per_second).replace(".", ",")} a {view.max_rate_per_second})
+          <Input
+            id={inputId}
+            inputMode="decimal"
+            className="h-8 w-40"
+            placeholder="Ex.: 0,5"
+            value={draft}
+            onChange={(e) => props.onDraft(e.target.value)}
+          />
+        </label>
+        <Button variant="outline" disabled={draft.trim() === ""} onClick={() => props.onReview(n, channel, view)}>
+          Revisar ritmo
+        </Button>
+        {custom && (
+          <Button variant="ghost" onClick={() => props.onReset(n, channel, view)}>
+            Voltar ao padrão ({fmtRate(view.default_rate_per_second)})
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function HistoryCard({ overview }: { overview: LimitsOverview | null }) {
   const [now] = useState(() => Date.now());
   type Row = { id: string; at: string; numero: string | null; quem: string; mudanca: string; motivo: string | null };
@@ -217,6 +314,8 @@ export default function ControlesPage() {
   const [overview, setOverview] = useState<LimitsOverview | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [rateDrafts, setRateDrafts] = useState<Record<string, { rate: string; force: boolean }>>({});
+  const [waha, setWaha] = useState<WahaRateState>({ status: "loading" });
+  const [wahaDrafts, setWahaDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -225,7 +324,19 @@ export default function ControlesPage() {
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
+  const loadWaha = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/disparador/waha-rate");
+      if (res.status === 503) return setWaha({ status: "unavailable" });
+      if (res.status === 403) return setWaha({ status: "forbidden" });
+      setWaha({ status: "ok", view: (await readJson(res)) as WahaRateView });
+    } catch (err) {
+      setWaha({ status: "error", message: err instanceof Error ? err.message : "falha ao carregar" });
+    }
+  }, []);
+
   const load = useCallback(async () => {
+    void loadWaha();
     try {
       const data = (await readJson(await apiFetch("/api/disparador/limits"))) as LimitsOverview;
       setOverview(data);
@@ -243,7 +354,7 @@ export default function ControlesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadWaha]);
 
   useEffect(() => {
     void load();
@@ -368,6 +479,46 @@ export default function ControlesPage() {
     });
   };
 
+  const reviewWahaRate = (n: NumberLimits, channel: WahaRateChannel, view: WahaRateView) => {
+    const rate = Number((wahaDrafts[n.id] ?? "").trim().replace(",", "."));
+    if (!Number.isFinite(rate) || rate < view.min_rate_per_second || rate > view.max_rate_per_second) {
+      setError(`${n.label}: o ritmo do WAHA deve ficar entre ${String(view.min_rate_per_second).replace(".", ",")} e ${view.max_rate_per_second} mensagens por segundo.`);
+      return;
+    }
+    if (rate === channel.rate_per_second) {
+      setError(null);
+      setNotice(`${n.label}: o ritmo já é ${fmtRate(rate)}.`);
+      return;
+    }
+    const warnings: string[] = [];
+    if (rate > channel.rate_per_second && rate > view.default_rate_per_second) {
+      warnings.push("Subir o ritmo do WAHA aumenta o risco de banimento. Suba aos poucos e acompanhe o Monitor.");
+    }
+    setError(null);
+    setNotice(null);
+    setReason("");
+    setDialogError(null);
+    setPending({
+      number: n,
+      lines: [{ label: "Ritmo do WAHA", before: fmtRate(channel.rate_per_second), after: fmtRate(rate) }],
+      warnings,
+      request: (reason) => ({ url: "/api/disparador/waha-rate", method: "PUT", body: { session_id: n.id, rate_per_second: rate, reason } }),
+    });
+  };
+
+  const reviewWahaReset = (n: NumberLimits, channel: WahaRateChannel, view: WahaRateView) => {
+    setError(null);
+    setNotice(null);
+    setReason("");
+    setDialogError(null);
+    setPending({
+      number: n,
+      lines: [{ label: "Ritmo do WAHA", before: `${fmtRate(channel.rate_per_second)} (personalizado)`, after: `${fmtRate(view.default_rate_per_second)} (padrão)` }],
+      warnings: [],
+      request: (reason) => ({ url: "/api/disparador/waha-rate", method: "PUT", body: { session_id: n.id, rate_per_second: null, reason } }),
+    });
+  };
+
   const confirm = async () => {
     if (!pending) return;
     const text = reason.trim();
@@ -395,6 +546,11 @@ export default function ControlesPage() {
         return rest;
       });
       setRateDrafts((d) => {
+        const rest = { ...d };
+        delete rest[id];
+        return rest;
+      });
+      setWahaDrafts((d) => {
         const rest = { ...d };
         delete rest[id];
         return rest;
@@ -527,6 +683,16 @@ export default function ControlesPage() {
                         {n.paused ? "Retomar número" : "Pausar número"}
                       </Button>
                     </div>
+                    {n.provider === "waha" && (
+                      <WahaRateBlock
+                        number={n}
+                        state={waha}
+                        draft={wahaDrafts[n.id] ?? ""}
+                        onDraft={(v) => setWahaDrafts((d) => ({ ...d, [n.id]: v }))}
+                        onReview={reviewWahaRate}
+                        onReset={reviewWahaReset}
+                      />
+                    )}
                     {n.provider === "meta" && (
                       <RateBlock
                         number={n}
