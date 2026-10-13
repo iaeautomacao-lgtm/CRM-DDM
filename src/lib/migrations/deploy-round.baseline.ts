@@ -41,6 +41,8 @@ GRANT USAGE ON SCHEMA auth, wacrm TO anon, authenticated, service_role;
 CREATE SCHEMA storage;
 CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text, name text, owner uuid);
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+-- helper do Supabase Storage (as policies recriadas no rollback da 351 usam): pastas do caminho, sem o nome do arquivo
+CREATE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT trim_array(string_to_array(name, '/'), 1) $$;
 CREATE POLICY "Members can upload chat media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'chat-media');
 CREATE POLICY "Members can update chat media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'chat-media');
 CREATE POLICY "Members can delete chat media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'chat-media');
