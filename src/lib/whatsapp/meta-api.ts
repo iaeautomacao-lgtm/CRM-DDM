@@ -18,9 +18,11 @@ const META_API_VERSION = 'v21.0'
 // recusa o endereço real; ver src/lib/loadtest/gate.ts). Gate falho = throw no carregamento (o app não envia).
 const META_API_BASE = `${resolveMetaApiBaseUrl()}/${META_API_VERSION}`
 
-const DEFAULT_META_TIMEOUT_MS = 30_000
+// Decisão do dono (13/10): 10 s (era 30 s). A latência medida da Meta é ~0,8 s (p95 1,0 s): conexão pendurada por 30 s ocupava a vaga do
+// número e terminava como resultado "incerto". A variável META_TIMEOUT_MS continua sobrepondo (1 ms a 120 s), para incidente.
+export const DEFAULT_META_TIMEOUT_MS = 10_000
 
-function getMetaTimeoutMs(): number {
+export function getMetaTimeoutMs(): number {
   const configured = Number.parseInt(process.env.META_TIMEOUT_MS ?? "", 10)
   if (!Number.isFinite(configured) || configured < 1) return DEFAULT_META_TIMEOUT_MS
   return Math.min(configured, 120_000)
