@@ -5,9 +5,12 @@ import { validateFlowForActivation } from '@/lib/flows/validate'
 import { listAccountTools } from '@/lib/ai-tools/runtime'
 import { listAccountAgents } from '@/lib/ai/agents/runtime'
 import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
+import { redactNodesForReadOnly } from '@/lib/flows/read-only-view'
 
 /**
- * GET   /api/flows/[id]  — fetch one flow with its nodes.
+ * GET   /api/flows/[id]  — fetch one flow with its nodes. Aceita flows.edit OU flows.view_runs (decisão do dono, 13/10: quem só vê
+ *                          execuções abre o editor em MODO LEITURA); a resposta traz `read_only` e, em leitura, sem os valores de
+ *                          cabeçalhos de http_fetch.
  * PUT   /api/flows/[id]  — replace name/trigger/entry/fallback + the
  *                          full node graph (delete-then-insert under
  *                          the hood; not atomic, but the runner is
@@ -16,8 +19,7 @@ import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
  * DELETE /api/flows/[id] — hard delete (RLS+CASCADE clean up nodes,
  *                          runs, events).
  *
- * All three require owner/admin and a flow that belongs to the caller's
- * account (other account → 404). Writes use the service role, so every
+ * PUT/DELETE exigem flows.edit (owner/admin hoje) e um fluxo da conta do chamador (outra conta → 404). Writes use the service role, so every
  * one is also filtered by account_id.
  */
 
@@ -26,7 +28,16 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
-  const guard = await guardFlow(id)
+  // Leitura: flows.edit (edita) ou, na falta dele (403), flows.view_runs (só lê). 401/404 não mudam.
+  let guard = await guardFlow(id, 'flows.edit')
+  let readOnly = false
+  if (!guard.ok && guard.response.status === 403) {
+    const viewGuard = await guardFlow(id, 'flows.view_runs')
+    if (viewGuard.ok) {
+      guard = viewGuard
+      readOnly = true
+    }
+  }
   if (!guard.ok) return guard.response
   const { supabase, accountId } = guard.ctx
 
@@ -41,7 +52,8 @@ export async function GET(
   if (!flow) {
     return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
   }
-  return NextResponse.json({ flow, nodes: nodes ?? [] })
+  const allNodes = nodes ?? []
+  return NextResponse.json({ flow, nodes: readOnly ? redactNodesForReadOnly(allNodes) : allNodes, read_only: readOnly })
 }
 
 interface PutBody {

@@ -212,6 +212,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   flow("flows/templates", "GET"),
   flow("flows/import", "POST"),
   flow("flows/[id]", "GET"),
+  flow("flows/[id]", "GET", "flows.view_runs"), // leitura do editor em modo leitura (decisão do dono, 13/10, item 11)
   flow("flows/[id]", "PUT"),
   flow("flows/[id]", "DELETE"),
   flow("flows/[id]/activate", "POST"),
