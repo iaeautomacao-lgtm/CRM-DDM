@@ -7,10 +7,15 @@ import {
   Gauge,
   Headphones,
   HelpCircle,
+  History,
+  Kanban,
+  LayoutTemplate,
   LayoutDashboard,
   Megaphone,
   MessageSquare,
+  MessageSquareText,
   Network,
+  ScrollText,
   Settings,
   Shield,
   Tags,
@@ -18,8 +23,12 @@ import {
   Users,
   UsersRound,
   Wifi,
+  UserSearch,
   Workflow,
+  Zap,
 } from "lucide-react";
+
+import type { Permission } from "@/lib/auth/permissions";
 
 export type NavGroup =
   | "overview"
@@ -36,6 +45,8 @@ export interface NavItem {
   icon: typeof LayoutDashboard;
   group?: NavGroup;
   beta?: boolean;
+  /** Exige esta permissão além do gate da rota (mesma regra da paleta Ctrl+K). */
+  permission?: Permission;
 }
 
 export const NAV_GROUPS: Array<{ id: NavGroup; label: string }> = [
@@ -53,14 +64,21 @@ export const navItems: NavItem[] = [
 
   { href: "/inbox", label: "Conversas", icon: MessageSquare, group: "operation" },
   { href: "/monitoramento", label: "Monitoramento", icon: Activity, group: "operation" },
+  { href: "/historico", label: "Histórico", icon: History, group: "operation" },
+  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: MessageSquareText, group: "operation" },
+  { href: "/tabulacoes", label: "Tabulações", icon: Tags, group: "operation" },
 
   { href: "/contacts", label: "Contatos", icon: Users, group: "relationship" },
+  { href: "/pipelines", label: "Funis", icon: Kanban, group: "relationship" },
+  { href: "/lead-extractor", label: "Extrator de leads", icon: UserSearch, group: "relationship" },
   { href: "/canais", label: "Canais", icon: Wifi, group: "relationship" },
 
   { href: "/disparador", label: "Disparador", icon: Megaphone, group: "campaigns" },
+  { href: "/templates", label: "Templates", icon: LayoutTemplate, group: "campaigns" },
   { href: "/regua", label: "Régua de cobrança", icon: CalendarClock, group: "campaigns" },
 
   { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation", beta: true },
+  { href: "/automations", label: "Automações", icon: Zap, group: "automation", permission: "automations.view" },
   { href: "/settings?tab=agents", label: "Agentes de IA", icon: Bot, group: "automation" },
 
   { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "intelligence", beta: true },
@@ -68,6 +86,7 @@ export const navItems: NavItem[] = [
 
   { href: "/equipes", label: "Equipes", icon: Network, group: "administration" },
   { href: "/usuarios", label: "Usuários", icon: UsersRound, group: "administration" },
+  { href: "/ddm-logs", label: "Logs do sistema", icon: ScrollText, group: "administration", permission: "audit.view" },
 ];
 
 export const reportNavItems: NavItem[] = [
