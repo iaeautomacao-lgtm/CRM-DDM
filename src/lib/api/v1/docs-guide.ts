@@ -27,6 +27,9 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getReportTeams: 'relatorios',
   getReportAgents: 'relatorios',
   getReportTabulations: 'relatorios',
+  listConversations: 'relatorios',
+  listConversationMessages: 'relatorios',
+  listMessages: 'relatorios',
 };
 
 export interface ScopeRow {
@@ -40,6 +43,8 @@ export const SCOPE_ROWS: ScopeRow[] = [
   { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns/{id}' },
   { scope: 'messages:send', paraQue: 'Enviar mensagem avulsa', endpoints: 'POST /whatsapp/send' },
   { scope: 'reports:read', paraQue: 'Relatórios para Power BI, Metabase, n8n', endpoints: 'GET /reports/*' },
+  { scope: 'conversations:read', paraQue: 'Extrair conversas, operadores, equipes e tabulações', endpoints: 'GET /conversations' },
+  { scope: 'messages:read', paraQue: 'Ler mensagens da conversa ou do período', endpoints: 'GET /conversations/{id}/messages e GET /messages' },
   { scope: '(nenhum)', paraQue: 'Testar se a chave funciona', endpoints: 'GET /me' },
 ];
 

@@ -9,6 +9,8 @@
 // Não contém segredo nenhum (só descrição de contrato).
 // ============================================================
 
+import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
+
 type Json = Record<string, unknown>;
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -120,7 +122,10 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+      '- `messages:read` — histórico de mensagens de uma conversa ou por período.',
+      '- `conversations:read` — listagem de conversas para extração incremental.',
       '- `GET /me` não exige escopo.',
+      ...EXTRACT_GUIDE,
       '',
       '## Envelope de resposta',
       'Sucesso: `{ "data": … }`. Falha: `{ "error": { "code": "…", "message": "…" } }`. Ramifique pelo `code` (estável); a `message` é para humanos e pode mudar.',
@@ -141,6 +146,7 @@ export const openApiSpec = {
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
+    ...extractTags,
     { name: 'Conta', description: 'Identidade da chave.' },
     { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
@@ -148,6 +154,7 @@ export const openApiSpec = {
   ],
   security: SECURITY,
   paths: {
+    ...extractPaths,
     '/me': {
       get: {
         tags: ['Conta'],
@@ -796,6 +803,7 @@ export const openApiSpec = {
       },
     },
     schemas: {
+      ...extractSchemas,
       Scope: {
         type: 'string',
         enum: [
