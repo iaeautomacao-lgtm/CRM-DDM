@@ -25,11 +25,11 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-destructive/40 bg-card/40 px-4 py-6 text-center',
+        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-card border border-dashed border-destructive/40 bg-card/40 px-4 py-6 text-center',
         className,
       )}
     >
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger-soft text-destructive">
         <AlertCircle className="h-5 w-5" />
       </div>
       <p className="text-sm font-medium text-foreground">{title}</p>
@@ -62,7 +62,7 @@ export function ForbiddenState({
     <div
       role="status"
       className={cn(
-        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-card/40 px-4 py-6 text-center',
+        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-card border border-dashed border-border-strong bg-card/40 px-4 py-6 text-center',
         className,
       )}
     >
