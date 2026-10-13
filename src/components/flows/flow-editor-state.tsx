@@ -78,16 +78,7 @@ import {
 } from "@/lib/flows/local-draft";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 
 // ============================================================
 // State shape
@@ -171,6 +162,8 @@ export interface ConfirmRequest {
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Botão de confirmar em tom destrutivo (exclusões). */
+  destructive?: boolean;
 }
 
 /** Rascunho local oferecido ao abrir o editor. */
@@ -1021,6 +1014,7 @@ Publicar mesmo assim?`,
       title: "Excluir fluxo",
       message: `Excluir "${state.name}"? Todas as execuções ativas serão encerradas imediatamente. Essa ação não pode ser desfeita.`,
       confirmLabel: "Excluir",
+      destructive: true,
     });
     if (!yes) return;
     try {
@@ -1269,27 +1263,19 @@ Publicar mesmo assim?`,
   return (
     <FlowEditorCtx.Provider value={value}>
       {children}
-      <AlertDialog
+      <ConfirmDialog
         open={confirmRequest !== null}
         onOpenChange={(open) => {
           // Adiado: se o clique em "confirmar" fechou o diálogo, a resposta
           // "sim" já foi dada e este "não" não tem mais efeito.
           if (!open) queueMicrotask(() => settleConfirm(false));
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{confirmRequest?.title}</AlertDialogTitle>
-            <AlertDialogDescription className="whitespace-pre-line">{confirmRequest?.message}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => settleConfirm(true)}>
-              {confirmRequest?.confirmLabel ?? "Confirmar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={confirmRequest?.title}
+        description={<span className="whitespace-pre-line">{confirmRequest?.message}</span>}
+        confirmLabel={confirmRequest?.confirmLabel ?? "Confirmar"}
+        destructive={confirmRequest?.destructive ?? false}
+        onConfirm={() => settleConfirm(true)}
+      />
     </FlowEditorCtx.Provider>
   );
 }

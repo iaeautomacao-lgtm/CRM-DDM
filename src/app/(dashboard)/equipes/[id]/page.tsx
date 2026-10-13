@@ -71,6 +71,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageBody } from "@/components/ddm/page-toolbar";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import type { AccountMember, MessageTemplate, Tag, Team } from "@/types";
 
 /** Replaces {{1}}, {{2}}, ... with the matching sample value — left as
@@ -361,6 +362,7 @@ export default function EquipeDetailPage({
   const [addingChannel, setAddingChannel] = useState(false);
   const [removeChannelTarget, setRemoveChannelTarget] = useState<LinkedChannel | null>(null);
   const [removingChannel, setRemovingChannel] = useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<string | null>(null);
 
   // ---- Tabulações — every kind='outcome' tag in the account, checkbox
   // reflects a row existing in wacrm.team_outcome_tags for (this team,
@@ -608,7 +610,16 @@ export default function EquipeDetailPage({
     (t) => !t.waba_id || linkedWabaIds.has(t.waba_id),
   );
 
-  async function handleToggleMember(userId: string, checked: boolean) {
+  // Remover pede confirmação; a caixa só muda depois de confirmar. Adicionar segue direto.
+  function handleToggleMember(userId: string, checked: boolean) {
+    if (checked) {
+      void performToggleMember(userId, true);
+      return;
+    }
+    setRemoveMemberTarget(userId);
+  }
+
+  async function performToggleMember(userId: string, checked: boolean) {
     setPendingMemberId(userId);
     setMemberUserIds((prev) => {
       const next = new Set(prev);
@@ -789,6 +800,7 @@ export default function EquipeDetailPage({
     } catch (err) {
       console.error("[EquipeDetail] remove channel error:", err);
       toast.error(err instanceof Error ? err.message : "Falha ao remover canal da equipe");
+      throw err; // mantém o diálogo aberto para tentar de novo
     } finally {
       setRemovingChannel(false);
     }
@@ -1593,43 +1605,42 @@ export default function EquipeDetailPage({
       </Dialog>
 
       {/* Remover canal */}
-      <Dialog
+      <ConfirmDialog
         open={removeChannelTarget !== null}
         onOpenChange={(open) => {
           if (!open) setRemoveChannelTarget(null);
         }}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Remover canal da equipe</DialogTitle>
-            <DialogDescription>
-              Remover canal da equipe? &quot;
-              {removeChannelTarget?.display_phone_number ||
-                `Canal ${removeChannelTarget?.id.slice(0, 8)}`}
-              &quot; fica sem equipe, mas continua habilitado normalmente.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setRemoveChannelTarget(null)}
-              disabled={removingChannel}
-            >
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleRemoveChannel} disabled={removingChannel}>
-              {removingChannel ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Removendo…
-                </>
-              ) : (
-                "Remover canal"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="Remover canal da equipe"
+        description={
+          <>
+            Remover canal da equipe? &quot;
+            {removeChannelTarget?.display_phone_number ||
+              `Canal ${removeChannelTarget?.id.slice(0, 8)}`}
+            &quot; fica sem equipe, mas continua habilitado normalmente.
+          </>
+        }
+        confirmLabel="Remover canal"
+        busy={removingChannel}
+        onConfirm={handleRemoveChannel}
+      />
+
+      {/* Remover membro */}
+      <ConfirmDialog
+        open={removeMemberTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveMemberTarget(null);
+        }}
+        title="Remover da equipe"
+        description={(() => {
+          const m = allAccountMembers.find((x) => x.user_id === removeMemberTarget);
+          const who = m?.full_name || m?.email || "este membro";
+          return team?.name ? `Remover ${who} da equipe ${team.name}?` : `Remover ${who} da equipe?`;
+        })()}
+        confirmLabel="Remover"
+        onConfirm={async () => {
+          if (removeMemberTarget) await performToggleMember(removeMemberTarget, false);
+        }}
+      />
 
       {/* Prévia do template — simple WhatsApp-bubble mock, same
           rendering as template-manager.tsx's own preview dialog. */}

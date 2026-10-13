@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { PageToolbar } from '@/components/ddm/page-toolbar';
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
@@ -266,6 +267,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
     } catch (err: unknown) {
       console.error('[AiOutcomeMapSection] delete error:', err);
       toast.error('Falha ao remover mapeamento');
+      throw err; // mantém o diálogo aberto para tentar de novo
     } finally {
       setDeleting(false);
     }
@@ -632,113 +634,75 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
 
       {/* Modal: Confirmação de Ativação do Encerramento Automático */}
       {SHOW_AUTO_CLOSE && (
-        <Dialog
+        <ConfirmDialog
           open={confirmAutoCloseTarget !== null}
-          onOpenChange={(open) => !open && setConfirmAutoCloseTarget(null)}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="size-5 text-warning" aria-hidden="true" />
-                Confirmar encerramento automático?
-              </DialogTitle>
-              <DialogDescription className="text-muted-foreground space-y-2 pt-2 text-left text-sm">
-                <span className="block">
-                  Ao ativar esta opção para a tag{' '}
-                  <strong className="text-foreground font-mono font-semibold">
-                    {confirmAutoCloseTarget?.exit_tag}
-                  </strong>
-                  , qualquer conversa em que a IA emitir essa tag será{' '}
-                  <strong>encerrada e tabulada imediatamente</strong> como
-                  &quot;
-                  {confirmAutoCloseTarget
-                    ? (tabulacaoById.get(confirmAutoCloseTarget.outcome_tag_id)
-                        ?.name ?? 'Tabulação configurada')
-                    : ''}
-                  &quot; <strong>sem passar por um atendente humano</strong>.
-                </span>
-                <span className="block text-xs font-medium text-warning">
-                  Certifique-se de que o fluxo do bot já envia todas as
-                  mensagens de despedida e conclusão necessárias antes de emitir
-                  a tag.
-                </span>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-0">
-              <Button
-                variant="outline"
-                onClick={() => setConfirmAutoCloseTarget(null)}
-                disabled={togglingAutoClose}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={() => {
-                  if (confirmAutoCloseTarget) {
-                    void updateAutoClose(
-                      confirmAutoCloseTarget.id,
-                      confirmAutoCloseTarget.exit_tag,
-                      true
-                    );
-                  }
-                }}
-                disabled={togglingAutoClose}
-              >
-                {togglingAutoClose ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Salvando…
-                  </>
-                ) : (
-                  'Confirmar encerramento'
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          onOpenChange={(open) => {
+            if (!open && !togglingAutoClose) setConfirmAutoCloseTarget(null);
+          }}
+          title={
+            <span className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-warning" aria-hidden="true" />
+              Confirmar encerramento automático?
+            </span>
+          }
+          description={
+            <>
+              <span className="block">
+                Ao ativar esta opção para a tag{' '}
+                <strong className="text-foreground font-mono font-semibold">
+                  {confirmAutoCloseTarget?.exit_tag}
+                </strong>
+                , qualquer conversa em que a IA emitir essa tag será{' '}
+                <strong>encerrada e tabulada imediatamente</strong> como
+                &quot;
+                {confirmAutoCloseTarget
+                  ? (tabulacaoById.get(confirmAutoCloseTarget.outcome_tag_id)
+                      ?.name ?? 'Tabulação configurada')
+                  : ''}
+                &quot; <strong>sem passar por um atendente humano</strong>.
+              </span>
+              <span className="mt-2 block text-xs font-medium text-warning">
+                Certifique-se de que o fluxo do bot já envia todas as
+                mensagens de despedida e conclusão necessárias antes de emitir
+                a tag.
+              </span>
+            </>
+          }
+          confirmLabel="Confirmar encerramento"
+          destructive={false}
+          busy={togglingAutoClose}
+          onConfirm={async () => {
+            if (confirmAutoCloseTarget) {
+              await updateAutoClose(
+                confirmAutoCloseTarget.id,
+                confirmAutoCloseTarget.exit_tag,
+                true
+              );
+            }
+          }}
+        />
       )}
 
       {/* Modal: Exclusão de Mapeamento */}
-      <Dialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Remover mapeamento</DialogTitle>
-            <DialogDescription>
-              Deseja remover o mapeamento da tag{' '}
-              <strong className="text-foreground font-mono">
-                {deleteTarget?.exit_tag}
-              </strong>
-              ? A IA não sugerirá mais essa tabulação ao emitir essa tag.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleting}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Removendo…
-                </>
-              ) : (
-                'Remover mapeamento'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        title="Remover mapeamento"
+        description={
+          <>
+            Deseja remover o mapeamento da tag{' '}
+            <strong className="text-foreground font-mono">
+              {deleteTarget?.exit_tag}
+            </strong>
+            ? A IA não sugerirá mais essa tabulação ao emitir essa tag.
+          </>
+        }
+        confirmLabel="Remover mapeamento"
+        busy={deleting}
+        onConfirm={handleDelete}
+      />
     </section>
   );
 }
