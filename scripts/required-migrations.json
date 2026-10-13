@@ -434,6 +434,10 @@
     {
       "version": "340_pipeline_archive",
       "kind": "registry"
+    },
+    {
+      "version": "352_pipelines_delete_owner_only",
+      "kind": "registry"
     }
   ]
 }
