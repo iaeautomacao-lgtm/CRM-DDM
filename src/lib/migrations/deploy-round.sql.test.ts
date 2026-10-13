@@ -16,7 +16,7 @@ const PRE_DEPLOY = [
   "311", "312", "313", "314", "314b", "315", "316b", "317", "318", "319", "320",
   "322", "323", "324", "325", "326", "327", "328", "329",
   "330", "330b", "331b", "333", "334",
-  "335", "335b", "336", "337", "338", "339", "340", "345", "346", "347", "348", "349", "350",
+  "335", "335b", "336", "337", "338", "339", "340", "345", "346", "347", "348", "349", "350", "352",
   "310",
 ] as const;
 /** Migrations que só rodam DEPOIS do deploy do código (o cabeçalho diz "FAZER O DEPLOY ... depois aplicar"): aplicar antes quebra o código antigo. */
@@ -301,6 +301,18 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
     }
     expect((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM wacrm.schema_migrations")).rows[0].n).toBe(before);
   }, 120_000);
+
+  // A 340 põe o DELETE de funis em pipelines.delete (só o proprietário); a 348 (RLS fase 3) roda depois e o devolvia a pipelines.manage; a 352 restaura a regra da 340.
+  it.skipIf(!ROUND.includes("352"))("no FIM da rodada, o DELETE de wacrm.pipelines só passa por has_perm('pipelines.delete') (a 348 não desfaz a 340)", async () => {
+    const r = await db.query<{ policyname: string; qual: string }>(
+      "SELECT policyname, qual FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = 'pipelines' AND cmd = 'DELETE' AND permissive = 'PERMISSIVE'",
+    );
+    expect(r.rows.map((x) => x.policyname)).toEqual(["pipelines_delete"]);
+    expect(r.rows[0].qual).toContain("pipelines.delete");
+    expect(r.rows[0].qual).not.toContain("pipelines.manage");
+    expect(ROUND.indexOf("352")).toBeGreaterThan(ROUND.indexOf("348"));
+    expect(ROUND.indexOf("352")).toBeGreaterThan(ROUND.indexOf("340"));
+  });
 
   it.skipIf(!ROUND.includes("310"))("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
     const r = await db.query<{ relname: string }>(`
