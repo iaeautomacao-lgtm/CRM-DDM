@@ -7,7 +7,7 @@ import { isOwnedChatMediaPath } from '@/lib/api/v1/conversation-media';
 export async function GET(request:Request,{params}:{params:Promise<{id:string;messageId:string}>}) {
  const logCtx:ApiCallLogContext={method:'GET',route:'/api/v1/conversations/[id]/messages/[messageId]/media',startedAt:Date.now()};
  try {
-  const ctx=await requireApiKey(request,'conversations:read');
+  const ctx=await requireApiKey(request,['conversations:read','conversations:export']);
   logCtx.accountId=ctx.accountId;logCtx.keyId=ctx.keyId;
   const {id,messageId}=await params, convId=uuidParam(id),msgId=uuidParam(messageId);
   await getConversation(ctx.supabase,ctx.accountId,convId);
