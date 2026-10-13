@@ -11,6 +11,7 @@ export const GUIDE_SECTIONS = [
   { id: 'acompanhar', title: 'Acompanhar a campanha' },
   { id: 'avulso', title: 'Envio avulso' },
   { id: 'relatorios', title: 'Relatórios para BI' },
+  { id: 'conversas', title: 'Histórico completo de conversas' },
   { id: 'erros', title: 'Erros e limites' },
 ] as const;
 
@@ -27,6 +28,13 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getReportTeams: 'relatorios',
   getReportAgents: 'relatorios',
   getReportTabulations: 'relatorios',
+  listPublicConversations: 'conversas',
+  listConversationMessages: 'conversas',
+  batchConversationMessages: 'conversas',
+  signConversationMedia: 'conversas',
+  createConversationExport: 'conversas',
+  getConversationExportStatus: 'conversas',
+  downloadConversationExportPart: 'conversas',
 };
 
 export interface ScopeRow {
@@ -40,6 +48,8 @@ export const SCOPE_ROWS: ScopeRow[] = [
   { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns/{id}' },
   { scope: 'messages:send', paraQue: 'Enviar mensagem avulsa', endpoints: 'POST /whatsapp/send' },
   { scope: 'reports:read', paraQue: 'Relatórios para Power BI, Metabase, n8n', endpoints: 'GET /reports/*' },
+  { scope: 'conversations:read', paraQue: 'Ler todas as mensagens e mídias de uma conta', endpoints: 'GET /conversations, GET /conversations/{id}/messages, POST /conversations/messages/batch' },
+  { scope: 'conversations:export', paraQue: 'Gerar e baixar exportações privadas do histórico', endpoints: 'POST /conversations/exports' },
   { scope: '(nenhum)', paraQue: 'Testar se a chave funciona', endpoints: 'GET /me' },
 ];
 
