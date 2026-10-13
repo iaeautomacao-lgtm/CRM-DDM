@@ -26,7 +26,7 @@ describe("getBreadcrumbs", () => {
     expect(getBreadcrumbs("/equipes/t1").map((c) => c.label)).toEqual(["Equipes", "Equipe"]);
     expect(getBreadcrumbs("/contacts/c1").map((c) => c.label)).toEqual(["Contatos", "Contato"]);
     expect(getBreadcrumbs("/disparador/campanhas/k1").map((c) => c.label)).toEqual(["Disparador · Campanhas", "Campanha"]);
-    expect(getBreadcrumbs("/inteligencia/chaves").map((c) => c.label)).toEqual(["Inteligência", "Chaves"]);
+    expect(getBreadcrumbs("/inteligencia/chaves").map((c) => c.label)).toEqual(["Inteligência", "Chave pessoal do MCP"]);
   });
 
   it("ignora a barra final e a query", () => {

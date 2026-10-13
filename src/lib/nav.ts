@@ -98,7 +98,7 @@ const extraTitles: Record<string, string> = {
   "/templates": "Templates",
   "/tabulacoes": "Tabulações",
   "/respostas-rapidas": "Respostas rápidas",
-  "/perfil": "Meu Perfil",
+  "/perfil": "Meu perfil",
   "/seguranca": "Senha e sessões",
   "/historico": "Histórico",
   "/pipelines": "Funis",
@@ -195,7 +195,7 @@ export function getBreadcrumbs(pathname: string): Crumb[] {
   if (root === "disparador" && a === "campanhas" && b) {
     return [{ label: "Disparador · Campanhas", href: "/disparador/campanhas" }, { label: "Campanha" }];
   }
-  if (root === "inteligencia" && a === "chaves") return [{ label: "Inteligência", href: "/inteligencia" }, { label: "Chaves" }];
+  if (root === "inteligencia" && a === "chaves") return [{ label: "Inteligência", href: "/inteligencia" }, { label: "Chave pessoal do MCP" }];
 
   return [{ label: baseTitle(path) }];
 }
