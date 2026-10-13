@@ -95,7 +95,7 @@ const conversationErrors = {
  '400': { description:'Parâmetros/cursor inválidos.', content:{'application/json':{schema:ref('ErrorEnvelope')}} },
  '401': resp('Unauthorized'),
  '403': resp('Forbidden'),
- '404': resp('NotFound'),
+ '404': { description:'Recurso não encontrado ou pertencente a outra conta.', content:{'application/json':{schema:ref('ErrorEnvelope')}} },
  '429': resp('RateLimited'),
  '500': resp('InternalError'),
 };
