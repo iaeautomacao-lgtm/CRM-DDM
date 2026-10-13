@@ -166,9 +166,9 @@ export function ContactTimeline({
 
   return (
     <div className="rounded-xl border border-border bg-card">
-      <div className="border-b border-[#F3F4F6] p-4">
+      <div className="border-b border-border-soft p-4">
         <div className="flex items-center gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#6366F1] text-sm font-semibold text-white">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary-solid text-sm font-semibold text-primary-foreground">
             {contactInitial}
           </span>
           <h2 className="text-base font-semibold text-foreground">{contactName}</h2>
@@ -234,7 +234,7 @@ export function ContactTimeline({
             hint="Este contato ainda não teve conversas registradas com os filtros atuais."
           />
         ) : (
-          <div className="relative space-y-3 border-l-2 border-[#E5E7EB]">
+          <div className="relative space-y-3 border-l-2 border-border">
             {conversations.map((conversation) => (
               <ConversationCard
                 key={conversation.id}
