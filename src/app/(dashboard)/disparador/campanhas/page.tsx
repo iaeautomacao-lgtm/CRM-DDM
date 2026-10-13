@@ -731,7 +731,15 @@ export default function CampanhasPage() {
         }),
       });
       if (res.ok) {
-        toast.success("Campanha iniciada e disparos agendados!");
+        // skipped_known_invalid: números que a Meta já recusou como inválidos em campanha anterior (a rota omite quando 0).
+        const started = (await res.json().catch(() => ({}))) as { skipped_known_invalid?: number };
+        const skipped = started.skipped_known_invalid ?? 0;
+        toast.success("Campanha iniciada e disparos agendados!", {
+          description:
+            skipped > 0
+              ? `${skipped.toLocaleString("pt-BR")} ${skipped === 1 ? "número inválido conhecido ignorado" : "números inválidos conhecidos ignorados"}.`
+              : undefined,
+        });
         trackAction("campaign_started", { campaign_id: id });
         setStartConfirmId(null);
         setCampaignInfo(null);
