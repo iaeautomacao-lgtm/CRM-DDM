@@ -40,6 +40,7 @@ import {
   rulerState,
   type Ruler,
 } from "@/lib/billing/client-types";
+import { PageHeader } from "@/components/ddm/page-header";
 
 type View = "rulers" | "enrollments";
 
@@ -146,14 +147,7 @@ function ReguaBoard({ canManage }: { canManage: boolean }) {
 
   return (
     <PageBody>
-      <div className="flex animate-ddm-up flex-col gap-1.5 pt-1">
-        <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">
-          Régua de cobrança
-        </h1>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Etapas automáticas por vencimento, que param sozinhas quando a dívida é paga ou o devedor pede para sair.
-        </p>
-      </div>
+      <PageHeader>Etapas automáticas por vencimento, que param sozinhas quando a dívida é paga ou o devedor pede para sair.</PageHeader>
 
       <AlertsBanner />
 

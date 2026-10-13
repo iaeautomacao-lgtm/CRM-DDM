@@ -71,6 +71,7 @@ import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
 import { normalizarErroMeta, extrairCodigoMetaErro } from "@/lib/disparador/normalize-meta-error";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL = "all";
 const PAGE_SIZE = 60;
@@ -466,12 +467,7 @@ export default function EnvioEmLotePage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h2>
-        <p className="text-sm text-muted-foreground">
-          Campanhas do Disparador com métricas agregadas e detalhe por contato.
-        </p>
-      </div>
+      <PageHeader>Campanhas do Disparador com métricas agregadas e detalhe por contato.</PageHeader>
 
       <div className="rounded-card border border-border bg-card">
         <button

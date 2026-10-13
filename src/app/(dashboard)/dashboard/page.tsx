@@ -34,6 +34,7 @@ import { AiPerformance } from '@/components/dashboard/ai-performance'
 import { FinancialPerformance } from '@/components/dashboard/financial-performance'
 import { ErrorState } from '@/components/dashboard/error-state'
 import { cn } from '@/lib/utils'
+import { PageBody } from '@/components/ddm/page-toolbar'
 
 // Seções carregadas por loadAll — usadas para rastrear quais falharam
 // e oferecer "Tentar novamente" em vez de skeletons eternos.
@@ -179,7 +180,7 @@ export default function DashboardPage() {
   const retry = () => void reloadAll(range)
 
   return (
-    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-5 pb-12">
+    <PageBody className="gap-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <h2 className="m-0 text-[15px] font-semibold text-foreground">Operação agora</h2>
@@ -296,7 +297,7 @@ export default function DashboardPage() {
           <ActivityFeed items={activity} loading={loading('activity')} nowMs={now} />
         )}
       </Row>
-    </div>
+    </PageBody>
   )
 }
 

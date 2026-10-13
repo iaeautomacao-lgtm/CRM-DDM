@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { ApiKeysSettings } from "@/components/settings/api-keys-settings";
+import { PageBody } from "@/components/ddm/page-toolbar";
 
 // /inteligencia/chaves — "Minhas chaves de API": chaves pessoais do DDM
 // Intelligence para o MCP (/api/mcp, PRD-04 Fase 3). Mesmo alcance do
@@ -11,7 +12,7 @@ import { ApiKeysSettings } from "@/components/settings/api-keys-settings";
 
 export default function MinhasChavesPage() {
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 p-4 lg:p-6">
+    <PageBody>
       <Link
         href="/inteligencia"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -20,6 +21,6 @@ export default function MinhasChavesPage() {
         Voltar para o Intelligence
       </Link>
       <ApiKeysSettings personal />
-    </div>
+    </PageBody>
   );
 }

@@ -9,6 +9,7 @@ import {
   HelpCircle
 } from "lucide-react";
 import { PageBody } from "@/components/ddm/page-toolbar";
+import { PageHeader } from "@/components/ddm/page-header";
 
 type HelpTabId = "whatsapp" | "ai" | "campaigns" | "pipeline" | "faq";
 
@@ -43,12 +44,7 @@ export default function HelpPage() {
 
   return (
     <PageBody className="gap-4">
-      <div className="flex animate-ddm-up flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Ajuda</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Guia do usuário e primeiros passos.
-        </p>
-      </div>
+      <PageHeader>Guia do usuário e primeiros passos.</PageHeader>
 
       {/* Seletor de tópicos (trilho segmentado do design system DDM) */}
       <div

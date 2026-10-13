@@ -57,6 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { PageHeader } from "@/components/ddm/page-header";
 
 /**
  * Flows list page.
@@ -393,15 +394,9 @@ function FlowsList() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <div className="flex items-center gap-2">
-          <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Fluxos</h2>
-          <StatusChip tone="warn">Beta</StatusChip>
-        </div>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Conversas ramificadas e orientadas por botões no WhatsApp — menus, FAQs e triagem antes do atendimento humano.
-        </p>
-      </div>
+      <PageHeader badge={<StatusChip tone="warn">Beta</StatusChip>}>
+        Conversas ramificadas e orientadas por botões no WhatsApp — menus, FAQs e triagem antes do atendimento humano.
+      </PageHeader>
 
       {!loading && flows.length > 0 && (
         <KpiStrip

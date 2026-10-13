@@ -66,6 +66,7 @@ import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/ta
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { usePermission } from "@/hooks/use-permission";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/ddm/page-header";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -405,12 +406,7 @@ export default function CanaisPage() {
   return (
     <PageBody>
       {/* Cabeçalho (redesenho DDM) */}
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Canais</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Linhas e canais conectados — WhatsApp, Instagram, Messenger e Webchat, com o cliente de cada linha.
-        </p>
-      </div>
+      <PageHeader>Linhas e canais conectados — WhatsApp, Instagram, Messenger e Webchat, com o cliente de cada linha.</PageHeader>
 
       {!loading && !loadError && configs.length > 0 && (
         <KpiStrip

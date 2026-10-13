@@ -49,6 +49,7 @@ import {
   type CatalogPermission,
   type RoleItem,
 } from '@/lib/roles/editor';
+import { PageHeader } from '@/components/ddm/page-header';
 
 interface RolesPayload {
   roles: RoleItem[];
@@ -124,12 +125,7 @@ export function PapeisView() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Usuários</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Cargos de sistema e personalizados. Os cargos controlam o que cada usuário pode fazer.
-        </p>
-      </div>
+      <PageHeader>Cargos de sistema e personalizados. Os cargos controlam o que cada usuário pode fazer.</PageHeader>
       <UsuariosTabs />
 
       {loadError === 'forbidden' ? (

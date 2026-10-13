@@ -967,7 +967,7 @@ export default function EquipeDetailPage({
         </button>
         <div className="min-w-0 flex-1">
           {isReadOnly ? (
-            <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{team.name}</h1>
+            <h2 className="font-heading text-xl font-semibold leading-tight tracking-[-0.02em] text-foreground">{team.name}</h2>
           ) : isEditingName ? (
             <div className="flex items-center gap-1.5">
               <Input
@@ -1004,7 +1004,7 @@ export default function EquipeDetailPage({
               className="group flex items-center gap-2 text-left"
               title="Clique para editar o nome"
             >
-              <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{team.name}</h1>
+              <h2 className="font-heading text-xl font-semibold leading-tight tracking-[-0.02em] text-foreground">{team.name}</h2>
               <Pencil className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </button>
           )}

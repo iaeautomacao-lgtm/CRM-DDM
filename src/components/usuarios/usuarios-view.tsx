@@ -50,6 +50,7 @@ import { ROLE_META } from '@/components/settings/role-meta';
 import { UsuariosTabs } from './usuarios-tabs';
 import { RoleSelect } from './role-select';
 import { assignableRoles, levelOf, myLevel, roleErrorMessage, type RoleItem } from '@/lib/roles/editor';
+import { PageHeader } from '@/components/ddm/page-header';
 
 interface Member {
   user_id: string;
@@ -478,12 +479,7 @@ export function UsuariosView() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Usuários</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Pessoas com acesso a esta conta. Os cargos controlam o que cada usuário pode fazer.
-        </p>
-      </div>
+      <PageHeader>Pessoas com acesso a esta conta. Os cargos controlam o que cada usuário pode fazer.</PageHeader>
       <UsuariosTabs />
 
       {loadError === 'forbidden' ? (
