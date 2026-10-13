@@ -57,7 +57,7 @@ export function VoipCallOverlay({
   if (!activeCall && !incomingCall) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Hidden Audio Player for WebRTC remote stream */}
       <audio ref={audioRef} autoPlay className="hidden" />
 
@@ -69,7 +69,7 @@ export function VoipCallOverlay({
           aria-labelledby="voip-incoming-title"
           className="w-full max-w-80 rounded-2xl border border-border bg-card p-6 text-center shadow-2xl animate-in zoom-in-95 duration-200"
         >
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 animate-pulse" aria-hidden="true">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success-soft text-success animate-pulse" aria-hidden="true">
             <Phone className="h-8 w-8" />
           </div>
           <h3 id="voip-incoming-title" className="mt-4 text-lg font-bold text-foreground">Ligação Recebida</h3>
@@ -88,7 +88,7 @@ export function VoipCallOverlay({
             </Button>
             <Button
               onClick={onAccept}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500 p-0 text-white hover:bg-emerald-600"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-success-fill p-0 text-white hover:bg-success-fill/90"
               title="Atender Chamada"
               aria-label="Atender chamada"
             >
@@ -108,7 +108,7 @@ export function VoipCallOverlay({
         >
           <div aria-hidden="true" className={cn(
             "mx-auto flex h-16 w-16 items-center justify-center rounded-full text-white",
-            activeCall.status === "active" ? "bg-emerald-500" : "bg-primary animate-pulse"
+            activeCall.status === "active" ? "bg-success-fill" : "bg-primary animate-pulse"
           )}>
             {activeCall.status === "active" ? (
               <Volume2 className="h-8 w-8" />
@@ -125,7 +125,7 @@ export function VoipCallOverlay({
           <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground" role="status">
             <span aria-hidden="true" className={cn(
               "h-2 w-2 rounded-full",
-              activeCall.status === "active" ? "bg-emerald-500 animate-ping" : "bg-amber-500"
+              activeCall.status === "active" ? "bg-success-fill animate-ping" : "bg-warning-fill"
             )} />
             <span>{CALL_STATUS_LABELS[activeCall.status] ?? activeCall.status}</span>
           </div>

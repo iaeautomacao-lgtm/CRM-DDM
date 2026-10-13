@@ -71,10 +71,10 @@ function StatusIcon({ status }: { status: Message["status"] }) {
     case "delivered":
       return <CheckCheck role="img" aria-label="Entregue" className="h-3 w-3 text-muted-foreground" />;
     case "read":
-      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-sky-400 [html[data-mode=light]_&]:text-sky-600" />;
+      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-info" />;
     case "failed":
       return (
-        <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-xs font-medium text-white">
+        <span className="inline-flex items-center gap-0.5 rounded bg-danger-fill px-1 text-xs font-medium text-white">
           <XCircle className="h-3 w-3" aria-hidden="true" />
           Falha no envio
         </span>

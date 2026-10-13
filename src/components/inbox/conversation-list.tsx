@@ -94,11 +94,11 @@ const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
 ];
 
 export const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
-  whatsapp: { label: "WhatsApp", className: "text-emerald-400 [html[data-mode=light]_&]:text-emerald-700 bg-emerald-500/10 border-emerald-500/20" },
-  webchat: { label: "Webchat", className: "text-cyan-400 [html[data-mode=light]_&]:text-cyan-700 bg-cyan-500/10 border-cyan-500/20" },
-  instagram: { label: "Instagram", className: "text-pink-400 [html[data-mode=light]_&]:text-pink-700 bg-pink-500/10 border-pink-500/20" },
-  messenger: { label: "Messenger", className: "text-blue-400 [html[data-mode=light]_&]:text-blue-700 bg-blue-500/10 border-blue-500/20" },
-  sms: { label: "SMS", className: "text-violet-400 [html[data-mode=light]_&]:text-violet-700 bg-violet-500/10 border-violet-500/20" },
+  whatsapp: { label: "WhatsApp", className: "text-success bg-success-soft border-success/20" },
+  webchat: { label: "Webchat", className: "text-info bg-info-soft border-info/20" },
+  instagram: { label: "Instagram", className: "text-danger bg-danger-soft border-danger/20" },
+  messenger: { label: "Messenger", className: "text-primary-text bg-primary-soft border-primary/20" },
+  sms: { label: "SMS", className: "text-warning bg-warning-soft border-warning/20" },
 };
 
 // Persisted independently per section so collapsing one doesn't touch
