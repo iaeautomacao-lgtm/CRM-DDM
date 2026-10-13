@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,37 +6,51 @@ vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ mode: 'light', toggleMo
 
 import { openApiSpec } from '@/lib/api/v1/openapi';
 import { buildGuideExamples } from '@/lib/api/v1/docs-guide';
-import { SCALAR_SRC, SCALAR_VERSION } from './api-reference';
+import { buildReference } from '@/lib/api/v1/docs-reference';
 import { ApiDocsPage } from './api-docs-page';
 
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
+const APP = 'https://crm.exemplo.com';
 
 describe('/docs/api — renderiza sem sessão', () => {
-  const html = renderToString(createElement(ApiDocsPage, { examples: buildGuideExamples('https://crm.exemplo.com') }));
+  const html = renderToString(createElement(ApiDocsPage, { examples: buildGuideExamples(APP), reference: buildReference(APP) }));
   const text = html
     .replace(/<[^>]+>/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&#x27;/g, "'")
     .replace(/&quot;/g, '"');
 
-  it('mostra a marca, as duas abas e todas as seções do guia', () => {
+  it('mostra a marca, a busca, "Comece aqui" e "Erros e limites"', () => {
     expect(text).toContain('Documentação da API');
-    expect(text).toContain('Guia');
-    expect(text).toContain('Referência');
-    for (const title of ['Comece aqui', 'Disparar campanha', 'Acompanhar a campanha', 'Envio avulso', 'Relatórios para BI', 'Erros e limites']) {
-      expect(text).toContain(title);
-    }
+    expect(html).toContain('aria-label="Buscar na documentação"');
+    expect(text).toContain('Comece aqui');
+    expect(text).toContain('Erros e limites');
     expect(text).toContain('https://crm.exemplo.com/api/v1');
   });
 
-  it('o guia cita toda rota da spec (falha se surgir rota v1 sem guia)', () => {
-    for (const [path, item] of Object.entries(openApiSpec.paths as Record<string, Record<string, unknown>>)) {
+  it('explica a autenticação: onde criar a chave, o formato e os escopos', () => {
+    expect(text).toContain('Integrações → Chaves de API');
+    expect(text).toContain('Authorization: Bearer SUA_CHAVE_DE_API');
+    expect(text).toContain('wacrm_live_');
+    expect(text).toContain('campaigns:write');
+  });
+
+  it('todo grupo e toda rota da spec têm âncora na página (falha se surgir rota sem bloco)', () => {
+    for (const tag of openApiSpec.tags) expect(text).toContain(tag.name);
+    for (const item of Object.values(openApiSpec.paths as Record<string, Record<string, { operationId?: string }>>)) {
       for (const method of METHODS) {
-        if (!item[method]) continue;
-        const literal = `${method.toUpperCase()} ${path}`;
-        expect(text.includes(literal), `o guia não menciona "${literal}"`).toBe(true);
+        const op = item[method];
+        if (!op) continue;
+        expect(html.includes(`id="${op.operationId}"`), `sem bloco/âncora para ${op.operationId}`).toBe(true);
       }
     }
+  });
+
+  it('cada rota mostra método, caminho e o exemplo de requisição', () => {
+    expect(text).toContain('/disparador/campaigns');
+    expect(html).toContain('role="tablist"');
+    expect(text).toContain('Python');
+    expect(text).toContain('Respostas e erros');
   });
 
   it('Meta × WAHA lado a lado e as dicas de idempotência/24h', () => {
@@ -47,21 +60,11 @@ describe('/docs/api — renderiza sem sessão', () => {
     expect(text).toContain('24 horas');
     expect(text).toContain('120 por minuto');
   });
-});
 
-describe('referência (Scalar) e CSP', () => {
-  const config = readFileSync('src/lib/security/csp.ts', 'utf8'); // a política de CSP mora em csp.ts (o next.config.ts só a usa)
-  it('versão fixada, só o caminho do Scalar liberado e Swagger removido', () => {
-    expect(SCALAR_SRC).toContain(`@scalar/api-reference@${SCALAR_VERSION}/`);
-    expect(config).toContain(`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${SCALAR_VERSION}/`);
-    expect(config.toLowerCase()).not.toContain('swagger');
-    expect(config).not.toMatch(/cdn\.jsdelivr\.net\/(?!npm\/@scalar\/api-reference@)/);
-  });
-  it('sem fontes externas, sem telemetria e sem envio de requisições reais', () => {
-    const src = readFileSync('src/components/docs/api-reference.tsx', 'utf8');
-    expect(src).toContain('withDefaultFonts: false');
-    expect(src).toContain('hideTestRequestButton: true');
-    expect(src).toContain('telemetry: false');
+  it('não vaza segredo: só o marcador da chave', () => {
+    expect(html).not.toMatch(/wacrm_live_[A-Za-z0-9]{8,}/);
+    expect(html).not.toMatch(/whsec_[A-Za-z0-9]{8,}/);
+    expect(text).toContain('SUA_CHAVE_DE_API');
   });
 });
 
