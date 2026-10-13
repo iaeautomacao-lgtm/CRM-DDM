@@ -361,12 +361,12 @@ export function ApiGuide({ examples }: { examples: GuideExamples }) {
           head={['Rota', 'Finalidade']}
           rows={[
             [<C key="1">GET /conversations</C>, 'Lista conversas com filtros por data, operador, equipe e status.'],
-            [<C key="2">GET /conversations/{'{id}'}/messages</C>, 'Todo o histórico de mensagens, em ordem cronológica, página a página.'],
+            [<C key="2">{'GET /conversations/{id}/messages'}</C>, 'Todo o histórico de mensagens, em ordem cronológica, página a página.'],
             [<C key="3">POST /conversations/messages/batch</C>, 'Até 20 conversas com cursores independentes e no máximo 100 mensagens por conversa.'],
-            [<C key="4">GET /conversations/{'{id}'}/messages/{'{messageId}'}/media</C>, 'URL privada de mídia do chat, assinada por 60 segundos.'],
+            [<C key="4">{'GET /conversations/{id}/messages/{messageId}/media'}</C>, 'URL privada de mídia do chat, assinada por 60 segundos.'],
             [<C key="5">POST /conversations/exports</C>, 'Solicita job de exportação completa em NDJSON.gz.'],
-            [<C key="6">GET /conversations/exports/{'{id}'}</C>, 'Mostra progresso e partes concluídas da exportação.'],
-            [<C key="7">GET /conversations/exports/{'{id}'}/parts/{'{partId}'}/download</C>, 'Retorna URL temporária para baixar cada parte privada.'],
+            [<C key="6">{'GET /conversations/exports/{id}'}</C>, 'Mostra progresso e partes concluídas da exportação.'],
+            [<C key="7">{'GET /conversations/exports/{id}/parts/{partId}/download'}</C>, 'Retorna URL temporária para baixar cada parte privada.'],
           ]}
         />
         <ul className="max-w-[68ch] list-disc space-y-1.5 pl-5 text-sm text-foreground/90">
