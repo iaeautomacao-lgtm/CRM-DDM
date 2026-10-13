@@ -85,23 +85,23 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
   // cada número abre no "i" (InfoHint: clique, teclado ou toque).
   return (
     <KpiStrip
-      ariaLabel="Indicadores do pipeline"
+      ariaLabel="Indicadores do funil"
       minWidth={150}
       items={[
         {
           label: "Total de negócios",
           value: <CountUp value={stats.totalCount} format={count} />,
-          info: "Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos.",
+          info: "Contagem de todos os negócios neste funil que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos.",
         },
         {
-          label: "Valor do pipeline",
+          label: "Valor do funil",
           value: <CountUp value={stats.totalValue} format={money} />,
-          info: "Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido.",
+          info: "Soma dos valores de todos os negócios neste funil, excluindo os marcados como Perdido.",
         },
         {
           label: "Ticket médio",
           value: <CountUp value={stats.avgValue} format={money} />,
-          info: "Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido.",
+          info: "Valor do funil dividido pelo Total de Negócios — o valor médio de um único negócio não perdido.",
         },
         {
           label: "Valor ponderado",
