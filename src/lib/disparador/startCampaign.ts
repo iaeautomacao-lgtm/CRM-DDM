@@ -1,6 +1,7 @@
 import { recordPrepareRetry, resetPrepareBackoff } from "@/lib/disparador/prepare-backoff";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
+import { loadKnownInvalidContactIds } from "@/lib/disparador/known-invalid";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
@@ -40,7 +41,7 @@ export interface StartCampaignOptions {
 }
 
 export type StartCampaignResult =
-  | { ok: true; enqueued: number }
+  | { ok: true; enqueued: number; /** Contatos pulados por telefone inválido conhecido (migration 335): "N números inválidos conhecidos ignorados". */ skippedKnownInvalid?: number }
   | { ok: false; status: number; error: string; code?: typeof RED_QUALITY_CODE; channels?: RedChannel[] };
 
 // Extraído de src/app/api/disparador/campaigns/[id]/start/route.ts —
@@ -505,6 +506,12 @@ async function prepareCampaign(
     // exibido como "na Blacklist" é exatamente o que é removido da fila.
     const blacklistSet = await loadBlacklistKeySet(supabaseAdmin());
 
+    // Número inválido conhecido (migration 335): o telefone principal que a Meta já recusou como inválido numa campanha anterior não é
+    // reenviado (gasta vaga/ritmo e piora a qualidade do número). A marca só vale enquanto o telefone do contato não mudou; contato com
+    // telefone alternativo utilizável segue (a escada de telefones resolve). Opt-out e blacklist não passam por aqui.
+    const knownInvalid = await loadKnownInvalidContactIds(supabaseAdmin(), accountId, new Set(contacts.map((c) => String(c.id))));
+    let skippedKnownInvalid = 0;
+
     // Contatos que já receberam com sucesso numa tentativa anterior desta
     // campanha (ex: a campanha falhou no meio — chunk de insert quebrou,
     // deploy no meio do processamento — e o usuário reiniciou). O DELETE
@@ -696,6 +703,11 @@ async function prepareCampaign(
       // Skip contatos que já receberam com sucesso numa tentativa
       // anterior desta mesma campanha (ver alreadySentContactIds acima).
       if (alreadySentContactIds.has(contact.id)) continue;
+
+      if (knownInvalid.skip.has(contact.id)) {
+        skippedKnownInvalid++;
+        continue;
+      }
 
       // Distribuição round-robin entre os canais selecionados — cada canal
       // recebe uma fatia igual dos contatos, em vez do sorteio aleatório
@@ -980,6 +992,16 @@ async function prepareCampaign(
     }
     state.preparing = false;
 
-    return { ok: true, enqueued };
+    if (skippedKnownInvalid > 0) {
+      void writeLog({
+        account_id: accountId,
+        level: "info",
+        source: "disparador",
+        event: "campaign_start_known_invalid_skipped",
+        message: `${skippedKnownInvalid} números inválidos conhecidos ignorados no início da campanha`,
+        payload: { campaign_id: campaignId, skipped: skippedKnownInvalid },
+      });
+    }
+    return { ok: true, enqueued, ...(skippedKnownInvalid > 0 ? { skippedKnownInvalid } : {}) };
   }
 }
