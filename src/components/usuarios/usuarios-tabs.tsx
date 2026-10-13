@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/usuarios", label: "Usuários" },
-  { href: "/usuarios/papeis", label: "Papéis e permissões" },
+  { href: "/usuarios/papeis", label: "Cargos e permissões" },
 ] as const;
 
-/** Abas da área de pessoas: lista de usuários e papéis (sistema e personalizados). */
+/** Abas da área de pessoas: lista de usuários e cargos (sistema e personalizados). */
 export function UsuariosTabs() {
   const pathname = usePathname();
   return (

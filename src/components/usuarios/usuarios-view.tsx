@@ -48,7 +48,8 @@ import { BulkImportMembersDialog } from '@/components/settings/bulk-import-membe
 import { InviteMemberDialog } from '@/components/settings/invite-member-dialog';
 import { ROLE_META } from '@/components/settings/role-meta';
 import { UsuariosTabs } from './usuarios-tabs';
-import { roleErrorMessage, type RoleItem } from '@/lib/roles/editor';
+import { RoleSelect } from './role-select';
+import { assignableRoles, levelOf, myLevel, roleErrorMessage, type RoleItem } from '@/lib/roles/editor';
 
 interface Member {
   user_id: string;
@@ -130,7 +131,7 @@ function lastAccessLabel(m: Pick<Member, 'last_active_at' | 'last_sign_in_at'>, 
 function RoleChip({ role, customName }: { role: AccountRole; customName?: string | null }) {
   if (customName) {
     return (
-      <StatusChip tone="info" dot={false} title="Papel personalizado">
+      <StatusChip tone="info" dot={false} title="Cargo personalizado">
         {customName}
       </StatusChip>
     );
@@ -144,7 +145,7 @@ function RoleChip({ role, customName }: { role: AccountRole; customName?: string
 
 export function UsuariosView() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, me } = usePermissions();
   const canManageMembers = can('members.manage');
   const canInvite = can('members.invite');
   const canBulkInvite = can('members.bulk_invite');
@@ -290,7 +291,7 @@ export function UsuariosView() {
       if (!res.ok) {
         apply(previousRole);
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Falha ao atualizar papel');
+        toast.error(payload.error || 'Falha ao atualizar cargo');
         return;
       }
       toast.success(`${member.full_name || 'Usuário'} atualizado para ${ROLE_META[nextRole].label}`);
@@ -313,7 +314,7 @@ export function UsuariosView() {
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(roleErrorMessage(payload, 'Falha ao atualizar papel'));
+        toast.error(roleErrorMessage(payload, 'Falha ao atualizar cargo'));
         return;
       }
       toast.success(`${member.full_name || 'Usuário'} atualizado`);
@@ -400,7 +401,7 @@ export function UsuariosView() {
       toast.success(`Propriedade transferida para ${transferTarget.full_name || 'o usuário'}`);
       setTransferTarget(null);
       setSelectedId(null);
-      // Seu papel mudou para Administrador: recarrega para refazer as permissões.
+      // Seu cargo mudou para Administrador: recarrega para refazer as permissões.
       window.location.reload();
     } catch (err) {
       console.error('[UsuariosView] transfer ownership error:', err);
@@ -471,13 +472,16 @@ export function UsuariosView() {
 
   const selectedCanEdit = !!selected && canManageMembers && selected.role !== 'owner' && selected.user_id !== user?.id;
   const selectedCanTransfer = !!selected && canTransferOwnership && selected.role !== 'owner' && selected.user_id !== user?.id;
+  // Cargo atual do membro (personalizado ou de sistema) e se está abaixo do meu nível (o servidor exige para trocar).
+  const memberRoleItem = selected ? customRoleByMember.get(selected.user_id) ?? roles.find((r) => r.kind === 'system' && r.key === selected.role) ?? null : null;
+  const memberBelowMe = !!memberRoleItem && levelOf(memberRoleItem) < myLevel(me);
 
   return (
     <PageBody>
       <div className="flex flex-col gap-1.5 pt-1">
         <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Usuários</h2>
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Pessoas com acesso a esta conta. Os papéis controlam o que cada usuário pode fazer.
+          Pessoas com acesso a esta conta. Os cargos controlam o que cada usuário pode fazer.
         </p>
       </div>
       <UsuariosTabs />
@@ -545,7 +549,7 @@ export function UsuariosView() {
                 className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
               />
             </label>
-            <Segmented ariaLabel="Filtrar por papel" size="lg" value={filter} onChange={setFilter} options={segOptions} />
+            <Segmented ariaLabel="Filtrar por cargo" size="lg" value={filter} onChange={setFilter} options={segOptions} />
             {canManageMembers && filter !== 'invites' && (
               <Segmented
                 ariaLabel="Filtrar por status"
@@ -594,7 +598,7 @@ export function UsuariosView() {
                     <thead>
                       <tr>
                         <Th>Convite</Th>
-                        <Th>Papel</Th>
+                        <Th>Cargo</Th>
                         <Th>Validade</Th>
                         <Th align="right">
                           <span className="sr-only">Ações</span>
@@ -638,7 +642,7 @@ export function UsuariosView() {
                 <thead>
                   <tr>
                     <Th>Usuário</Th>
-                    <Th>Papel</Th>
+                    <Th>Cargo</Th>
                     <Th className="hidden md:table-cell">Equipe</Th>
                     <Th>Situação</Th>
                     {canManageMembers && (
@@ -761,31 +765,26 @@ export function UsuariosView() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <dt className="text-xs font-semibold text-muted-foreground">Papel</dt>
+              <dt className="text-xs font-semibold text-muted-foreground">Cargo</dt>
               <dd>
                 {selectedCanEdit && canAssignRoles && roles.length > 0 ? (
-                  <Select
-                    value={customRoleByMember.get(selected.user_id)?.id ?? roles.find((r) => r.kind === 'system' && r.key === selected.role)?.id ?? ''}
-                    onValueChange={(v) => v && void handleAssignRole(selected, v)}
-                  >
-                    <SelectTrigger className="w-full" disabled={pendingMemberAction === selected.user_id}>
-                      <SelectValue>{(value: string | null) => roles.find((r) => r.id === value)?.name ?? ''}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles
-                        .filter((r) => r.key !== 'owner')
-                        .map((r) => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.name}
-                            {r.kind === 'custom' ? ' (personalizado)' : ''}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  memberBelowMe ? (
+                    <RoleSelect
+                      value={memberRoleItem?.id ?? null}
+                      roles={assignableRoles(roles, myLevel(me))}
+                      disabled={pendingMemberAction === selected.user_id}
+                      onChange={(r) => void handleAssignRole(selected, r.id)}
+                    />
+                  ) : (
+                    <span className="text-foreground">
+                      {memberRoleItem?.name ?? ROLE_META[selected.role].label}
+                      <span className="ml-1.5 text-xs text-muted-foreground">(cargo do seu nível ou acima: você não altera)</span>
+                    </span>
+                  )
                 ) : selectedCanEdit && customRoleByMember.has(selected.user_id) ? (
                   <span className="text-foreground">
                     {customRoleByMember.get(selected.user_id)?.name}
-                    <span className="ml-1.5 text-xs text-muted-foreground">(papel personalizado: só o proprietário altera)</span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">(cargo personalizado: sem permissão para alterar)</span>
                   </span>
                 ) : selectedCanEdit ? (
                   <Select value={selected.role} onValueChange={(v) => v && void handleRoleChange(selected, v as AccountRole)}>
@@ -832,7 +831,7 @@ export function UsuariosView() {
             <AlertDialogTitle>{statusTarget?.active ? 'Reativar usuário?' : 'Desativar usuário?'}</AlertDialogTitle>
             <AlertDialogDescription>
               {statusTarget?.active
-                ? `${statusTarget.member.full_name || 'Este usuário'} volta a poder entrar na conta com o papel que já tinha.`
+                ? `${statusTarget.member.full_name || 'Este usuário'} volta a poder entrar na conta com o cargo que já tinha.`
                 : `${statusTarget?.member.full_name || 'Este usuário'} perde o acesso agora: as sessões abertas caem, o login é bloqueado e a pessoa sai da distribuição de conversas. O histórico dela é mantido e você pode reativar depois.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
