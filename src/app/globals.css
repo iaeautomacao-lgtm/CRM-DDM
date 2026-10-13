@@ -72,6 +72,13 @@
   --color-info-soft: var(--info-soft);
   --color-danger: var(--destructive);
   --color-danger-soft: var(--danger-soft);
+  /* Preenchimento semântico do DS (pontos de presença, ícones, barras): as cores
+   * puras do DS, iguais nos dois modos. No claro success (2,9:1) e warning (2,2:1)
+   * ficam abaixo de 3:1: use sempre com texto ou rótulo ao lado. Texto usa --success etc. */
+  --color-success-fill: #2bae66;
+  --color-warning-fill: #e8a100;
+  --color-danger-fill: #d8362f;
+  --color-info-fill: #1f7ae0;
   --color-neutral-soft: var(--neutral-soft);
   --color-bubble-in: var(--bubble-in);
   --color-bubble-in-border: var(--bubble-in-border);
@@ -376,7 +383,7 @@ html[data-mode="dark"][data-theme] {
 }
 
 html[data-mode="light"][data-theme] {
-  --primary-text: color-mix(in srgb, var(--primary) 76%, black);
+  --primary-text: color-mix(in srgb, var(--primary) 66%, black);
   --primary-soft: color-mix(in srgb, var(--primary) 8%, white);
   --primary-soft-2: color-mix(in srgb, var(--primary) 24%, white);
   --bubble-out: color-mix(in srgb, var(--primary) 7%, white);
@@ -390,7 +397,8 @@ html[data-mode="dark"][data-theme="ddm"] {
 }
 
 html[data-mode="light"][data-theme="ddm"] {
-  --primary-text: #c23e00;
+  /* Texto da marca no claro: 4,5:1+ sobre soft (5,97), soft-2 (4,95), branco e creme. */
+  --primary-text: #a83800;
   --primary-soft: #fff3ec;
   --primary-soft-2: #ffd9c5;
   --bubble-out: #fff3ec;

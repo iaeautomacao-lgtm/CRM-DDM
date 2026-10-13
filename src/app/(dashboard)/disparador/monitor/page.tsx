@@ -60,7 +60,7 @@ function MonitorKpi(props: { title: string; value: ReactNode; sub?: ReactNode; t
       </span>
       <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">{props.value}</span>
       {props.bar != null && (
-        <span className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3" role="presentation">
+        <span className="h-2 w-full overflow-hidden rounded-full bg-muted" role="presentation">
           <span
             className={cn(
               "block h-full origin-left animate-ddm-bar rounded-full transition-[width] duration-500",
@@ -394,7 +394,7 @@ export default function MonitorV2Page() {
                         {c.pauseReason && <p className="m-0 mt-1 whitespace-normal text-[11px] text-danger">{c.pauseReason}</p>}
                       </Td>
                       <Td>
-                        <span className="block h-1.5 w-full overflow-hidden rounded-full bg-surface-3" role="presentation">
+                        <span className="block h-2 w-full overflow-hidden rounded-full bg-muted" role="presentation">
                           <span
                             className="block h-full origin-left animate-ddm-bar rounded-full bg-primary transition-[width] duration-500"
                             style={{ width: `${Math.max(c.progressPct > 0 ? 2 : 0, c.progressPct)}%` }}
