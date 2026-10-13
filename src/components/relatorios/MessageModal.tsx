@@ -22,14 +22,14 @@ export function MessageModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" showCloseButton={false}>
-        <div className="-mx-4 -mt-4 mb-2 flex items-center justify-between rounded-t-xl bg-[#3B3DBF] px-4 py-3">
-          <DialogTitle className="flex items-center gap-2 text-white">
+        <div className="-mx-4 -mt-4 mb-2 flex items-center justify-between rounded-t-xl bg-primary-solid px-4 py-3">
+          <DialogTitle className="flex items-center gap-2 text-primary-foreground">
             <MessageCircle className="size-4" />
             Mensagem
           </DialogTitle>
           <DialogClose
             render={
-              <button type="button" className="text-white/80 hover:text-white" aria-label="Fechar" />
+              <button type="button" className="text-primary-foreground/80 hover:text-primary-foreground" aria-label="Fechar" />
             }
           >
             <XIcon className="size-4" />

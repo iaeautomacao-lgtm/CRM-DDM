@@ -29,10 +29,10 @@ import {
 export type { AuditLog } from "@/lib/audit/labels";
 
 export const EVENT_BADGE: Record<AuditLog["event_type"], string> = {
-  created: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
+  created: "bg-success-soft text-success",
   updated: "bg-info-soft text-info",
-  deleted: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-  action: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  deleted: "bg-danger-soft text-danger",
+  action: "bg-warning-soft text-warning",
 };
 
 /** Link para abrir o recurso, quando existe uma tela para ele. */
@@ -174,10 +174,10 @@ export function AuditDetailModal({
                   <div key={field}>
                     <p className="mb-1 text-xs font-medium text-foreground">{fieldLabel(field)}</p>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-red-50 px-3 py-2 text-sm break-words text-red-800 dark:bg-red-500/10 dark:text-red-300">
+                      <div className="rounded-lg bg-danger-soft px-3 py-2 text-sm break-words text-danger">
                         {displayValue(before)}
                       </div>
-                      <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm break-words text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+                      <div className="rounded-lg bg-success-soft px-3 py-2 text-sm break-words text-success">
                         {displayValue(after)}
                       </div>
                     </div>

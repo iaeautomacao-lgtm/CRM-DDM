@@ -210,7 +210,7 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
             {contactLabel(row.contactName, row.contactPhone)}
           </span>
           {row.wahaSession ? (
-            <MessageCircle className="size-4 shrink-0 text-[#25D366]" />
+            <MessageCircle className="size-4 shrink-0 text-success" />
           ) : (
             <Globe className="size-4 shrink-0 text-muted-foreground" />
           )}
