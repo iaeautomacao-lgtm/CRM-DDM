@@ -53,6 +53,8 @@ import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media"
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermission } from "@/hooks/use-permission";
+import Link from "next/link";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 import { useFlowEditor } from "../flow-editor-state";
@@ -2647,6 +2649,7 @@ function GoToFlowForm({
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
   const { flows, loading } = useActiveFlows();
+  const canEditFlows = usePermission("flows.edit");
   const selectedLabel = cfg.flow_id
     ? flows.find((f) => f.id === cfg.flow_id)?.name ?? cfg.flow_id
     : undefined;
@@ -2688,6 +2691,18 @@ function GoToFlowForm({
         <p className="mt-1 text-[10px] text-muted-foreground">
           Só fluxos com status &quot;ativo&quot; podem ser escolhidos aqui.
         </p>
+        {!loading && flows.length === 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Nenhum fluxo ativo.{" "}
+            {canEditFlows ? (
+              <Link href="/flows" target="_blank" rel="noopener" className="text-primary-text hover:underline">
+                Abrir fluxos
+              </Link>
+            ) : (
+              "Peça a um administrador para ativar um fluxo."
+            )}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <Switch
@@ -2728,7 +2743,10 @@ function SendTemplateForm({
     <>
       <p className="rounded-md border border-warning/30 bg-warning-soft p-2 text-[11px] text-foreground">
         Templates (HSM) só funcionam em canais Meta. Em canais WAHA, o texto
-        de fallback abaixo é enviado como mensagem comum.
+        de fallback abaixo é enviado como mensagem comum.{" "}
+        <Link href="/templates" target="_blank" rel="noopener" className="text-primary-text hover:underline">
+          Ver templates
+        </Link>
       </p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <TextRow
@@ -2791,6 +2809,7 @@ function SendFlowForm({
   currentKey: string;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
+  const canManageChannels = usePermission("channels.manage");
   const action = cfg.flow_action ?? "navigate";
   const vars = "Aceita {{vars.nome_da_variavel}}.";
   return (
@@ -2863,6 +2882,14 @@ function SendFlowForm({
         onChange={(v) => onUpdateConfig({ fallback_text: v })}
         rows={2}
       />
+      {canManageChannels && (
+        <p className="text-[11px] text-muted-foreground">
+          O Id do Flow vem do canal Meta conectado.{" "}
+          <Link href="/canais" target="_blank" rel="noopener" className="text-primary-text hover:underline">
+            Ver canais
+          </Link>
+        </p>
+      )}
       <NextNodeRow
         value={cfg.next_node_key ?? ""}
         allNodes={allNodes}
