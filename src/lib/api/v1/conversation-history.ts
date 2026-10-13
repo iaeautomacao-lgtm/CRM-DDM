@@ -67,7 +67,6 @@ export async function listConversations(db: SupabaseClient, accountId: string, p
   if (from) q=q.gte('created_at',from+'T00:00:00-03:00');
   if (to) q=q.lt('created_at',new Date(Date.parse(to+'T00:00:00-03:00')+86400000).toISOString());
   if (snapshotAt) q=q.lte('created_at',snapshotAt);
-  if (snapshotAt) q=q.lte('created_at',snapshotAt);
   if (cursor) q=q.or(`created_at.gt.${cursor.at},and(created_at.eq.${cursor.at},id.gt.${cursor.id})`);
   const {data,error}=await q; if(error)throw error;
   const records=(data??[]) as Array<{created_at:string;id:string;[key:string]:unknown}>;
@@ -83,6 +82,7 @@ async function loadVerifiedMessages(db: SupabaseClient, accountId: string, conve
   const cursor=cursorDecode(rawCursor);
   let q=db.from('messages').select(MESSAGE_FIELDS).eq('account_id',accountId).eq('conversation_id',conversationId)
     .order('created_at',{ascending:true}).order('id',{ascending:true}).limit(limit+1);
+  if (snapshotAt) q=q.lte('created_at',snapshotAt);
   if (cursor) q=q.or(`created_at.gt.${cursor.at},and(created_at.eq.${cursor.at},id.gt.${cursor.id})`);
   const {data,error}=await q;if(error)throw error;
   const items=(data??[]) as Array<{created_at:string;id:string;[key:string]:unknown}>;
