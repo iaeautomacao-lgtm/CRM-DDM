@@ -21,6 +21,7 @@ import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/account/admin-client";
 import { logAuditEvent } from "@/lib/audit/log-event";
 import { passwordResetEvent } from "@/lib/audit/security-events";
+import { revokeOtherSessions } from "@/lib/auth/sessions";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -98,10 +99,18 @@ export async function POST(
 
     if (updateErr) {
       console.error("[reset-password] updateUserById error:", updateErr);
-      return NextResponse.json(
-        { error: updateErr.message || "Falha ao redefinir a senha" },
-        { status: 500 },
-      );
+      // A mensagem do Supabase Auth fica no log; ao cliente, a genérica.
+      return NextResponse.json({ error: "Falha ao redefinir a senha" }, { status: 500 });
+    }
+
+    // Revisão de segurança 13/10: senha redefinida = TODAS as sessões do membro caem (inclusive a de quem talvez tenha
+    // descoberto a senha antiga). RPC da 290, só service role; p_keep NULL = nenhuma sessão mantida.
+    let sessionsRevoked: number | null = null;
+    try {
+      sessionsRevoked = await revokeOtherSessions(admin, userId, null);
+    } catch (err) {
+      // A senha já mudou: não desfaz. O token antigo ainda vale até expirar (~1 h), sem renovar.
+      console.error("[reset-password] falha ao encerrar as sessões do membro:", err);
     }
 
     // 20.8: quem redefiniu a senha de quem (sem a senha). Nunca derruba a resposta.
@@ -115,7 +124,7 @@ export async function POST(
       }),
     );
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, sessions_revoked: sessionsRevoked });
   } catch (err) {
     return toErrorResponse(err);
   }
