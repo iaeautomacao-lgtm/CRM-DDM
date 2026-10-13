@@ -478,8 +478,8 @@ describe('opções do agendador do cron', () => {
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 
-  it('F8: limite de taxa da Meta (130429/131048/131056) reagenda SEM consumir tentativa — nem vira permanente na última', async () => {
-    for (const code of [130429, 131048, 131056]) {
+  it('F8: limite de taxa da Meta (130429/131048/131056 e, por decisão do dono de 13/10, 80007 e 4) reagenda SEM consumir tentativa — nem vira permanente na última', async () => {
+    for (const code of [130429, 131048, 131056, 80007, 4]) {
       for (const tentativas of [0, 2, 4]) {
         mocks.updates.length = 0;
         mocks.send.mockReset().mockRejectedValue(new MetaApiError('rate limit (code ' + code + ')', code, code === 130429 ? 429 : 400));
