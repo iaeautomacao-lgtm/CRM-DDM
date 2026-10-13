@@ -345,7 +345,69 @@ export function ApiGuide({ examples }: { examples: GuideExamples }) {
         <CodeTabs snippets={snippets.relatorio} title="Relatório de operação" />
       </Section>
 
-      {/* 6 ─ Erros */}
+      {/* 6 ─ Conversas completas */}
+      <Section
+        id="conversas"
+        title="Conversas completas e exportações"
+        intro={
+          <>
+            Para analisar a qualidade de centenas de atendimentos sem abrir cada um no Inbox, use
+            o escopo <C>conversations:read</C>. Ele permite percorrer TODAS as mensagens
+            em ordem cronológica, incluindo IA, operador, cliente e metadados de mídia.
+            Para gerar arquivos, peça também <C>conversations:export</C>.
+          </>
+        }
+      >
+        <Table
+          head={['Rota', 'Resultado', 'Permissão']}
+          rows={[
+            [<C key="c1">GET /conversations</C>, 'Lista paginada e filtros por data, status, operador, equipe, canal e contato.', 'conversations:read'],
+            [<C key="c2">GET /conversations/{'{id}'}</C>, 'Metadados, operador e estado da conversa.', 'conversations:read'],
+            [<C key="c3">GET /conversations/{'{id}'}/messages</C>, 'Todas as mensagens sem truncamento. Siga next_cursor até null.', 'conversations:read'],
+            [<C key="c4">GET /conversations/{'{id}'}/events</C>, 'Eventos de fluxo, atribuição e auditoria, sem payload bruto de ferramentas.', 'conversations:read'],
+            [<C key="c5">POST /conversations/messages/batch</C>, 'Até 10 conversas e 100 mensagens por conversa, com paginação independente.', 'conversations:read'],
+            [<C key="c6">POST /conversations/exports</C>, 'Solicita arquivo privado NDJSON, gerado pelo cron.', 'conversations:export'],
+            [<C key="c7">GET /conversations/exports/{'{id}'}</C>, 'Consulta status e fornece link temporário para download.', 'conversations:export'],
+          ]}
+        />
+        <H3>Como ler um atendimento do início ao fim</H3>
+        <P>
+          Primeiro consulte <C>GET /conversations</C>, com
+          <C>from</C>/<C>to</C>, <C>status</C> e, se desejar,
+          <C>date_field=last_message_at</C> para incluir conversas antigas
+          movimentadas hoje. Depois consulte <C>GET /conversations/{'{id}'}/messages?limit=200</C>.
+          Cada resposta contém <C>next_cursor</C>: repita até ele chegar a <C>null</C>.
+          O limite de 200 se refere à página, não ao histórico completo.
+        </P>
+        <P>
+          A transcrição inclui textos integrais, nomes dos remetentes humanos,
+          horários, templates, IDs e referências das imagens, áudios e documentos.
+          Não recria arquivos cuja URL tenha expirado ou cujos bytes já não estejam
+          armazenados pelo provedor. Eventos de IA e transferências ficam disponíveis
+          separadamente em <C>GET /conversations/{'{id}'}/events</C>.
+        </P>
+        <H3>Consulta em lote e exportação</H3>
+        <P>
+          Para até dez atendimentos, envie <C>POST /conversations/messages/batch</C>
+          com <C>conversation_ids</C>, <C>limit_per_conversation</C>
+          e os cursores de cada atendimento. Em volumes grandes,
+          <C>POST /conversations/exports</C> aceita filtros e
+          <C>max_conversations</C> de até 500; o processamento ocorre em segundo plano.
+          Consulte <C>GET /conversations/exports/{'{id}'}</C> para obter status
+          e URL assinada de dez minutos. Arquivos expiram em 24 horas.
+        </P>
+        <Callout tone="warn" title="Proteja o conteúdo das conversas">
+          <p>
+            Essas rotas devolvem dados pessoais e informações de cobrança.
+            <C>reports:read</C> permite apenas métricas agregadas e NÃO libera
+            mensagens. Use chaves dedicadas no backend, não compartilhe arquivos
+            exportados publicamente e não guarde transcrições em logs.
+            A exportação exige a migration 194 e o cron configurado.
+          </p>
+        </Callout>
+      </Section>
+
+      {/* 7 ─ Erros */}
       <Section
         id="erros"
         title="Erros e limites"
