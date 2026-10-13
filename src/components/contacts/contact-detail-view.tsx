@@ -1195,12 +1195,13 @@ export function ContactDetailView({
               <p className="text-sm font-semibold text-foreground">{deal.title}</p>
               {deal.stage && (
                 <span
-                  className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                  style={{
-                    backgroundColor: `${deal.stage.color}20`,
-                    color: deal.stage.color,
-                  }}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-card-2 px-2 py-0.5 text-[11px] font-semibold text-foreground"
                 >
+                  <span
+                    className="size-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: deal.stage.color }}
+                    aria-hidden="true"
+                  />
                   {deal.stage.name}
                 </span>
               )}
@@ -1211,7 +1212,7 @@ export function ContactDetailView({
                 {formatCurrency(deal.value ?? 0, deal.currency || defaultCurrency)}
               </span>
               {deal.status && deal.status !== 'open' && (
-                <span className={deal.status === 'won' ? 'text-success' : 'text-danger'}>{deal.status}</span>
+                <span className={deal.status === 'won' ? 'text-success' : 'text-danger'}>{deal.status === 'won' ? 'Ganho' : deal.status === 'lost' ? 'Perdido' : deal.status}</span>
               )}
             </div>
           </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { readTextFile } from "@/lib/text/decode-text";
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -127,6 +127,7 @@ export function ImportModal({
   const supabase = createClient();
   const { accountId, canEditSettings } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resultTitleRef = useRef<HTMLParagraphElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedContactRow[]>([]);
@@ -142,6 +143,11 @@ export function ImportModal({
     failed: number;
     tagsAssigned: number;
   } | null>(null);
+
+  // Ao concluir, leva o foco ao título do resultado (leitores de tela e teclado).
+  useEffect(() => {
+    if (result) resultTitleRef.current?.focus();
+  }, [result]);
 
   function reset() {
     setFile(null);
@@ -589,7 +595,13 @@ export function ImportModal({
 
           {result && (
             <div role="status" className="rounded-xl border border-border bg-background/50 p-4">
-              <p className="text-sm font-medium text-popover-foreground">Importação concluída</p>
+              <p
+                ref={resultTitleRef}
+                tabIndex={-1}
+                className="text-sm font-medium text-popover-foreground outline-none"
+              >
+                Importação concluída
+              </p>
               <div className="mt-3 flex flex-wrap gap-3">
                 {result.imported > 0 && (
                   <div className="text-primary flex items-center gap-1.5 text-sm">

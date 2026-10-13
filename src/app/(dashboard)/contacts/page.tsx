@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { cn, normalizeForSearch } from '@/lib/utils';
 import type { Contact, Tag, ContactTag } from '@/types';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -16,13 +16,15 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Popover,
   PopoverContent,
@@ -454,7 +456,7 @@ export default function ContactsPage() {
             <div className="flex items-center justify-between border-b border-border px-3 py-2">
               <span className="text-[13px] font-semibold text-popover-foreground">Filtrar por etiquetas</span>
               {selectedTagIds.length > 0 && (
-                <button onClick={clearTagFilters} className="text-xs font-semibold text-primary-text hover:underline">
+                <button type="button" onClick={clearTagFilters} className="text-xs font-semibold text-primary-text hover:underline">
                   Limpar
                 </button>
               )}
@@ -523,7 +525,7 @@ export default function ContactsPage() {
               </button>
             );
           })}
-          <button onClick={clearTagFilters} className="px-1 text-xs font-semibold text-primary-text hover:underline">
+          <button type="button" onClick={clearTagFilters} className="px-1 text-xs font-semibold text-primary-text hover:underline">
             Limpar
           </button>
         </div>
@@ -822,72 +824,66 @@ export default function ContactsPage() {
       )}
 
       {/* Delete Confirmation */}
-      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-popover-foreground">Excluir Contato</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir contato</AlertDialogTitle>
+            <AlertDialogDescription>
               Tem certeza que deseja excluir{' '}
               <span className="text-popover-foreground font-medium">
                 {deleteTarget?.name || deleteTarget?.phone}
               </span>
               ? Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteConfirmOpen(false)}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
               disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDelete();
+              }}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
               Excluir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Bulk Delete Confirmation */}
-      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-popover-foreground">
-              Excluir {selected.size} {selected.size === 1 ? 'Contato' : 'Contatos'}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Excluir {selected.size} {selected.size === 1 ? 'contato' : 'contatos'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               Tem certeza que deseja excluir{' '}
               <span className="text-popover-foreground font-medium">
                 {selected.size} {selected.size === 1 ? 'contato' : 'contatos'}
               </span>
               ? Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setBulkDeleteOpen(false)}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleBulkDelete}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
               disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkDelete();
+              }}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
               Excluir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageBody>
   );
 }

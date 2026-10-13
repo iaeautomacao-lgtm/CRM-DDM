@@ -383,17 +383,17 @@ export function ContactForm({
                       onClick={() => toggleTag(tag.id)}
                       onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
                       aria-pressed={selected}
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card-2 px-2.5 py-0.5 text-xs font-medium text-foreground transition-colors cursor-pointer outline-none focus-visible:ring-3 focus-visible:ring-ring/50 ${
                         selected
                           ? 'ring-2 ring-primary ring-offset-1 ring-offset-border'
-                          : 'opacity-60 hover:opacity-100'
+                          : 'opacity-70 hover:opacity-100'
                       }`}
-                      style={{
-                        backgroundColor: tag.color + '20',
-                        color: tag.color,
-                        borderColor: tag.color,
-                      }}
                     >
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: tag.color }}
+                        aria-hidden="true"
+                      />
                       {tag.name}
                     </button>
                   );
