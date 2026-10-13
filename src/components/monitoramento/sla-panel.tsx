@@ -92,6 +92,7 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
             key={p}
             type="button"
             onClick={() => setDays(p)}
+            aria-pressed={days === p}
             className={cn(
               "rounded-full px-3 py-1 text-xs font-medium",
               days === p ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
@@ -100,7 +101,7 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
             {p === 1 ? "Hoje (24h)" : `${p} dias`}
           </button>
         ))}
-        <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} className="ml-auto">
+        <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} className="ml-auto" aria-label="Atualizar SLA">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>

@@ -100,6 +100,10 @@ export function QuickRepliesManager() {
   const [editing, setEditing] = useState<QuickReply | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  // Erros por campo (validação ao salvar): aparecem junto do campo, com foco no primeiro inválido.
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<'shortcut' | 'title' | 'content' | 'team', string>>>({});
+  const clearFieldError = (key: 'shortcut' | 'title' | 'content' | 'team') =>
+    setFieldErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
 
   const [deleteTarget, setDeleteTarget] = useState<QuickReply | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -169,6 +173,7 @@ export function QuickRepliesManager() {
   function openCreate() {
     setEditing(null);
     setForm(EMPTY_FORM);
+    setFieldErrors({});
     setFormOpen(true);
   }
 
@@ -181,6 +186,7 @@ export function QuickRepliesManager() {
       visibility: visibilityOf(reply),
       teamId: reply.team_id ?? '',
     });
+    setFieldErrors({});
     setFormOpen(true);
   }
 
@@ -204,24 +210,17 @@ export function QuickRepliesManager() {
   async function handleSave() {
     const title = form.title.trim();
     const content = form.content.trim();
-    if (!isValidShortcut(shortcut)) {
-      toast.error('Atalho inválido: use letras, números, "-" ou "_".');
-      return;
-    }
-    if (duplicate) {
-      toast.error(`Já existe uma resposta com o atalho /${shortcut} neste escopo.`);
-      return;
-    }
-    if (!title) {
-      toast.error('Informe um título.');
-      return;
-    }
-    if (!content) {
-      toast.error('Escreva o texto da resposta.');
-      return;
-    }
-    if (form.visibility === 'team' && !form.teamId) {
-      toast.error('Escolha a equipe que vai ver esta resposta.');
+    const errs: Partial<Record<'shortcut' | 'title' | 'content' | 'team', string>> = {};
+    if (!isValidShortcut(shortcut)) errs.shortcut = 'Atalho inválido: use letras, números, "-" ou "_".';
+    else if (duplicate) errs.shortcut = `Já existe uma resposta com o atalho /${shortcut} neste escopo.`;
+    if (!title) errs.title = 'Informe um título.';
+    if (!content) errs.content = 'Escreva o texto da resposta.';
+    if (form.visibility === 'team' && !form.teamId) errs.team = 'Escolha a equipe que vai ver esta resposta.';
+    setFieldErrors(errs);
+    const firstInvalid = (['team', 'shortcut', 'title', 'content'] as const).find((k) => errs[k]);
+    if (firstInvalid) {
+      const ids = { team: 'qr-team', shortcut: 'qr-shortcut', title: 'qr-title', content: 'qr-content' } as const;
+      document.getElementById(ids[firstInvalid])?.focus();
       return;
     }
     if (!accountId || !user) return;
@@ -507,7 +506,12 @@ export function QuickRepliesManager() {
                   id="qr-team"
                   value={form.teamId}
                   disabled={saving || !editable || !canManage}
-                  onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, teamId: e.target.value }));
+                    clearFieldError('team');
+                  }}
+                  aria-invalid={fieldErrors.team ? true : undefined}
+                  aria-describedby={fieldErrors.team ? 'qr-team-error' : undefined}
                   className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   <option value="">Selecione a equipe…</option>
@@ -518,6 +522,11 @@ export function QuickRepliesManager() {
                   ))}
                   {form.teamId && !teamNameById.has(form.teamId) && <option value={form.teamId}>Equipe atual</option>}
                 </select>
+                {fieldErrors.team && (
+                  <p id="qr-team-error" role="alert" className="text-xs text-destructive">
+                    {fieldErrors.team}
+                  </p>
+                )}
                 {teams.length === 0 && (
                   <p className="text-xs text-muted-foreground">
                     Nenhuma equipe cadastrada.{' '}
@@ -545,27 +554,45 @@ export function QuickRepliesManager() {
                 <Input
                   id="qr-shortcut"
                   value={form.shortcut}
-                  onChange={(e) => setForm((f) => ({ ...f, shortcut: e.target.value }))}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, shortcut: e.target.value }));
+                    clearFieldError('shortcut');
+                  }}
                   onBlur={() => setForm((f) => ({ ...f, shortcut: normalizeShortcut(f.shortcut) }))}
                   placeholder="boleto"
                   maxLength={QUICK_REPLY_SHORTCUT_MAX + 5}
                   className="pl-6 font-mono"
                   disabled={saving || !editable}
-                  aria-invalid={duplicate || undefined}
+                  aria-invalid={duplicate || fieldErrors.shortcut ? true : undefined}
+                  aria-describedby={duplicate || fieldErrors.shortcut ? 'qr-shortcut-error' : undefined}
                 />
               </div>
-              {duplicate && <p className="text-xs text-destructive">Já existe /{shortcut} neste escopo.</p>}
+              {(duplicate || fieldErrors.shortcut) && (
+                <p id="qr-shortcut-error" role="alert" className="text-xs text-destructive">
+                  {duplicate ? `Já existe /${shortcut} neste escopo.` : fieldErrors.shortcut}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="qr-title">Título</Label>
               <Input
                 id="qr-title"
                 value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, title: e.target.value }));
+                  clearFieldError('title');
+                }}
                 placeholder="Segunda via do boleto"
                 maxLength={QUICK_REPLY_TITLE_MAX}
                 disabled={saving || !editable}
+                aria-invalid={fieldErrors.title ? true : undefined}
+                aria-describedby={fieldErrors.title ? 'qr-title-error' : undefined}
               />
+              {fieldErrors.title && (
+                <p id="qr-title-error" role="alert" className="text-xs text-destructive">
+                  {fieldErrors.title}
+                </p>
+              )}
             </div>
           </div>
           <div className="space-y-2">
@@ -573,12 +600,22 @@ export function QuickRepliesManager() {
             <Textarea
               id="qr-content"
               value={form.content}
-              onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
+              onChange={(e) => {
+                setForm((f) => ({ ...f, content: e.target.value }));
+                clearFieldError('content');
+              }}
               placeholder="Olá, {primeiro_nome}! Segue a segunda via do seu boleto…"
               rows={6}
               maxLength={QUICK_REPLY_CONTENT_MAX}
               disabled={saving || !editable}
+              aria-invalid={fieldErrors.content ? true : undefined}
+              aria-describedby={fieldErrors.content ? 'qr-content-error' : undefined}
             />
+            {fieldErrors.content && (
+              <p id="qr-content-error" role="alert" className="text-xs text-destructive">
+                {fieldErrors.content}
+              </p>
+            )}
             {editable && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span>Inserir:</span>
@@ -588,7 +625,7 @@ export function QuickRepliesManager() {
                     type="button"
                     onClick={() => insertVariable(v.key)}
                     title={v.label}
-                    className="rounded border border-border px-1.5 py-0.5 font-mono hover:bg-muted hover:text-foreground"
+                    className="rounded border border-border px-1.5 py-0.5 font-mono outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
                     disabled={saving}
                   >
                     {v.key}

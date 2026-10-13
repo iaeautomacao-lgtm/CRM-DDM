@@ -141,7 +141,7 @@ export function ConversationDrilldown({
                 <div className="shrink-0 text-right text-muted-foreground">
                   <p>{format(new Date(r.created_at), "dd/MM HH:mm")}</p>
                   {r.waiting_min !== null ? (
-                    <p className="font-medium text-amber-700 dark:text-amber-400">aguardando {mins(r.waiting_min)}</p>
+                    <p className="font-medium text-warning">aguardando {mins(r.waiting_min)}</p>
                   ) : (
                     <p>1ª resposta {mins(r.first_response_min)}</p>
                   )}
