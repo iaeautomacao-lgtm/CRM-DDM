@@ -13,6 +13,7 @@ export const EXPORT_MAX_CONVERSATIONS = 500;
 type PagePosition = { at: string; id: string };
 export type ConversationFilters = {
   status: 'all' | 'active' | 'attending' | 'waiting' | 'open' | 'pending' | 'closed';
+  dateField: 'created_at' | 'last_message_at' | 'closed_at';
   from: string | null;
   to: string | null;
   teamId: string | null;
@@ -59,6 +60,10 @@ export function parseListOptions(input: string): ListOptions {
   if (!['all', 'active', 'attending', 'waiting', 'open', 'pending', 'closed'].includes(status)) {
     throw badRequest('Invalid conversation status');
   }
+  const dateField = p.get('date_field') || 'created_at';
+  if (!['created_at', 'last_message_at', 'closed_at'].includes(dateField)) {
+    throw badRequest('Invalid date_field');
+  }
   const from = p.get('from'), to = p.get('to');
   if (from) dateBoundary(from, false);
   if (to) dateBoundary(to, true);
@@ -79,7 +84,8 @@ export function parseListOptions(input: string): ListOptions {
   const cursor = p.get('cursor');
   if (cursor) decodeCursor(cursor); // fail before any DB read
   return {
-    status: status as ConversationFilters['status'], from, to,
+    status: status as ConversationFilters['status'],
+    dateField: dateField as ConversationFilters['dateField'], from, to,
     teamId: optionalUuid(p, 'team_id'), agentId: optionalUuid(p, 'agent_id'),
     contactId: optionalUuid(p, 'contact_id'), channel, q, limit, cursor,
   };
@@ -148,8 +154,8 @@ export function applyConversationFilters(
   else if (f.status === 'attending') q = q.in('status', ['open', 'pending']).not('assigned_agent_id', 'is', null);
   else if (f.status === 'waiting') q = q.in('status', ['open', 'pending']).is('assigned_agent_id', null);
   else if (f.status !== 'all') q = q.eq('status', f.status);
-  if (f.from) q = q.gte('created_at', dateBoundary(f.from, false));
-  if (f.to) q = q.lt('created_at', dateBoundary(f.to, true));
+  if (f.from) q = q.gte(f.dateField, dateBoundary(f.from, false));
+  if (f.to) q = q.lt(f.dateField, dateBoundary(f.to, true));
   if (f.teamId) q = q.eq('team_id', f.teamId);
   if (f.agentId) q = q.eq('assigned_agent_id', f.agentId);
   if (f.contactId) q = q.eq('contact_id', f.contactId);
