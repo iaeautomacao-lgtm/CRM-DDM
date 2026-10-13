@@ -28,14 +28,17 @@ async function request(method, path, auth = false) {
     signal: AbortSignal.timeout(16000),
   });
   const data = await response.json().catch(() => null);
-  return { status: response.status, code: data?.error?.code, data: data?.data };
+  return { status: response.status, code: data?.error?.code, data: data?.data, raw: data };
 }
 
 async function run() {
   const spec = await request('GET', '/api/v1/openapi.json');
-  const ops = spec.data ? [] : (await Promise.resolve(spec)); // spec endpoint returns a raw JSON OpenAPI body.
-  void ops;
-  check('OpenAPI public', spec.status === 200, 'HTTP ' + spec.status);
+  // /openapi.json devolve o documento OpenAPI na raiz, sem envelope data.
+  const operations = Object.values(spec.raw?.paths || {}).flatMap((item) =>
+    Object.values(item).filter((operation) => operation && typeof operation === 'object' && 'operationId' in operation)
+  );
+  check('OpenAPI public', spec.status === 200 && spec.raw?.openapi === '3.1.0' && operations.length === 12,
+    'HTTP ' + spec.status + ', operacoes ' + operations.length);
 
   const anon = [
     ['GET', '/api/v1/me'],

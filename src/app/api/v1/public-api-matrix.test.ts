@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 // Teste transversal da API pública: exerce os handlers reais, mas nunca alcança
 // um banco, provedor WhatsApp ou fila de campanhas. Os testes de operações
@@ -124,6 +126,10 @@ beforeEach(() => {
 });
 
 describe('API pública V1: matriz de autenticação e escopos em TODOS os handlers', () => {
+  it('o script de smoke externo e valido em Node sem executa-lo na CI', () => {
+    expect(() => execFileSync(process.execPath, ['--check', resolve('scripts/smoke-public-api-v1.mjs')])).not.toThrow();
+  });
+
   it('cobre 100% das 12 operações do contrato OpenAPI', async () => {
     const { openApiSpec } = await import('@/lib/api/v1/openapi');
     const specOps = Object.values(openApiSpec.paths).flatMap((entry) =>

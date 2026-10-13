@@ -4,6 +4,7 @@ Esta validação cobre a API pública do CRM DDM, em **main**. Não inclui as ce
 
 ## Execução automática
 - \`src/app/api/v1/public-api-matrix.test.ts\`: executa os **12 handlers reais** sem chave (401), com escopo insuficiente (403), confirma o escopo solicitado, garante ausência de leitura em requisições bloqueadas, valida o contrato público OpenAPI e testa retornos 200 com banco sintético nas rotas de leitura.
+- Acrescenta `src/app/api/v1/disparador/campaigns/status-route.test.ts`: valida consulta 200/404, retorno das métricas e impedimento de acesso a campanhas de outra conta.
 - Continua usando as suites existentes: \`openapi.test.ts\`, \`api-context.test.ts\`, \`extract.test.ts\`, \`extract.sql.test.ts\` (PostgreSQL PGlite), \`extract-routes.test.ts\`, \`reporting.test.ts\`, \`disparador/campaigns/route.test.ts\`, \`whatsapp/send/route.test.ts\`.
 - Executar pelo CI (\`npm run lint\`, \`npm run typecheck\`, \`npm test\`, \`npm run build\`); **nenhum teste envia mensagem real**.
 
