@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
-import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { formatInt, timeAgoPt } from "@/lib/disparador/monitor-format";
 import type { LimitsOverview, NumberLimits, RateInfo } from "@/lib/disparador/limits";
 
@@ -318,6 +318,7 @@ export default function ControlesPage() {
   const [wahaDrafts, setWahaDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [reason, setReason] = useState("");
@@ -348,9 +349,9 @@ export default function ControlesPage() {
         }
         return next;
       });
-      setError(null);
+      setLoadError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao carregar os controles");
+      setLoadError(err instanceof Error ? err.message : "Falha ao carregar os controles");
     } finally {
       setLoading(false);
     }
@@ -582,6 +583,7 @@ export default function ControlesPage() {
         </p>
       </PageToolbar>
 
+      {loadError && <ErrorState className="min-h-0 py-4" title="Não foi possível carregar os controles" hint={loadError} onRetry={() => void load()} />}
       {error && (
         <div role="alert" className="flex animate-ddm-fade items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px] text-foreground">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
