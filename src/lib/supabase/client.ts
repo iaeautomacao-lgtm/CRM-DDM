@@ -1,6 +1,7 @@
 import { createBrowserClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { authForensicsFetch, logAuthFx } from '@/lib/auth/auth-forensics'
+import { sessionCookieOptions } from '@/lib/supabase/cookie-options'
 
 // Singleton instance -- one client shared across the whole browser session.
 // Creating multiple clients causes auth-lock contention ("Lock was released
@@ -31,6 +32,7 @@ export function createClient(): SupabaseClient {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: sessionCookieOptions(),
       db: {
         schema: 'wacrm',
       },

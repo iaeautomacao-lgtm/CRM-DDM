@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { safeReturnPath } from '@/lib/auth/return-path'
 import { callbackFailurePath } from '@/lib/auth/recovery-link'
+import { sessionCookieOptions } from '@/lib/supabase/cookie-options'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -23,6 +24,7 @@ export async function GET(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
+        cookieOptions: sessionCookieOptions(),
         cookies: {
           getAll() {
             return cookieStore.getAll()
