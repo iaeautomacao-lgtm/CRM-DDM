@@ -37,6 +37,20 @@ export const BASELINE_SQL = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
 CREATE SCHEMA auth; CREATE SCHEMA wacrm;
 GRANT USAGE ON SCHEMA auth, wacrm TO anon, authenticated, service_role;
+-- Storage (016/020/023/121): a 351 remove as policies de ESCRITA de chat-media e flow-media e mantém as de leitura; aqui só reproduz as reais.
+CREATE SCHEMA storage;
+CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text, name text, owner uuid);
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+-- helper do Supabase Storage (as policies recriadas no rollback da 351 usam): pastas do caminho, sem o nome do arquivo
+CREATE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT trim_array(string_to_array(name, '/'), 1) $$;
+CREATE POLICY "Members can upload chat media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'chat-media');
+CREATE POLICY "Members can update chat media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'chat-media');
+CREATE POLICY "Members can delete chat media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'chat-media');
+CREATE POLICY "Members can upload flow media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'flow-media');
+CREATE POLICY "Members can update flow media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'flow-media');
+CREATE POLICY "Members can delete flow media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'flow-media');
+CREATE POLICY "Anyone can read flow media" ON storage.objects FOR SELECT USING (bucket_id = 'flow-media');
+CREATE POLICY "Members can read chat media" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'chat-media');
 
 CREATE TABLE auth.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text, last_sign_in_at timestamptz);
 CREATE TABLE auth.sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, created_at timestamptz DEFAULT now(),
@@ -67,7 +81,7 @@ CREATE TABLE wacrm.conversation_assignments (id uuid PRIMARY KEY DEFAULT gen_ran
   from_agent_id uuid, to_agent_id uuid, from_team_id uuid, to_team_id uuid, actor_id uuid, reason text, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE wacrm.export_history (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), file_name text);
 CREATE TABLE wacrm.internal_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id),
-  sender_id uuid NOT NULL REFERENCES auth.users(id), recipient_id uuid NOT NULL REFERENCES auth.users(id), content text NOT NULL, media_type text,
+  sender_id uuid NOT NULL REFERENCES auth.users(id), recipient_id uuid NOT NULL REFERENCES auth.users(id), content text NOT NULL, media_url text, media_type text,
   read_at timestamptz, created_at timestamptz DEFAULT now());
 CREATE TABLE wacrm.quick_replies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id) ON DELETE CASCADE,
@@ -134,6 +148,8 @@ CREATE POLICY contact_phones_select ON wacrm.contact_phones FOR SELECT USING (EX
 ALTER TABLE wacrm.contact_import_variables ENABLE ROW LEVEL SECURITY;
 CREATE POLICY contact_import_variables_select ON wacrm.contact_import_variables FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_import_variables.contact_id AND wacrm.is_account_member(c.account_id)));
 
+-- Auditoria v2 (131): a 318 confere a ASSINATURA REAL no pré-check e chama a função nos triggers de cargos; o corpo não é objeto deste teste.
+CREATE FUNCTION wacrm.audit_write(p_account uuid, p_event text, p_resource_type text, p_resource_id uuid, p_label text, p_action text, p_summary text, p_changes jsonb DEFAULT NULL, p_metadata jsonb DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$ BEGIN NULL; END $$;
 -- RPCs de relatório (a 322 reescreve o guard is_account_member(p_account_id) pela definição VIVA). Aqui só reproduzem a ASSINATURA e o
 -- número de ocorrências do guard que a 322 confere; a lógica de cada relatório não é o objeto deste teste.
 CREATE FUNCTION wacrm.get_attendance_report_by_team(p_account_id uuid, p_from timestamptz, p_to timestamptz) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
@@ -160,7 +176,7 @@ CREATE TABLE wacrm.campaigns (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), acc
 CREATE TABLE wacrm.campaign_metrics (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id));
-CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), pipeline_id uuid REFERENCES wacrm.pipelines(id));
 ALTER TABLE wacrm.campaigns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wacrm.campaign_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wacrm.disp_message_queue ENABLE ROW LEVEL SECURITY;
@@ -184,7 +200,7 @@ CREATE POLICY intelligence_tool_calls_select ON wacrm.intelligence_tool_calls FO
 CREATE TABLE wacrm.ai_prompt_versions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.ai_prompt_versions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY ai_prompt_versions_select ON wacrm.ai_prompt_versions FOR SELECT USING (wacrm.is_account_member(account_id));
-CREATE TABLE wacrm.account_invitations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.account_invitations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), role wacrm.account_role_enum NOT NULL DEFAULT 'agent', accepted_at timestamptz, accepted_by_user_id uuid);
 ALTER TABLE wacrm.account_invitations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY account_invitations_select ON wacrm.account_invitations FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE TABLE wacrm.message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
@@ -193,6 +209,28 @@ CREATE POLICY message_templates_select ON wacrm.message_templates FOR SELECT USI
 CREATE TABLE wacrm.disparador_message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.disparador_message_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY disparador_message_templates_select ON wacrm.disparador_message_templates FOR SELECT USING (wacrm.is_account_member(account_id));
+-- Tabelas de escrita da 349 (flows, automações, broadcasts, blacklist, UTM): colunas mínimas (account_id e a chave da tabela-mãe) + RLS + a leitura de hoje
+CREATE TABLE wacrm.flows (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.flows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY flows_select ON wacrm.flows FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.flow_nodes ADD COLUMN flow_id uuid REFERENCES wacrm.flows(id);
+ALTER TABLE wacrm.flow_nodes ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.automations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.automations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY automations_select ON wacrm.automations FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.automation_steps (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), automation_id uuid NOT NULL REFERENCES wacrm.automations(id));
+ALTER TABLE wacrm.automation_steps ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.broadcasts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.broadcasts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY broadcasts_select ON wacrm.broadcasts FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.broadcast_recipients (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), broadcast_id uuid NOT NULL REFERENCES wacrm.broadcasts(id));
+ALTER TABLE wacrm.broadcast_recipients ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.blacklist (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.blacklist ENABLE ROW LEVEL SECURITY;
+CREATE POLICY blacklist_select ON wacrm.blacklist FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.disparador_utm_links (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.disparador_utm_links ENABLE ROW LEVEL SECURITY;
+CREATE POLICY disparador_utm_links_all ON wacrm.disparador_utm_links FOR ALL USING (wacrm.is_account_member(account_id));
 CREATE TABLE wacrm.clients (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.clients ENABLE ROW LEVEL SECURITY;
 CREATE POLICY clients_select ON wacrm.clients FOR SELECT USING (wacrm.is_account_member(account_id));
@@ -200,6 +238,13 @@ CREATE TABLE wacrm.whatsapp_test_sends (id uuid PRIMARY KEY DEFAULT gen_random_u
 ALTER TABLE wacrm.whatsapp_test_sends ENABLE ROW LEVEL SECURITY;
 CREATE POLICY whatsapp_test_sends_select ON wacrm.whatsapp_test_sends FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE POLICY account_invitations_modify ON wacrm.account_invitations FOR ALL USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+-- api_keys (026) e ai_config (a 346 troca a policy de SELECT "membro da conta" por membro + has_perm)
+CREATE TABLE wacrm.api_keys (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), key_hash text);
+ALTER TABLE wacrm.api_keys ENABLE ROW LEVEL SECURITY;
+CREATE POLICY api_keys_select ON wacrm.api_keys FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.ai_config (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), enabled boolean NOT NULL DEFAULT false, api_key text);
+ALTER TABLE wacrm.ai_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY ai_config_select ON wacrm.ai_config FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE POLICY clients_write ON wacrm.clients FOR ALL TO authenticated USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
 CREATE TABLE wacrm.team_allowed_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id));
 ALTER TABLE wacrm.team_allowed_templates ENABLE ROW LEVEL SECURITY;
