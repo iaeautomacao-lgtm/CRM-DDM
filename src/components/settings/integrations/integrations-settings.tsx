@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { SecretsSettings } from '@/components/settings/secrets-settings';
 import { ToolsSettings } from '@/components/settings/tools-settings';
-import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
+import { AiProvidersPanel } from '@/components/settings/ai-providers-panel';
 import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
 import { SECTION_META, type IntegrationTab } from '@/components/settings/settings-sections';
 import { WebhooksSettings } from './webhooks-settings';
@@ -21,7 +21,7 @@ const PANELS: Record<IntegrationTab, () => ReactNode> = {
   secrets: () => <SecretsSettings />,
   tools: () => <ToolsSettings />,
   webhooks: () => <WebhooksSettings />,
-  ai: () => <AiAgentSettings />,
+  ai: () => <AiProvidersPanel />,
   'api-docs': () => <ApiDocsPanel />,
 };
 

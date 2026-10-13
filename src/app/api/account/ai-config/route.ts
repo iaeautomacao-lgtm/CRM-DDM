@@ -34,7 +34,7 @@ function supabaseAdmin(): SupabaseClient {
 }
 
 // Must match the constant of the same name in
-// src/components/settings/ai-agent-settings.tsx — the frontend can't
+// src/components/settings/ai-config-shared.ts — the frontend can't
 // import this file directly (it pulls in server-only Node deps via
 // supabaseAdmin/encrypt), so the literal is duplicated intentionally.
 // It's what the client sends back unchanged to mean "user didn't touch
