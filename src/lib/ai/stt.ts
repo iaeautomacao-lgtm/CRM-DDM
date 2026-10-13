@@ -9,6 +9,7 @@
 
 import { openAiUrl } from '@/lib/loadtest/gate'
 import { tryDecrypt } from '@/lib/whatsapp/encryption'
+import { consumeAiQuota } from '@/lib/ai/daily-quota'
 
 export const TRANSCRIPT_PREFIX = '🎙️ _Áudio transcrito:_ '
 export const STT_MODEL = 'whisper-1'
@@ -113,5 +114,11 @@ export async function transcribeInboundAudio(
   const key = await resolveAccountSttKey(db, accountId)
   if (!key) return { status: 'skipped', text: null }
   if (audio.byteLength > STT_MAX_BYTES) return { status: 'skipped', text: null }
+  // Cota diária da conta (migration 339): estourou ⇒ 'skipped' (a mensagem entra sem transcrição; nada é enviado à OpenAI).
+  const quota = await consumeAiQuota(db, accountId, 'stt')
+  if (!quota.allowed) {
+    console.warn(`[stt] cota diária de transcrição esgotada (conta ${accountId}): ${quota.used}/${quota.limit}`)
+    return { status: 'skipped', text: null }
+  }
   return transcribeWithKey(audio, key, { mimeType })
 }

@@ -422,6 +422,10 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "339_ai_daily_quota",
+      "kind": "registry"
     }
   ]
 }
