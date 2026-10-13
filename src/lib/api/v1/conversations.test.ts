@@ -97,6 +97,8 @@ describe('query parsing and bounds', () => {
     expect(() => parseListOptions(url('?status=hidden'))).toThrow();
     expect(() => parseListOptions(url('?agent_id=untrusted'))).toThrow();
     expect(() => parseListOptions(url('?channel=telegram'))).toThrow();
+    expect(() => parseListOptions(url('?date_field=private_column'))).toThrow();
+    expect(parseListOptions(url('?date_field=closed_at')).dateField).toBe('closed_at');
     expect(() => parseListOptions(url('?from=2026-02-30'))).toThrow();
     expect(() => parseListOptions(url('?from=2026-10-15&to=2026-10-10'))).toThrow();
   });
