@@ -130,7 +130,7 @@ export function ConversationCard({
       </div>
 
       {expanded && (
-        <div className="mt-1 overflow-hidden rounded-xl border border-border bg-background">
+        <div className="mt-1 overflow-hidden rounded-card border border-border bg-background">
           <MessageThread
             conversationId={conversation.id}
             loading={loadingMessages}

@@ -4,7 +4,8 @@ import { use, useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { ArrowLeft, Check, X, ChevronDown, ChevronRight } from "lucide-react"
+import { ArrowLeft, Check, X, ChevronDown, ChevronRight, History, SearchX } from "lucide-react"
+import { EmptyState } from "@/components/ddm/states"
 
 import { createClient } from "@/lib/supabase/client"
 import type {
@@ -143,10 +144,7 @@ export default function AutomationLogsPage({
     return (
       <PageBody>
         <div className="pt-1">{back}</div>
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
-          <p className="text-[13.5px] font-semibold text-foreground">Automação não encontrada</p>
-          <p className="text-[12.5px] text-muted-foreground">Ela pode ter sido excluída.</p>
-        </div>
+        <EmptyState icon={SearchX} title="Automação não encontrada" hint="Ela pode ter sido excluída." />
       </PageBody>
     )
   }
@@ -175,12 +173,7 @@ export default function AutomationLogsPage({
       )}
 
       {logs.length === 0 ? (
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
-          <p className="text-[13.5px] font-semibold text-foreground">Nenhuma execução ainda</p>
-          <p className="text-[12.5px] text-muted-foreground">
-            Dispare esta automação para ver as execuções aqui.
-          </p>
-        </div>
+        <EmptyState icon={History} title="Nenhuma execução ainda" hint="Dispare esta automação para ver as execuções aqui." />
       ) : (
         <ul className="ddm-stagger flex flex-col gap-2">
           {logs.map((log) => {

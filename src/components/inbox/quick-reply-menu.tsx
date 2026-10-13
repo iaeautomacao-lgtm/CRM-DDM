@@ -32,7 +32,7 @@ export function QuickReplyMenu({
 }: QuickReplyMenuProps) {
   return (
     <div
-      className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+      className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-card border border-border bg-popover shadow-lg"
       // Clique no item não pode tirar o foco do campo antes do onPick.
       onMouseDown={(e) => e.preventDefault()}
     >

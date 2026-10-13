@@ -22,7 +22,7 @@ export function ListCard({ className, children, ...props }: React.ComponentProps
     <div
       data-slot="ddm-list-card"
       role="list"
-      className={cn('divide-border overflow-hidden rounded-xl border bg-card divide-y', className)}
+      className={cn('divide-border overflow-hidden rounded-card border bg-card divide-y', className)}
       {...props}
     >
       {children}

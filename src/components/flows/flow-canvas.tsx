@@ -59,7 +59,9 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Plus, Copy, Search, Zap,
-  Trash2 } from 'lucide-react';
+  Trash2,
+  Check,
+  X } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -269,7 +271,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
             backgroundColor: debugVisual.badge === 'check' ? 'var(--success)' : 'var(--danger)',
           }}
         >
-          {debugVisual.badge === 'check' ? '✓' : '✗'}
+          {debugVisual.badge === 'check' ? <Check className="size-3" aria-label="Passou" /> : <X className="size-3" aria-label="Falhou" />}
         </span>
       )}
       {hasTarget && (
@@ -838,7 +840,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
             color="var(--border)"
           />
           <Controls
-            className="!border-border !bg-card [&_button]:!border-border [&_button]:!bg-card [&_button:hover]:!bg-muted [&_button_svg]:!fill-foreground !overflow-hidden !rounded-xl !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
+            className="!border-border !bg-card [&_button]:!border-border [&_button]:!bg-card [&_button:hover]:!bg-muted [&_button_svg]:!fill-foreground !overflow-hidden !rounded-card !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
             showInteractive={false}
           />
           <MiniMap
@@ -850,7 +852,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
             nodeStrokeWidth={0}
             nodeBorderRadius={3}
             maskColor="color-mix(in oklch, var(--background) 70%, transparent)"
-            className="!border-border !bg-card !rounded-xl !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
+            className="!border-border !bg-card !rounded-card !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
           />
           {!isDebugMode && (
             <Panel position="top-left" className="!top-4 !left-4 flex flex-wrap items-center gap-2">

@@ -165,7 +165,7 @@ export function ContactTimeline({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="rounded-card border border-border bg-card">
       <div className="border-b border-border-soft p-4">
         <div className="flex items-center gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary-solid text-sm font-semibold text-primary-foreground">
@@ -224,7 +224,7 @@ export function ContactTimeline({
         {loading ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-xl" />
+              <Skeleton key={i} className="h-20 w-full rounded-card" />
             ))}
           </div>
         ) : conversations.length === 0 ? (

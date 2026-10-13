@@ -650,7 +650,7 @@ export default function AtendimentosPage() {
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-32 w-full rounded-xl" />
+            <Skeleton key={i} className="h-32 w-full rounded-card" />
           ))}
         </div>
       ) : (

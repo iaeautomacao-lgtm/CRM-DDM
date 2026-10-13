@@ -115,7 +115,7 @@ export function CommandPalette() {
         <DialogOverlay />
         <DialogPrimitive.Popup
           aria-label="Busca rápida"
-          className="fixed inset-x-4 top-[12vh] z-50 mx-auto flex max-h-[70vh] w-auto max-w-[560px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-overlay outline-none data-open:animate-ddm-menu data-closed:animate-out data-closed:fade-out-0"
+          className="fixed inset-x-4 top-[12vh] z-50 mx-auto flex max-h-[70vh] w-auto max-w-[560px] flex-col overflow-hidden rounded-card border border-border bg-popover text-popover-foreground shadow-overlay outline-none data-open:animate-ddm-menu data-closed:animate-out data-closed:fade-out-0"
         >
           <div className="flex items-center gap-2.5 border-b border-border px-3.5">
             <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

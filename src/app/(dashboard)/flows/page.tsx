@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 import { usePermission, usePermissions } from "@/hooks/use-permission";
-import { ForbiddenState } from "@/components/ddm/states";
+import { EmptyState as EmptyPanel, ForbiddenState } from "@/components/ddm/states";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -740,28 +740,17 @@ function EmptyState({
   canCreate: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card/50 px-6 py-16 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-        <Workflow className="h-6 w-6 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-base font-medium text-foreground">
-        Nenhum fluxo ainda
-      </h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Crie sua primeira conversa — um menu de boas-vindas, consulta de
-        pedidos, bot de FAQ. O cliente toca nos botões e o fluxo direciona
-        para a resposta certa (ou o agente certo).
-      </p>
-      <GatedButton
-        canAct={canCreate}
-        gateReason="criar fluxos"
-        onClick={onCreate}
-        className="mt-5"
-      >
+    <EmptyPanel
+      className="py-16"
+      icon={Workflow}
+      title="Nenhum fluxo ainda"
+      hint="Crie sua primeira conversa — um menu de boas-vindas, consulta de pedidos, bot de FAQ. O cliente toca nos botões e o fluxo direciona para a resposta certa (ou o agente certo)."
+    >
+      <GatedButton canAct={canCreate} gateReason="criar fluxos" onClick={onCreate}>
         <Plus className="h-4 w-4" />
         Criar primeiro fluxo
       </GatedButton>
-    </div>
+    </EmptyPanel>
   );
 }
 

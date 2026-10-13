@@ -1778,7 +1778,7 @@ export function MessageThread({
                 ["self-start", "w-2/5", "h-10"],
                 ["self-end", "w-1/2", "h-16"],
               ].map(([side, width, height], i) => (
-                <Skeleton key={i} className={cn("rounded-xl", side, width, height)} />
+                <Skeleton key={i} className={cn("rounded-card", side, width, height)} />
               ))}
             </div>
           ) : messages.length === 0 && pendingSends.length === 0 ? (
