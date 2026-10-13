@@ -191,6 +191,21 @@ function allowedHosts(env: NodeJS.ProcessEnv = process.env): string[] {
     .filter(Boolean)
 }
 
+/**
+ * URL de serviço configurada (waha_url do tenant, VOIP_URL): exige https:. http só para host em SSRF_ALLOWED_HOSTS (rede interna
+ * legítima, como o container do VoIP). URL inválida = false. Plano de segurança 13/10 (Âncora 4).
+ */
+export function isHttpsOrAllowlistedUrl(raw: string, env?: NodeJS.ProcessEnv): boolean {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  if (url.protocol === 'https:') return true
+  return url.protocol === 'http:' && isHostAllowlisted(url.hostname, env)
+}
+
 function isHostAllowlisted(hostname: string, env?: NodeJS.ProcessEnv): boolean {
   const host = hostname.toLowerCase()
   return allowedHosts(env).some((entry) =>
