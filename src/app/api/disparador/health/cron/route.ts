@@ -5,6 +5,7 @@ import { registerAuditActor } from "@/lib/audit/context";
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { pollChannelHealth } from "@/lib/disparador/channel-health";
+import { alertStalledCrons } from "@/lib/ops/cron-stalled-alert";
 
 // POST /api/disparador/health/cron — poll de segurança da saúde dos números Meta (P1-5): lê qualidade/tier/throughput no Graph,
 // grava channel_health e recalcula o limite/s automático. Complementa o webhook phone_number_quality_update (que pode atrasar ou
@@ -63,6 +64,8 @@ async function handlePost(request: Request) {
     }, 20_000);
 
     const report = await pollChannelHealth(db, { outOfTime });
+    // Alerta ativo: cron parado (webhook dispatch.cron_stalled + push admin/proprietário; 1 por cron por hora). Nunca lança.
+    const stalled = outOfTime() ? { stalled: [], alerts: 0 } : await alertStalledCrons(db);
     return NextResponse.json({
       status: report.skipped_tables_missing ? "idle" : report.refreshed ? "refreshed" : "idle",
       tables_missing: report.skipped_tables_missing,
@@ -70,6 +73,7 @@ async function handlePost(request: Request) {
       refreshed: report.refreshed,
       changed: report.changed,
       failed: report.failed,
+      stalled_crons: stalled.stalled.length,
       duration_ms: Date.now() - startedAt,
     });
   } catch (error) {

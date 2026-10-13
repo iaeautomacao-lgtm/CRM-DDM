@@ -394,14 +394,6 @@
       "kind": "registry"
     },
     {
-      "version": "327_revoke_broadcast_counters",
-      "kind": "registry"
-    },
-    {
-      "version": "328_trigger_functions_search_path",
-      "kind": "registry"
-    },
-    {
       "version": "330_api_v1_conversation_extract",
       "kind": "registry"
     },
@@ -428,24 +420,7 @@
       "kind": "registry"
     },
     {
-      "version": "335_contacts_phone_invalid",
-      "kind": "registry"
-    },
-    {
-      "version": "335b_contacts_phone_invalid_idx",
-      "kind": "index",
-      "index": "idx_contacts_phone_invalid"
-    },
-    {
-      "version": "336_campaign_template_pause",
-      "kind": "registry"
-    },
-    {
-      "version": "339_ai_daily_quota",
-      "kind": "registry"
-    },
-    {
-      "version": "345_contacts_write_rls_has_perm",
+      "version": "337_ops_alert_dedupe",
       "kind": "registry"
     }
   ]
