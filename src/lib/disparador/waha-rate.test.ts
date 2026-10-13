@@ -58,10 +58,10 @@ const actor = { accountId: "A", userId: "u1", role: "admin" as const };
 
 const seed = () => ({
   whatsapp_config: [
-    { id: S1, account_id: "A", provider: "waha", label: "WAHA 1" },
-    { id: S2, account_id: "A", provider: "waha", label: "WAHA 2" },
-    { id: META, account_id: "A", provider: "meta", label: "Meta" },
-    { id: "00000000-0000-0000-0000-0000000000b1", account_id: "B", provider: "waha", label: "Outra conta" },
+    { id: S1, account_id: "A", provider: "waha", waha_session: "WAHA 1" },
+    { id: S2, account_id: "A", provider: "waha", waha_session: "WAHA 2" },
+    { id: META, account_id: "A", provider: "meta", waha_session: "Meta" },
+    { id: "00000000-0000-0000-0000-0000000000b1", account_id: "B", provider: "waha", waha_session: "Outra conta" },
   ] as Row[],
   dispatch_waha_rate: [] as Row[],
 });

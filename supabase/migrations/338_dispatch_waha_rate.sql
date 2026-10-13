@@ -38,6 +38,17 @@ ALTER TABLE wacrm.dispatch_waha_rate ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON wacrm.dispatch_waha_rate FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.dispatch_waha_rate TO service_role;
 
+-- 2FA (migration 310): se já aplicada, cobre a tabela aqui (idempotente); se não, a 310 cobre depois.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'wacrm' AND p.proname = 'apply_mfa_policy'
+  ) THEN
+    PERFORM wacrm.apply_mfa_policy('wacrm.dispatch_waha_rate'::regclass);
+  END IF;
+END $$;
+
 DO $$ BEGIN
   IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
     INSERT INTO wacrm.schema_migrations (version) VALUES ('338_dispatch_waha_rate') ON CONFLICT DO NOTHING;
