@@ -67,7 +67,7 @@ CREATE TABLE wacrm.conversation_assignments (id uuid PRIMARY KEY DEFAULT gen_ran
   from_agent_id uuid, to_agent_id uuid, from_team_id uuid, to_team_id uuid, actor_id uuid, reason text, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE wacrm.export_history (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), file_name text);
 CREATE TABLE wacrm.internal_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id),
-  sender_id uuid NOT NULL REFERENCES auth.users(id), recipient_id uuid NOT NULL REFERENCES auth.users(id), content text NOT NULL, media_type text,
+  sender_id uuid NOT NULL REFERENCES auth.users(id), recipient_id uuid NOT NULL REFERENCES auth.users(id), content text NOT NULL, media_url text, media_type text,
   read_at timestamptz, created_at timestamptz DEFAULT now());
 CREATE TABLE wacrm.quick_replies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id) ON DELETE CASCADE,
