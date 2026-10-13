@@ -131,22 +131,13 @@ export function CommandPalette() {
               placeholder="Buscar telas e atalhos…"
               aria-label="Buscar"
               role="combobox"
-              aria-expanded={!loading && !error && results.length > 0}
+              aria-expanded="true"
               aria-controls={listId}
               aria-autocomplete="list"
               aria-activedescendant={results[activeIndex] ? `${listId}-${activeIndex}` : undefined}
               className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
             <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">Esc</kbd>
-          </div>
-
-          {/* Anúncio da quantidade de resultados (WCAG 4.1.3), fora do listbox. */}
-          <div role="status" aria-live="polite" className="sr-only">
-            {loading || error
-              ? ""
-              : results.length === 0
-                ? "Nenhum resultado"
-                : `${results.length} ${results.length === 1 ? "resultado" : "resultados"}`}
           </div>
 
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">

@@ -242,10 +242,10 @@ function getInitials(name?: string | null): string {
 const ACTION_BADGE_PALETTE = [
   "bg-info-soft text-info border-info/40",
   "bg-success-soft text-success border-success/40",
-  "bg-purple-500/15 text-purple-300 [html[data-mode=light]_&]:text-purple-700 border-purple-500/40",
+  "bg-primary/15 text-primary-text border-primary/40",
   "bg-warning-soft text-warning border-warning/40",
-  "bg-pink-500/15 text-pink-300 [html[data-mode=light]_&]:text-pink-700 border-pink-500/40",
-  "bg-cyan-500/15 text-cyan-300 [html[data-mode=light]_&]:text-cyan-700 border-cyan-500/40",
+  "bg-surface-3 text-foreground-2 border-border",
+  "bg-info-soft text-info border-info/40",
 ];
 
 // user_name vem da RPC get_action_logs (LEFT JOIN em profiles,
@@ -279,11 +279,11 @@ function highlightJson(value: unknown): string {
   return escaped.replace(
     /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
-      let cls = "text-orange-300 [html[data-mode=light]_&]:text-orange-700"; // número
+      let cls = "text-warning"; // número
       if (/^"/.test(match)) {
         cls = /:\s*$/.test(match) ? "text-info" : "text-success"; // chave vs. valor string
       } else if (/^(true|false)$/.test(match)) {
-        cls = "text-purple-300 [html[data-mode=light]_&]:text-purple-700";
+        cls = "text-primary-text";
       } else if (match === "null") {
         cls = "text-muted-foreground";
       }
@@ -1691,7 +1691,7 @@ export default function DdmLogsPage() {
               </div>
             ) : feedbackLogs.length === 0 ? (
               <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-                Nenhum problema reportado. 🎉
+                Nenhum problema reportado.
               </div>
             ) : (
               <div className="flex flex-col gap-3">

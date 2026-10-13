@@ -155,7 +155,7 @@ export function SessionsCard() {
       </div>
 
       {error ? (
-        <p className="px-4 py-4 text-sm text-destructive">{error}</p>
+        <p role="alert" className="px-4 py-4 text-sm text-destructive">{error}</p>
       ) : sessions === null ? (
         <div className="flex flex-col gap-2 p-4" aria-busy>
           {[0, 1].map((i) => (
