@@ -120,8 +120,8 @@ export function EditorHeader({ view, sim, validation }: EditorHeaderProps) {
       <button
         type="button"
         onClick={() => navigateAway("/flows")}
-        title="Voltar para Fluxos"
-        aria-label="Voltar para Fluxos"
+        title="Voltar para fluxos"
+        aria-label="Voltar para fluxos"
         className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border text-foreground-2 transition-colors hover:bg-surface-hover hover:text-foreground"
       >
         <ArrowLeft className="size-4" />

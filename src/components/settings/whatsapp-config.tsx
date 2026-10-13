@@ -800,7 +800,7 @@ export function WhatsAppConfig() {
           {/* Provider Selection Card */}
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-foreground">Provedor de Conexão</CardTitle>
+              <CardTitle className="text-foreground">Provedor de conexão</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 Escolha se deseja conectar via Meta Cloud API oficial ou WAHA próprio.
               </CardDescription>
@@ -834,7 +834,7 @@ export function WhatsAppConfig() {
             <Card className="border-border bg-card">
               <CardHeader>
                 <CardTitle className="text-foreground flex items-center gap-2">
-                  Controle da Sessão
+                  Controle da sessão
                 </CardTitle>
                 <CardDescription className="text-muted-foreground font-light">
                   Gerencie sua conexão WAHA e leitura de QR Code.
@@ -945,7 +945,7 @@ export function WhatsAppConfig() {
                           disabled={pairingLoading || !pairingPhone}
                           className="bg-primary hover:bg-primary/90 text-primary-foreground h-9 font-medium text-xs px-3"
                         >
-                          {pairingLoading ? 'Gerando...' : 'Gerar Código'}
+                          {pairingLoading ? 'Gerando...' : 'Gerar código'}
                         </Button>
                       </form>
 
@@ -1010,7 +1010,7 @@ export function WhatsAppConfig() {
                         disabled={voipLoading || !wahaSession}
                         onClick={handleCreateVoipSession}
                       >
-                        {voipLoading ? 'Ativando...' : 'Ativar Ligações'}
+                        {voipLoading ? 'Ativando...' : 'Ativar ligações'}
                       </Button>
                     )}
                   </div>
@@ -1128,7 +1128,7 @@ export function WhatsAppConfig() {
             <CardHeader>
               <CardTitle className="text-foreground">
                 {activeConfigId 
-                  ? (provider === 'waha' ? 'Editar Servidor WAHA' : 'Editar Credenciais Meta') 
+                  ? (provider === 'waha' ? 'Editar servidor WAHA' : 'Editar credenciais Meta') 
                   : (provider === 'waha' ? 'Configurar Nova Linha WAHA' : 'Configurar Nova Linha Meta')}
               </CardTitle>
               <CardDescription className="text-muted-foreground font-light">
@@ -1155,7 +1155,7 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="wa-waha-session" className="text-muted-foreground">Nome da Sessão</Label>
+                    <Label htmlFor="wa-waha-session" className="text-muted-foreground">Nome da sessão</Label>
                     <Input
                       id="wa-waha-session"
                       placeholder="ex.: default"
@@ -1230,7 +1230,7 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="wa-access-token" className="text-muted-foreground">Token de Acesso Permanente</Label>
+                    <Label htmlFor="wa-access-token" className="text-muted-foreground">Token de acesso permanente</Label>
                     <div className="relative">
                       <Input
                         id="wa-access-token"
@@ -1267,7 +1267,7 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="wa-verify-token" className="text-muted-foreground">Token de Verificação do Webhook</Label>
+                    <Label htmlFor="wa-verify-token" className="text-muted-foreground">Token de verificação do webhook</Label>
                     <Input
                       id="wa-verify-token"
                       placeholder="Crie um token de verificação personalizado"
@@ -1310,7 +1310,7 @@ export function WhatsAppConfig() {
           {/* Webhook Configuration Card */}
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-foreground">Configuração de Webhook</CardTitle>
+              <CardTitle className="text-foreground">Configuração de webhook</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
                   ? 'Configure esta URL nas configurações do seu WAHA para receber as conversas.'
@@ -1355,7 +1355,7 @@ export function WhatsAppConfig() {
                   Salvando...
                 </>
               ) : (
-                'Salvar Configuração'
+                'Salvar configuração'
               )}
             </Button>
             <Button
@@ -1403,7 +1403,7 @@ export function WhatsAppConfig() {
         <div>
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-foreground text-base">Instruções de Configuração</CardTitle>
+              <CardTitle className="text-foreground text-base">Instruções de configuração</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
                   ? 'Siga estes passos para conectar sua conta do WhatsApp via WAHA.'
@@ -1442,7 +1442,7 @@ export function WhatsAppConfig() {
                         <li>Insira a URL do seu servidor (ex.: <code className="text-foreground font-mono">http://localhost:3000</code>)</li>
                         <li>Defina um nome de sessão único (ex.: <code className="text-foreground font-mono">default</code>)</li>
                         <li>Informe o token secreto da API se configurado</li>
-                        <li>Clique em <strong>Salvar Configuração</strong></li>
+                        <li>Clique em <strong>Salvar configuração</strong></li>
                       </ol>
                     </AccordionContent>
                   </AccordionItem>
@@ -1456,7 +1456,7 @@ export function WhatsAppConfig() {
                     </AccordionTrigger>
                     <AccordionContent className="text-muted-foreground text-sm">
                       <ol className="list-decimal list-inside space-y-1">
-                        <li>No painel <strong>Controle da Sessão</strong>, clique em <strong>Conectar</strong></li>
+                        <li>No painel <strong>Controle da sessão</strong>, clique em <strong>Conectar</strong></li>
                         <li>Escaneie o QR code com o WhatsApp no seu celular</li>
                         <li>Aguarde até o status mudar para <strong className="text-success">WORKING</strong></li>
                       </ol>
@@ -1526,7 +1526,7 @@ export function WhatsAppConfig() {
                         <li>Acesse WhatsApp &gt; Configuração da API</li>
                         <li>Copie o seu <strong className="text-foreground">ID do Número de Telefone</strong></li>
                         <li>Copie o seu <strong className="text-foreground">ID da Conta WhatsApp Business</strong></li>
-                        <li>Gere um <strong className="text-foreground">Token de Acesso Permanente</strong> em Configurações do Negócio &gt; Usuários do Sistema</li>
+                        <li>Gere um <strong className="text-foreground">Token de acesso permanente</strong> em Configurações do Negócio &gt; Usuários do Sistema</li>
                       </ol>
                     </AccordionContent>
                   </AccordionItem>
@@ -1543,7 +1543,7 @@ export function WhatsAppConfig() {
                         <li>Acesse WhatsApp &gt; Configuração</li>
                         <li>Clique em &quot;Editar&quot; na seção do Webhook</li>
                         <li>Cole a <strong className="text-foreground">URL de Callback do Webhook</strong> acima</li>
-                        <li>Insira o mesmo <strong className="text-foreground">Token de Verificação</strong> definido aqui</li>
+                        <li>Insira o mesmo <strong className="text-foreground">Token de verificação</strong> definido aqui</li>
                         <li>Assine o campo &quot;messages&quot; do webhook</li>
                       </ol>
                     </AccordionContent>

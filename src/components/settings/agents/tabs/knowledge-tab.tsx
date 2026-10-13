@@ -268,7 +268,7 @@ export function KnowledgeTab({
         <div>
           <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
             <Database className="size-4 text-primary" />
-            Base de Conhecimento (Arquivos da Conta)
+            Base de conhecimento (arquivos da conta)
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Defina como o agente consulta os arquivos e documentos carregados na conta.

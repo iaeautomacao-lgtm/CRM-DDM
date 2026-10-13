@@ -70,8 +70,8 @@ export interface SectionMeta {
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   overview: { id: 'overview', label: 'Visão geral', icon: LayoutGrid, group: 'top' },
-  profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
-  security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
+  profile: { id: 'profile', label: 'Meu perfil', icon: User, group: 'account' },
+  security: { id: 'security', label: 'Segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
   organization: { id: 'organization', label: 'Organização', icon: Building2, group: 'workspace', minRole: 'admin' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', integrationTab: true },
@@ -85,7 +85,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   tools: {
     id: 'tools',
-    label: 'Ferramentas',
+    label: 'Ferramentas dos agentes',
     icon: Wrench,
     group: 'workspace',
     integrationTab: true,
@@ -93,13 +93,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   agents: {
     id: 'agents',
-    label: 'Agentes',
+    label: 'Agentes de IA',
     icon: Sparkles,
     group: 'workspace',
     minRole: 'supervisor',
   },
   integrations: { id: 'integrations', label: 'Integrações', icon: Plug, group: 'workspace' },
-  webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
+  webhooks: { id: 'webhooks', label: 'Webhooks de saída', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
   'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor', integrationTab: true },
   ai: { id: 'ai', label: 'Provedores de IA', icon: Bot, group: 'workspace', ownerOnly: true, integrationTab: true },
 };
@@ -107,7 +107,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
   { label: null, group: 'top' },
   { label: 'Conta', group: 'account' },
-  { label: 'Espaço de trabalho', group: 'workspace' },
+  { label: 'Administração', group: 'workspace' },
 ];
 
 /** O papel enxerga a seção? (ownerOnly e minRole). */

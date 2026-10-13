@@ -852,7 +852,7 @@ export function ContactDetailView({
 
       <Button onClick={saveDetails} disabled={savingDetails} className="w-full" size="sm">
         {savingDetails ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-        Salvar Alterações
+        Salvar alterações
       </Button>
     </div>
   );

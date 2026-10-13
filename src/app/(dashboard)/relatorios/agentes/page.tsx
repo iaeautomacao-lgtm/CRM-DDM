@@ -190,9 +190,9 @@ export default function AgentesPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Agentes</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Sessões de atendentes</h2>
         <p className="text-sm text-muted-foreground">
-          Histórico de sessões (login/logout) por agente.
+          Histórico de sessões (login/logout) por atendente.
         </p>
       </div>
 
@@ -204,7 +204,7 @@ export default function AgentesPage() {
           />
 
           <div className="space-y-1">
-            <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Agente</label>
+            <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Atendente</label>
             <Select value={draft.userId} onValueChange={(v) => v && setDraft((d) => ({ ...d, userId: v }))}>
               <SelectTrigger id={`${uid}-agente`} className="w-44">
                 <SelectValue>{(v: string) => userLabel(v)}</SelectValue>
@@ -260,7 +260,7 @@ export default function AgentesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Agente</TableHead>
+                      <TableHead>Atendente</TableHead>
                       <TableHead>E-mail</TableHead>
                       <TableHead>Data do login</TableHead>
                       <TableHead>Data do logout</TableHead>

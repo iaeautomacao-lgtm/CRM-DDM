@@ -181,7 +181,7 @@ function filterOf(status: string): Exclude<CampaignFilter, "todas"> {
 const STATUS_LABELS: Record<CampaignStatus, string> = {
   rascunho: "Rascunho",
   agendado: "Agendado",
-  em_execucao: "Em Execução",
+  em_execucao: "Em execução",
   pausada: "Pausada",
   encerrada: "Encerrada",
   preparando: "Preparando envio",

@@ -212,7 +212,7 @@ export default function CampanhaContatosPage({
           hint="Volte para a lista de campanhas."
         />
         <Link href="/disparador/campanhas" className={cn(buttonVariants({ variant: "outline" }), "self-center")}>
-          Voltar para Campanhas
+          Voltar para campanhas
         </Link>
       </PageBody>
     );
@@ -237,8 +237,8 @@ export default function CampanhaContatosPage({
       <div className="flex flex-wrap items-center gap-3">
         <Link
           href="/disparador/campanhas"
-          aria-label="Voltar para Campanhas"
-          title="Voltar para Campanhas"
+          aria-label="Voltar para campanhas"
+          title="Voltar para campanhas"
           className="flex size-8 shrink-0 items-center justify-center rounded-[6px] border border-border bg-card text-foreground-2 transition-colors hover:bg-surface-hover hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" aria-hidden="true" />

@@ -208,7 +208,7 @@ export function ProfileForm() {
   return (
     <section className="max-w-2xl animate-in fade-in-50 duration-200">
       <SettingsPanelHead
-        title="Seu perfil"
+        title="Meu perfil"
         description="Como você aparece pelo app. Seu avatar e nome aparecem no cabeçalho, na sidebar e em qualquer lugar que sua equipe te veja."
       />
       <form onSubmit={onSubmit} className="space-y-4">

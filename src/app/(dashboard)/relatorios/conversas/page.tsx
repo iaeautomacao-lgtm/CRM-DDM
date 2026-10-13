@@ -442,7 +442,7 @@ export default function ConversasPage() {
           { key: "telefone", label: "Telefone" },
           { key: "canal", label: "Canal" },
           { key: "status", label: "Status" },
-          { key: "agente", label: "Agente" },
+          { key: "agente", label: "Atendente" },
           { key: "equipe", label: "Equipe" },
           { key: "iniciadoEm", label: "Iniciado em" },
           { key: "encerradoEm", label: "Encerrado em" },
@@ -535,7 +535,7 @@ export default function ConversasPage() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Agente</label>
+                <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Atendente</label>
                 <Select value={draft.agentId} onValueChange={(v) => v && setDraft((d) => ({ ...d, agentId: v }))}>
                   <SelectTrigger id={`${uid}-agente`} className="w-44">
                     <SelectValue>{(v: string) => agentLabel(v)}</SelectValue>

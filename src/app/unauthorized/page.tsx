@@ -27,7 +27,7 @@ export default function UnauthorizedPage() {
         <CardContent>
           <Button
             className="w-full"
-            render={<Link href="/dashboard">Voltar para o Dashboard</Link>}
+            render={<Link href="/dashboard">Voltar para o Painel</Link>}
           />
         </CardContent>
       </Card>

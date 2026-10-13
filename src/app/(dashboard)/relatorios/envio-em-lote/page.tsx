@@ -413,7 +413,7 @@ export default function EnvioEmLotePage() {
           { key: "erro", label: "Erro" },
         ],
         exportType: "envio-em-lote",
-        description: `Envio em Lote - ${detail?.nome ?? campaignLabel(campaignId)}`,
+        description: `Campanhas - ${detail?.nome ?? campaignLabel(campaignId)}`,
         format: "csv",
       });
     } catch (err) {
@@ -467,9 +467,9 @@ export default function EnvioEmLotePage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h2>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Campanhas</h2>
         <p className="text-sm text-muted-foreground">
-          Campanhas do Disparador com métricas agregadas e detalhe por contato.
+          Campanhas com métricas agregadas e detalhe por contato.
         </p>
       </div>
 

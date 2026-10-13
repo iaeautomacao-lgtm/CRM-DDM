@@ -167,7 +167,7 @@ function normalizeAgentRows(rows: RawAgentRow[]): AttendanceRow[] {
   return rows.map((r) => ({
     id: r.agent_id ?? "__none__",
     rawId: r.agent_id,
-    name: r.agent_name ?? "Sem agente",
+    name: r.agent_name ?? "Sem atendente",
     finalized: n(r.finalized),
     transferred: n(r.transferred),
     active: n(r.active),
@@ -270,7 +270,7 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       key: "ttp",
       header: "TTP",
       align: "right",
-      tooltip: "Tempo Total de Primeira Resposta — soma do tempo até a primeira mensagem do agente em cada conversa.",
+      tooltip: "Tempo Total de Primeira Resposta — soma do tempo até a primeira mensagem do atendente em cada conversa.",
       render: (r) => formatDuration(r.ttp_seconds),
       total: (rows) => formatDuration(rows.reduce((s, r) => s + r.ttp_seconds, 0)),
     },
@@ -278,7 +278,7 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       key: "tmp",
       header: "TMP",
       align: "right",
-      tooltip: "Tempo Médio de Primeira Resposta — média do tempo até a primeira mensagem do agente.",
+      tooltip: "Tempo Médio de Primeira Resposta — média do tempo até a primeira mensagem do atendente.",
       render: (r) => formatDuration(r.tmp_seconds),
       // Média ponderada pelas conversas com primeira resposta. A RPC não
       // devolve essa contagem, mas ela é exatamente TTP ÷ TMP (o TMP é a
@@ -605,7 +605,7 @@ export default function AtendimentosPage() {
       <div>
         <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Atendimentos</h2>
         <p className="text-sm text-muted-foreground">
-          Métricas de tempo e volume de atendimento por equipe e agente.
+          Métricas de tempo e volume de atendimento por equipe e atendente.
         </p>
       </div>
 
@@ -660,10 +660,10 @@ export default function AtendimentosPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <MetricCard
-            title="Atendimento Humano"
+            title="Atendimento humano"
             icon={Headphones}
             metrics={[
-              { label: "Agentes", value: summary.totalAgents },
+              { label: "Atendentes", value: summary.totalAgents },
               { label: "Mensagens", value: summary.humanMessages },
               { label: "Atendimentos", value: summary.humanAttendances },
             ]}
@@ -679,8 +679,8 @@ export default function AtendimentosPage() {
         </div>
       )}
 
-      <AttendanceSection title="Por Equipe" nameHeader="Equipe" rows={teamRows} loading={loading} />
-      <AttendanceSection title="Por Agente" nameHeader="Agente" rows={filteredAgentRows} loading={loading} />
+      <AttendanceSection title="Por equipe" nameHeader="Equipe" rows={teamRows} loading={loading} />
+      <AttendanceSection title="Por atendente" nameHeader="Atendente" rows={filteredAgentRows} loading={loading} />
         </>
       )}
     </div>

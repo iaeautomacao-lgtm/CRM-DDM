@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 // noindex — não é autenticação (a rota não tem nenhuma, de propósito),
 // só evita que a URL "oculta" acabe indexada por um crawler.
 export const metadata: Metadata = {
-  title: "DDM Logs",
+  title: "Logs do sistema",
   robots: {
     index: false,
     follow: false,

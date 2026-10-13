@@ -593,7 +593,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-foreground truncate">
-              {message.content_text || "Contato Compartilhado"}
+              {message.content_text || "Contato compartilhado"}
             </p>
             <p className="text-xs text-muted-foreground">
               vCard de Contato
