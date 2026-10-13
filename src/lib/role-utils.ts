@@ -81,6 +81,8 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/contacts": ["owner"],
   "/pipelines": ["owner"],
   "/flows": ["owner", "admin"],
+  // Decisão do dono (13/10, item 9): o visualizador NÃO vê /automations (o mesmo conjunto de automations.view).
+  "/automations": ["owner", "admin", "supervisor", "agent"],
   "/disparador": ["owner", "admin"],
   // Régua de cobrança (PRD 17): ver = billing.view (supervisor+); editar = billing.manage (admin+, conferido na tela e nas rotas).
   "/regua": ["owner", "admin", "supervisor"],
