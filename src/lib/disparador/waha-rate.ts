@@ -83,11 +83,11 @@ function fail(error: { message: string } | null | undefined, fallback: string): 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function loadWahaChannels(db: Db, accountId: string, onlyId?: string) {
-  let q = db.from("whatsapp_config").select("id, label, display_phone_number, provider").eq("account_id", accountId).eq("provider", "waha");
+  let q = db.from("whatsapp_config").select("id, waha_session, display_phone_number, provider").eq("account_id", accountId).eq("provider", "waha");
   if (onlyId) q = q.eq("id", onlyId);
   const { data, error } = await q.limit(500);
   if (error) fail(error, "Falha ao ler os canais WAHA.");
-  return (data ?? []) as Array<{ id: string; label?: string | null; display_phone_number?: string | null }>;
+  return (data ?? []) as Array<{ id: string; waha_session?: string | null; display_phone_number?: string | null }>;
 }
 
 export async function listWahaRates(db: Db, accountId: string): Promise<WahaRateView> {
@@ -107,7 +107,7 @@ export async function listWahaRates(db: Db, accountId: string): Promise<WahaRate
       const row = rows.get(c.id);
       return {
         session_id: c.id,
-        label: c.label ?? c.display_phone_number ?? c.id,
+        label: c.waha_session ?? c.display_phone_number ?? c.id,
         rate_per_second: resolveWahaRate(row),
         source: row ? "custom" : "default",
         reason: row?.reason ?? null,
@@ -165,11 +165,11 @@ export async function setWahaRate(db: Db, actor: WahaRateActor, input: SetWahaRa
     eventType: "updated",
     resourceType: "dispatch_waha_rate",
     resourceId: sessionId,
-    resourceLabel: channel.label ?? channel.display_phone_number ?? undefined,
+    resourceLabel: channel.waha_session ?? channel.display_phone_number ?? undefined,
     action: reset ? "dispatch_waha_rate.reset" : "dispatch_waha_rate.set",
     summary: reset
-      ? `Ritmo do WAHA da sessão ${channel.label ?? sessionId} voltou ao padrão (${DEFAULT_WAHA_RATE_PER_SECOND}/s): ${reason}`
-      : `Ritmo do WAHA da sessão ${channel.label ?? sessionId} alterado de ${before}/s para ${rate}/s: ${reason}`,
+      ? `Ritmo do WAHA da sessão ${channel.waha_session ?? sessionId} voltou ao padrão (${DEFAULT_WAHA_RATE_PER_SECOND}/s): ${reason}`
+      : `Ritmo do WAHA da sessão ${channel.waha_session ?? sessionId} alterado de ${before}/s para ${rate}/s: ${reason}`,
     changes: { rate_per_second: { before, after } },
     metadata: { reason },
   });

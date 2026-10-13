@@ -205,6 +205,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   disp("disparador/rate-limits", "PUT", "campaigns.rate_limit"),
   disp("disparador/rate-limits/acknowledge", "POST", "campaigns.rate_limit"),
   disp("disparador/rate-limits/[session]/revert-auto", "POST", "campaigns.rate_limit"),
+  disp("disparador/waha-rate", "GET", "campaigns.rate_limit"),
+  disp("disparador/waha-rate", "PUT", "campaigns.rate_limit"),
 
   // ── Fluxos, automações, IA, segredos ────────────────────
   flow("flows", "GET"),
