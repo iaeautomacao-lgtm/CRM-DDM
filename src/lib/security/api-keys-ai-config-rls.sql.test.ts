@@ -1,4 +1,4 @@
-// Migration 335: api_keys_select e ai_config_select pelo catálogo. Papéis de sistema: retrato idêntico; papel personalizado sem chave deixa de ler.
+// Migration 346: api_keys_select e ai_config_select pelo catálogo. Papéis de sistema: retrato idêntico; papel personalizado sem chave deixa de ler.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 
@@ -6,7 +6,7 @@ import { ACC, ACC_B, SYSTEM, asUser, createRolesDb, headerRollback, migration } 
 
 type Snap = { api_keys: string[]; ai_config: string[] };
 
-describe("migration 335 — api_keys e ai_config por permissão", { timeout: 180_000 }, () => {
+describe("migration 346 — api_keys e ai_config por permissão", { timeout: 180_000 }, () => {
   let db: PGlite;
   const before: Record<string, Snap> = {};
   const after: Record<string, Snap> = {};
@@ -32,7 +32,7 @@ describe("migration 335 — api_keys e ai_config por permissão", { timeout: 180
       INSERT INTO wacrm.ai_config (account_id) VALUES ('${ACC}'), ('${ACC_B}');
     `);
     for (const who of everyone()) before[who] = await read(who);
-    await db.exec(migration("335_api_keys_ai_config_select_has_perm.sql"));
+    await db.exec(migration("346_api_keys_ai_config_select_has_perm.sql"));
     for (const who of everyone()) after[who] = await read(who);
   }, 120_000);
   afterAll(async () => {
@@ -56,9 +56,9 @@ describe("migration 335 — api_keys e ai_config por permissão", { timeout: 180
   });
 
   it("ROLLBACK do cabeçalho é SQL executável: devolve o retrato de antes para todos; reaplicar funciona", async () => {
-    await db.exec(headerRollback("335_api_keys_ai_config_select_has_perm.sql"));
+    await db.exec(headerRollback("346_api_keys_ai_config_select_has_perm.sql"));
     for (const who of everyone()) expect(await read(who), `${who} depois do rollback`).toEqual(before[who]);
-    await db.exec(migration("335_api_keys_ai_config_select_has_perm.sql"));
+    await db.exec(migration("346_api_keys_ai_config_select_has_perm.sql"));
     for (const who of everyone()) expect(await read(who), `${who} reaplicada`).toEqual(after[who]);
   });
 });
