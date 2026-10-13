@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { MFA_PATH } from '@/lib/auth/mfa'
+import { isCrossSiteMutation, isPublicPage } from '@/lib/security/request-guard'
 
 // Derivado de NEXT_PUBLIC_SUPABASE_URL, sem ref de fallback: um ref antigo
 // embutido faria o middleware procurar o cookie de OUTRO projeto e deslogar todo
@@ -91,12 +92,17 @@ function hasSessionCookie(request: NextRequest): boolean {
   }
 }
 
+// Diagnóstico de autenticação (headers X-Auth-Fx-* e parâmetros auth_err/missing_env_* no redirect): só fora de produção. Em produção
+// revelavam o modo de autenticação e quais variáveis de ambiente faltam a qualquer um que visitasse uma página protegida (revisão 13/10, item 14).
+const isProduction = () => process.env.NODE_ENV === 'production'
+
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isAuthenticated = hasSessionCookie(request)
 
   const authFxId = crypto.randomUUID()
   const finalizeAuthFx = <T extends NextResponse>(response: T): T => {
+    if (isProduction()) return response
     const isRsc = request.headers.get('rsc') === '1'
     const isPrefetch =
       request.headers.get('next-router-prefetch') === '1' ||
@@ -110,6 +116,10 @@ export function middleware(request: NextRequest) {
     response.headers.set('X-Auth-Fx-Rsc', isRsc ? '1' : '0')
     response.headers.set('X-Auth-Fx-Prefetch', isPrefetch ? '1' : '0')
     return response
+  }
+
+  if (isCrossSiteMutation(request)) {
+    return finalizeAuthFx(noStore(NextResponse.json({ error: 'Origem da requisição não permitida' }, { status: 403 })))
   }
 
   // Auth pages - redirect to dashboard if already logged in.
@@ -148,45 +158,19 @@ export function middleware(request: NextRequest) {
     return finalizeAuthFx(noStore(NextResponse.redirect(url)))
   }
 
-  // Protected pages - redirect to login if not authenticated.
-  // '/unauthorized' is deliberately NOT in this list — it must stay
-  // reachable without looping back into the role gate below.
-  const protectedPaths = [
-    '/dashboard',
-    '/conversas',
-    '/contacts',
-    '/pipelines',
-    '/flows',
-    '/canais',
-    '/relatorios',
-    '/monitoramento',
-    '/disparador',
-    '/regua',
-    '/agente-de-ia',
-    '/configuracoes',
-    '/automacoes',
-    '/settings',
-  ]
-  if (
-    !isAuthenticated &&
-    protectedPaths.some((path) => pathname.startsWith(path))
-  ) {
+  // Páginas protegidas: TUDO o que não é público e não é /api/* (que valida a sessão por rota) — redireciona para o login.
+  if (!isAuthenticated && !pathname.startsWith('/api/') && !isPublicPage(pathname)) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.search = ''
-    url.searchParams.set(
-      'next',
-      request.nextUrl.pathname + request.nextUrl.search
-    )
+    url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search)
 
-    // Add debugging parameters to help trace authentication issues on the server/cPanel
-    url.searchParams.set('auth_failed', 'true')
-    url.searchParams.set('auth_err', 'no_session_cookie')
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      url.searchParams.set('missing_env_url', 'true')
-    }
-    if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      url.searchParams.set('missing_env_key', 'true')
+    // Diagnóstico para rastrear problemas de autenticação no servidor: só fora de produção (ver isProduction).
+    if (!isProduction()) {
+      url.searchParams.set('auth_failed', 'true')
+      url.searchParams.set('auth_err', 'no_session_cookie')
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) url.searchParams.set('missing_env_url', 'true')
+      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) url.searchParams.set('missing_env_key', 'true')
     }
 
     return finalizeAuthFx(noStore(NextResponse.redirect(url)))
