@@ -550,6 +550,34 @@ export const MONITOR_LOG_EVENTS = [
   "meta_error_code_unknown",
 ];
 
+export const PENDING_131026_FALLBACK_LIMIT = 5000;
+
+/**
+ * 131026 pendentes por campanha. Caminho normal: agregação no banco (migration 333), exata em qualquer volume. Sem a função, lê até
+ * 5.000 linhas como antes, mas agora SINALIZA a contagem parcial (truncated) em vez de mostrar 5.000 como se fosse o total (D-10).
+ */
+async function loadPending131026(
+  db: Db,
+  accountId: string,
+): Promise<{ counts: Map<string, number>; error: boolean; truncated: boolean }> {
+  const counts = new Map<string, number>();
+  const rpc = await db.rpc("dispatch_131026_pending_counts", { p_account_id: accountId });
+  if (!rpc.error && Array.isArray(rpc.data)) {
+    for (const r of rpc.data as Array<{ campaign_id: string; pending: number | string }>) counts.set(r.campaign_id, Number(r.pending));
+    return { counts, error: false, truncated: false };
+  }
+  const { data, error } = await db
+    .from("dispatch_meta_131026_failures")
+    .select("campaign_id")
+    .eq("account_id", accountId)
+    .eq("status", "pendente")
+    .limit(PENDING_131026_FALLBACK_LIMIT);
+  if (error) return { counts, error: true, truncated: false };
+  const rows = (data ?? []) as Array<{ campaign_id: string }>;
+  for (const r of rows) counts.set(r.campaign_id, (counts.get(r.campaign_id) ?? 0) + 1);
+  return { counts, error: false, truncated: rows.length >= PENDING_131026_FALLBACK_LIMIT };
+}
+
 export async function loadMonitorInput(db: Db, accountId: string, now: Date = new Date()): Promise<MonitorInput> {
   const degraded: string[] = [];
   const since30 = new Date(now.getTime() - 30 * 60_000).toISOString();
@@ -582,18 +610,14 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
       .gte("created_at", since24h)
       .order("created_at", { ascending: false })
       .limit(40),
-    db
-      .from("dispatch_meta_131026_failures")
-      .select("campaign_id")
-      .eq("account_id", accountId)
-      .eq("status", "pendente")
-      .limit(5000),
+    loadPending131026(db, accountId),
   ]);
 
   if (campaignsRes.error) throw campaignsRes.error;
   if (ticksRes.error) degraded.push("telemetria do motor (cron_tick)");
   if (logsRes.error) degraded.push("eventos recentes");
   if (pendingRes.error) degraded.push("131026 pendentes");
+  else if (pendingRes.truncated) degraded.push("131026 pendentes (contagem parcial: 5.000+; aplique a migration 333)");
 
   // Monitor é operacional: canais desabilitados ficam somente em /canais
   // para administração e não entram em contagens, limites ou RPC do motor.
@@ -663,10 +687,7 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
     }
   }
 
-  const pending131026 = new Map<string, number>();
-  for (const r of (pendingRes.data ?? []) as Array<{ campaign_id: string }>) {
-    pending131026.set(r.campaign_id, (pending131026.get(r.campaign_id) ?? 0) + 1);
-  }
+  const pending131026 = pendingRes.counts;
 
   return {
     now,

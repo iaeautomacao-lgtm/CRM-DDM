@@ -93,6 +93,7 @@ describe("recoverStaleSendingReservations", () => {
     expect(result).toEqual({
       recoveredAccepted: 0,
       finalizedUnknown: 0,
+      requeuedNeverSent: 0,
       failed: 0,
       campaignIds: [],
     });
@@ -137,7 +138,7 @@ describe("recoverStaleSendingReservations — lease do item em voo (F14, migrati
   it("lease renovado (envio lento mas vivo): NÃO é varrido nem marcado como incerto", async () => {
     const { db, updates } = database([base({ inflight_until: future })]);
     const result = await recoverStaleSendingReservations(db, NOW);
-    expect(result).toEqual({ recoveredAccepted: 0, finalizedUnknown: 0, failed: 0, campaignIds: [] });
+    expect(result).toEqual({ recoveredAccepted: 0, finalizedUnknown: 0, requeuedNeverSent: 0, failed: 0, campaignIds: [] });
     expect(updates).toHaveLength(0);
   });
 

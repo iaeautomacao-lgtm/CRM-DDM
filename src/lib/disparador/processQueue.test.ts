@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   autoBlacklist: vi.fn(),
   ai: vi.fn(),
   log: vi.fn(),
+  // D-02: resposta do compare-and-set do marcador "chamada ao provedor iniciada" (UPDATE ... RETURNING id em disp_message_queue).
+  marker: { rows: [{ id: 'item' }] as Array<{ id: string }> | null, error: null as null | { code?: string; message: string } },
+  updatesWithFilters: [] as Array<{ table: string; values: Record<string, unknown> }>,
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -24,8 +27,10 @@ vi.mock('@/lib/disparador/admin-client', () => ({
                 access_token: 'encrypted',
                 phone_number_id: 'phone-id',
               }
-            : null,
-        error: null,
+            : table === 'disp_message_queue'
+              ? mocks.marker.rows
+              : null,
+        error: table === 'disp_message_queue' ? mocks.marker.error : null,
       };
       const builder: Record<string, unknown> = {};
       for (const method of [
@@ -36,10 +41,12 @@ vi.mock('@/lib/disparador/admin-client', () => ({
         'limit',
         'lte',
         'is',
+        'or',
       ])
         builder[method] = () => builder;
       builder.update = (value: Record<string, unknown>) => {
         mocks.updates.push(value);
+        mocks.updatesWithFilters.push({ table, values: value });
         return builder;
       };
       builder.maybeSingle = async () => result;
@@ -69,6 +76,8 @@ import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
 import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
 import { resetUnknownMetaCodes } from './meta-error-catalog';
+import { resetProviderCallMarkerState } from './provider-call-marker';
+import { resetShutdownGate, beginShutdown } from './shutdown-gate';
 
 const item: QueueItem = {
   id: 'item',
@@ -81,6 +90,11 @@ const item: QueueItem = {
 
 describe('queue provider outcomes', () => {
   beforeEach(() => {
+    mocks.marker.rows = [{ id: 'item' }];
+    mocks.marker.error = null;
+    mocks.updatesWithFilters.length = 0;
+    resetProviderCallMarkerState();
+    resetShutdownGate();
     mocks.claimed = true;
     mocks.confirmationError = null;
     mocks.updates.length = 0;
@@ -573,5 +587,75 @@ describe('opções do agendador do cron', () => {
     });
     expect(await processQueueItem(item, campaign, { defaultMaxInFlight: 8 })).toMatchObject({ outcome: 'sent' });
     expect(mocks.rpc).toHaveBeenCalledWith('claim_dispatch_item', { p_item_id: 'item' });
+  });
+});
+
+describe('D-02: marcador "chamada ao provedor iniciada" (migration 332)', () => {
+  beforeEach(() => {
+    mocks.marker.rows = [{ id: 'item' }];
+    mocks.marker.error = null;
+    mocks.updatesWithFilters.length = 0;
+    mocks.updates.length = 0;
+    resetProviderCallMarkerState();
+    resetShutdownGate();
+    mocks.claimed = true;
+    mocks.confirmationError = null;
+    mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
+    mocks.autoBlacklist.mockReset().mockResolvedValue({ campaignCount: 1, blacklisted: false });
+    mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
+      data: name === 'claim_dispatch_item' ? mocks.claimed : null,
+      error: name === 'confirm_dispatch_item_sent' || name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
+    }));
+  });
+  const run = () => processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+  const markerWrites = () => mocks.updatesWithFilters.filter((u) => u.table === 'disp_message_queue' && 'provider_call_started_at' in u.values);
+
+  it('grava o marcador ANTES do POST à Meta e então envia', async () => {
+    const order: string[] = [];
+    mocks.send.mockReset().mockImplementation(async () => (order.push('send'), { messageId: 'wamid.ok' }));
+    const origUpdate = mocks.updatesWithFilters.push.bind(mocks.updatesWithFilters);
+    mocks.updatesWithFilters.push = (...args) => {
+      if (args[0].table === 'disp_message_queue' && 'provider_call_started_at' in args[0].values) order.push('marker');
+      return origUpdate(...args);
+    };
+    const result = await run();
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(order).toEqual(['marker', 'send']);
+    expect(markerWrites()).toHaveLength(1);
+  });
+
+  it('outro remetente já chamou (ou o item saiu de enviando): NÃO envia, não toca no item e devolve deferred', async () => {
+    mocks.marker.rows = [];
+    const result = await run();
+    expect(result).toEqual({ outcome: 'deferred', reason: 'provider_call_not_owned' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro')).toBe(false);
+  });
+
+  it('falha ao gravar o marcador: NÃO envia e tenta devolver o item à fila', async () => {
+    mocks.marker.rows = null;
+    mocks.marker.error = { message: 'rede caiu' };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await run();
+    expect(result).toEqual({ outcome: 'deferred', reason: 'provider_call_marker_failed' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'agendado')).toBe(true);
+  });
+
+  it('migration 332 ausente (coluna inexistente): envia como antes, sem marcador', async () => {
+    mocks.marker.rows = null;
+    mocks.marker.error = { code: '42703', message: 'column disp_message_queue.provider_call_started_at does not exist' };
+    const result = await run();
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('desligamento em curso (SIGTERM): não inicia chamada nova e devolve o item à fila', async () => {
+    await beginShutdown(10);
+    const result = await run();
+    expect(result).toEqual({ outcome: 'deferred', reason: 'shutting_down' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(markerWrites()).toHaveLength(0);
+    expect(mocks.updates.some((u) => u.status === 'agendado')).toBe(true);
   });
 });
