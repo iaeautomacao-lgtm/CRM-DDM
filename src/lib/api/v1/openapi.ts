@@ -83,6 +83,23 @@ const reportOk = (description: string, data: Json, example: Json) => ({
   },
 });
 
+
+const conversationIdParam = { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+const messageIdParam = { name: 'messageId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+const partIdParam = { name: 'partId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+const paginationParam = { name: 'cursor', in: 'query', required: false, schema: { type: 'string' }, description: 'Continue até next_cursor=null.' };
+const simpleOk = (description: string) => ({
+  description, content: { 'application/json': { schema: { type: 'object', required: ['data'], properties: { data: { type: 'object' } } } } },
+});
+const conversationErrors = {
+ '400': { description:'Parâmetros/cursor inválidos.', content:{'application/json':{schema:ref('ErrorEnvelope')}} },
+ '401': resp('Unauthorized'),
+ '403': resp('Forbidden'),
+ '404': resp('NotFound'),
+ '429': resp('RateLimited'),
+ '500': resp('InternalError'),
+};
+
 const periodExample = { from: '2026-10-01', to: '2026-10-07', timezone: 'America/Sao_Paulo' };
 const periodMetricsExample = {
   received: 1240,
@@ -120,6 +137,8 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+       '- `conversations:read` — listar conversas, consultar mensagens e obter URLs temporárias de mídia.',
+       '- `conversations:export` — criar exportações integrais em partes, consultar progresso e baixar arquivos privados.',
       '- `GET /me` não exige escopo.',
       '',
       '## Envelope de resposta',
@@ -145,6 +164,7 @@ export const openApiSpec = {
     { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
+    { name: 'Conversas', description: 'Consulta integral de mensagens e exportação privada, sujeitas a permissão específica.' },
   ],
   security: SECURITY,
   paths: {
@@ -358,6 +378,80 @@ export const openApiSpec = {
             },
           },
         },
+      },
+    },
+
+
+    '/conversations': {
+      get: {
+        tags:['Conversas'], operationId:'listPublicConversations', summary:'Listar conversas com paginação',
+        description:'Escopo conversations:read. Lista somente conversas da conta da chave, com dados do contato, operador, tabulação e horários.',
+        parameters:[
+          {name:'from',in:'query',schema:{type:'string',format:'date'}},
+          {name:'to',in:'query',schema:{type:'string',format:'date'}},
+          {name:'status',in:'query',schema:{type:'string',enum:['open','pending','closed']}},
+          {name:'agent_id',in:'query',schema:{type:'string',format:'uuid'}},
+          {name:'team_id',in:'query',schema:{type:'string',format:'uuid'}},
+          {name:'channel_type',in:'query',schema:{type:'string'}},
+          {name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:100}},
+          paginationParam,
+        ],responses:{'200':simpleOk('Página com items e next_cursor.'),...conversationErrors},
+      },
+    },
+    '/conversations/{id}/messages': {
+      get: {
+        tags:['Conversas'], operationId:'listConversationMessages', summary:'Ler histórico integral de mensagens',
+        description:'Escopo conversations:read. Páginas cronológicas com textos, modelos, mídia e autoria. Continue até next_cursor=null.',
+        parameters:[conversationIdParam,{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:500}},paginationParam],
+        responses:{'200':simpleOk('Mensagens cronológicas, com next_cursor independente.'),...conversationErrors},
+      },
+    },
+    '/conversations/messages/batch': {
+      post:{
+        tags:['Conversas'],operationId:'batchConversationMessages',summary:'Ler mensagens de várias conversas',
+        description:'Escopo conversations:read. Até 20 conversas e 100 mensagens por conversa, com cursor independente.',
+        requestBody:{required:true,content:{'application/json':{schema:{type:'object',required:['conversation_ids'],properties:{
+          conversation_ids:{type:'array',minItems:1,maxItems:20,items:{type:'string',format:'uuid'}},
+          limit:{type:'integer',minimum:1,maximum:100},
+          cursors:{type:'object',additionalProperties:{type:'string'}},
+        }}}}},
+        responses:{'200':simpleOk('Histórico em lote com cursor por conversa.'),...conversationErrors},
+      },
+    },
+    '/conversations/{id}/messages/{messageId}/media': {
+      get:{
+        tags:['Conversas'],operationId:'signConversationMedia',summary:'Obter link temporário de anexo',
+        description:'Escopo conversations:read. Valida posse da mensagem e devolve URL assinada do chat-media por 60 s. Mídia externa não é re-hospedada.',
+        parameters:[conversationIdParam,messageIdParam],
+        responses:{'200':simpleOk('URL temporária e expiração (segundos).'),...conversationErrors},
+      },
+    },
+    '/conversations/exports': {
+      post:{
+        tags:['Conversas'],operationId:'createConversationExport',summary:'Solicitar exportação completa assíncrona',
+        description:'Escopo conversations:export. Retorna 202; cron processa dados até o snapshot e publica arquivos NDJSON comprimidos em bucket privado. Retenção sete dias.',
+        requestBody:{required:true,content:{'application/json':{schema:{type:'object',required:['from','to'],properties:{
+          from:{type:'string',format:'date'},to:{type:'string',format:'date'},
+          status:{type:'string',enum:['open','pending','closed']},
+          agent_id:{type:'string',format:'uuid'},team_id:{type:'string',format:'uuid'},channel_type:{type:'string'},
+        }}}}},
+        responses:{'202':simpleOk('Job aceito, id, status e poll_url.'),...conversationErrors},
+      },
+    },
+    '/conversations/exports/{id}': {
+      get:{
+        tags:['Conversas'],operationId:'getConversationExportStatus',summary:'Status e partes da exportação',
+        description:'Escopo conversations:export. Partes disponíveis para download somente quando status completed. Paginação por after_part_no.',
+        parameters:[conversationIdParam,{name:'after_part_no',in:'query',schema:{type:'integer',minimum:0}}],
+        responses:{'200':simpleOk('Status, métricas de progresso, parts e next_part_no.'),...conversationErrors},
+      },
+    },
+    '/conversations/exports/{id}/parts/{partId}/download': {
+      get:{
+        tags:['Conversas'],operationId:'downloadConversationExportPart',summary:'Assinar download privado',
+        description:'Escopo conversations:export. Valida conta, job, part e validade; retorna URL assinada com expiração de 60 segundos.',
+        parameters:[conversationIdParam,partIdParam],
+        responses:{'200':simpleOk('URL temporária para baixar a parte NDJSON.gz.'),...conversationErrors},
       },
     },
 
@@ -804,6 +898,7 @@ export const openApiSpec = {
           'contacts:read',
           'contacts:write',
           'conversations:read',
+          'conversations:export',
           'campaigns:write',
           'campaigns:read',
           'reports:read',
