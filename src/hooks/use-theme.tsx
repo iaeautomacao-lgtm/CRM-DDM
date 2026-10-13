@@ -14,8 +14,10 @@ import {
   DEFAULT_THEME,
   MODE_STORAGE_KEY,
   STORAGE_KEY,
+  SYSTEM_DARK_QUERY,
   isMode,
   isThemeId,
+  resolveMode,
   type Mode,
   type ThemeId,
 } from "@/lib/themes";
@@ -67,13 +69,17 @@ function readInitialMode(): Mode {
   if (typeof window === "undefined") return DEFAULT_MODE;
   const fromAttr = document.documentElement.dataset.mode;
   if (isMode(fromAttr)) return fromAttr;
+  let stored: string | null = null;
   try {
-    const stored = localStorage.getItem(MODE_STORAGE_KEY);
-    if (isMode(stored)) return stored;
+    stored = localStorage.getItem(MODE_STORAGE_KEY);
   } catch {
     // localStorage can throw in private-browsing / sandboxed contexts.
   }
-  return DEFAULT_MODE;
+  try {
+    return resolveMode(stored, window.matchMedia(SYSTEM_DARK_QUERY).matches);
+  } catch {
+    return isMode(stored) ? stored : DEFAULT_MODE;
+  }
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -108,6 +114,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggleMode = useCallback(() => {
     setMode(mode === "dark" ? "light" : "dark");
   }, [mode, setMode]);
+
+  // Sem escolha salva, o modo acompanha o tema do sistema também com a
+  // página aberta (ex.: o SO troca para escuro à noite). A troca manual
+  // grava em localStorage e daí em diante vence.
+  useEffect(() => {
+    let media: MediaQueryList;
+    try {
+      media = window.matchMedia(SYSTEM_DARK_QUERY);
+    } catch {
+      return;
+    }
+    function onSystemChange(e: MediaQueryListEvent) {
+      let saved: string | null = null;
+      try {
+        saved = localStorage.getItem(MODE_STORAGE_KEY);
+      } catch {
+        // Sem localStorage: segue o sistema.
+      }
+      if (isMode(saved)) return;
+      const next = resolveMode(saved, e.matches);
+      setModeState(next);
+      document.documentElement.dataset.mode = next;
+    }
+    media.addEventListener("change", onSystemChange);
+    return () => media.removeEventListener("change", onSystemChange);
+  }, []);
 
   // Sync from other tabs — change theme or mode in tab A, tab B
   // catches up without a refresh.
