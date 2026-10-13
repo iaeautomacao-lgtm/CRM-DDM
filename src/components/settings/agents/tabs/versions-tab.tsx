@@ -66,7 +66,7 @@ export function VersionsTab({ versions, publishedVersionId, onRestore, readOnly,
       </div>
 
       {versions.length === 0 ? (
-        <div className="rounded-[10px] border border-dashed border-border p-8 text-center space-y-2">
+        <div className="rounded-card border border-dashed border-border p-8 text-center space-y-2">
           <History className="size-5 mx-auto text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Nenhuma versão publicada ainda.</p>
         </div>
@@ -75,7 +75,7 @@ export function VersionsTab({ versions, publishedVersionId, onRestore, readOnly,
           {versions.map((v) => {
             const current = v.id === publishedVersionId;
             return (
-              <li key={v.id} className="flex flex-wrap items-center gap-3 rounded-[10px] border border-border bg-card p-4">
+              <li key={v.id} className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-card p-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold">v{v.version}</span>

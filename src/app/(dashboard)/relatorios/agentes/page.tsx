@@ -196,7 +196,7 @@ export default function AgentesPage() {
         </p>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card p-4">
+      <div className="rounded-card border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.dateFrom, dateTo: draft.dateTo }}
@@ -231,7 +231,7 @@ export default function AgentesPage() {
         </div>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card">
+      <div className="rounded-card border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (

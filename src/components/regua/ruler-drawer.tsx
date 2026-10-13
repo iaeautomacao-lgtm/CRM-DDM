@@ -354,7 +354,7 @@ function ConfigForm({
         Etapas atrasadas além da tolerância expiram em vez de sair juntas. A campanha manual conta no teto diário do devedor.
       </p>
 
-      <div className="flex flex-col divide-y divide-border rounded-[10px] border border-border">
+      <div className="flex flex-col divide-y divide-border rounded-card border border-border">
         <SwitchRow
           label="Pausar quando houver conversa aberta"
           hint="Se ligado, o devedor com conversa aberta não recebe a etapa."
@@ -477,7 +477,7 @@ function SimulatePanel({ ruler, canManage }: { ruler: Ruler; canManage: boolean 
         </Button>
       </div>
       {result && (
-        <div className="overflow-hidden rounded-[10px] border border-border">
+        <div className="overflow-hidden rounded-card border border-border">
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="bg-surface-3 text-left text-xs text-muted-foreground">
@@ -575,7 +575,7 @@ function MetricsPanel({ ruler }: { ruler: Ruler }) {
           <p className="text-sm text-muted-foreground">Sem etapas.</p>
         ) : (
           data.steps.map((s) => (
-            <div key={s.step_id} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
+            <div key={s.step_id} className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-card px-4 py-3">
               <span className="w-24 text-sm font-semibold text-foreground">{s.offset_days == null ? `Etapa ${s.position}` : formatOffset(s.offset_days)}</span>
               {!s.active && <StatusChip tone="mute">Inativa</StatusChip>}
               <span className="flex-1" />

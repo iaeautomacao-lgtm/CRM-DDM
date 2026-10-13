@@ -806,7 +806,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         role="dialog"
         aria-modal="true"
         aria-labelledby="nc-title"
-        className="flex h-full w-full max-w-5xl animate-ddm-pop flex-col overflow-hidden bg-background shadow-overlay outline-none sm:h-auto sm:max-h-[92vh] sm:rounded-[10px] sm:border sm:border-border"
+        className="flex h-full w-full max-w-5xl animate-ddm-pop flex-col overflow-hidden bg-background shadow-overlay outline-none sm:h-auto sm:max-h-[92vh] sm:rounded-card sm:border sm:border-border"
       >
         {/* Barra de passos (protótipo): número em círculo, separador e o passo atual em destaque. */}
         <header className="shrink-0 border-b border-border bg-card px-4 py-3 sm:px-6">

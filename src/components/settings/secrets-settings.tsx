@@ -121,7 +121,7 @@ export function SecretsSettings() {
       <div className="flex flex-col gap-2" aria-busy>
         <Skeleton className="h-6 w-56" />
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-14 rounded-[10px]" />
+          <Skeleton key={i} className="h-14 rounded-field" />
         ))}
       </div>
     );
@@ -214,7 +214,7 @@ export function SecretsSettings() {
       {items.length === 0 ? (
         <EmptyState icon={LockKeyhole} title="Nenhuma variável ou credencial cadastrada." />
       ) : visible.length === 0 ? (
-        <p className="rounded-[10px] border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-card border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
           Nada encontrado com esse filtro.
         </p>
       ) : (

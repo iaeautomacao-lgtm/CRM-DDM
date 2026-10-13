@@ -112,7 +112,7 @@ export function WebhooksSettings() {
   if (loading) {
     return (
       <div className="flex flex-col gap-2" aria-busy>
-        <Skeleton className="h-16 rounded-[10px]" />
+        <Skeleton className="h-16 rounded-field" />
       </div>
     );
   }
@@ -212,7 +212,7 @@ function WebhooksPanel() {
       ) : loading ? (
         <div className="flex flex-col gap-2" aria-busy>
           {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-16 rounded-[10px]" />
+            <Skeleton key={i} className="h-16 rounded-field" />
           ))}
         </div>
       ) : endpoints.length === 0 ? (

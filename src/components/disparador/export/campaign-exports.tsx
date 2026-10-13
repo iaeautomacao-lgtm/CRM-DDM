@@ -150,7 +150,7 @@ export function CampaignExportsPanel({ campaignId }: { campaignId: string }) {
 
   if (unavailable) return null;
   return (
-    <section aria-label="Exportações" className="flex flex-col gap-3 rounded-[10px] border border-border bg-card px-[18px] py-4">
+    <section aria-label="Exportações" className="flex flex-col gap-3 rounded-card border border-border bg-card px-[18px] py-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h3 className="m-0 font-sans text-sm font-semibold text-foreground">Exportações</h3>

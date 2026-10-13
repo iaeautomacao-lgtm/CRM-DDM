@@ -159,7 +159,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
       <div className="flex flex-col gap-2" aria-busy>
         <Skeleton className="h-6 w-48" />
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-20 rounded-[10px]" />
+          <Skeleton key={i} className="h-20 rounded-field" />
         ))}
       </div>
     );

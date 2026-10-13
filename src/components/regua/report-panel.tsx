@@ -113,7 +113,7 @@ export function ReportPanel({ ruler }: { ruler: Ruler }) {
               Por etapa
               <InfoHint label="Sobre pagas após cobrança">{PAID_AFTER_NOTE}</InfoHint>
             </h3>
-            <div className="overflow-x-auto rounded-[10px] border border-border">
+            <div className="overflow-x-auto rounded-card border border-border">
               <table className="w-full min-w-[560px] border-collapse text-[13px]">
                 <thead>
                   <tr className="bg-surface-3 text-left text-xs text-muted-foreground">
@@ -156,15 +156,15 @@ export function ReportPanel({ ruler }: { ruler: Ruler }) {
           <section className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-foreground">Pagamentos detectados</h3>
             <dl className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-[10px] border border-border bg-card px-4 py-3">
+              <div className="rounded-card border border-border bg-card px-4 py-3">
                 <dt className="text-xs text-muted-foreground">Pagas após cobrança</dt>
                 <dd className="text-lg font-semibold tabular-nums text-foreground">{n(data.payments.paid_after_charge)}</dd>
               </div>
-              <div className="rounded-[10px] border border-border bg-card px-4 py-3">
+              <div className="rounded-card border border-border bg-card px-4 py-3">
                 <dt className="text-xs text-muted-foreground">Pagas sem cobrança</dt>
                 <dd className="text-lg font-semibold tabular-nums text-foreground">{n(data.payments.paid_without_charge)}</dd>
               </div>
-              <div className="rounded-[10px] border border-border bg-card px-4 py-3">
+              <div className="rounded-card border border-border bg-card px-4 py-3">
                 <dt className="text-xs text-muted-foreground">Média de cobranças até o pagamento</dt>
                 <dd className="text-lg font-semibold tabular-nums text-foreground">
                   {formatAvgCharges(data.payments.avg_charges_before_payment)}
@@ -186,7 +186,7 @@ export function ReportPanel({ ruler }: { ruler: Ruler }) {
           {data.daily.length > 0 && (
             <section className="flex flex-col gap-2">
               <h3 className="text-sm font-semibold text-foreground">Por dia</h3>
-              <div className="max-h-64 overflow-y-auto rounded-[10px] border border-border">
+              <div className="max-h-64 overflow-y-auto rounded-card border border-border">
                 <table className="w-full border-collapse text-[13px]">
                   <thead className="sticky top-0">
                     <tr className="bg-surface-3 text-left text-xs text-muted-foreground">

@@ -1152,7 +1152,7 @@ export default function CampanhasPage() {
       {loading ? (
         <div className="flex flex-col gap-2.5" aria-busy="true" aria-label="Carregando campanhas">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[112px] w-full rounded-[10px]" />
+            <Skeleton key={i} className="h-[112px] w-full rounded-field" />
           ))}
         </div>
       ) : loadError && campaigns.length === 0 ? (
@@ -1178,7 +1178,7 @@ export default function CampanhasPage() {
               <section
                 key={c.id}
                 aria-label={c.nome}
-                className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-[10px] border border-border bg-card px-[18px] py-4 transition-colors hover:border-border-strong"
+                className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-card border border-border bg-card px-[18px] py-4 transition-colors hover:border-border-strong"
               >
                 {/* Identificação e configuração */}
                 <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-1.5">

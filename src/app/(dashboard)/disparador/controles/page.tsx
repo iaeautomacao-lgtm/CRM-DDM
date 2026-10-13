@@ -445,8 +445,8 @@ export default function ControlesPage() {
 
       {loading && !overview ? (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2" aria-busy="true" aria-label="Carregando controles">
-          <Skeleton className="h-64 w-full rounded-[10px]" />
-          <Skeleton className="h-64 w-full rounded-[10px]" />
+          <Skeleton className="h-64 w-full rounded-field" />
+          <Skeleton className="h-64 w-full rounded-field" />
         </div>
       ) : (
         <>
@@ -461,7 +461,7 @@ export default function ControlesPage() {
                     key={n.id}
                     aria-label={n.label}
                     className={cn(
-                      "flex flex-col gap-4 rounded-[10px] border bg-card px-5 py-[18px]",
+                      "flex flex-col gap-4 rounded-card border bg-card px-5 py-[18px]",
                       n.paused ? "border-warning-border" : "border-border",
                     )}
                   >

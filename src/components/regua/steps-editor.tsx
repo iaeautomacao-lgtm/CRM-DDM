@@ -146,7 +146,7 @@ export function StepsEditor({
       )}
 
       {drafts.length === 0 && (
-        <p className="rounded-[10px] border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-card border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
           Esta régua ainda não tem etapas.
         </p>
       )}
@@ -156,7 +156,7 @@ export function StepsEditor({
         const needed = Math.max(showTemplate ? maxPlaceholder(tpl?.body_text) : 0, showText ? maxPlaceholder(d.message_text) : 0);
         const offsetNum = Number(d.offset);
         return (
-          <section key={d.key} className="flex flex-col gap-3 rounded-[10px] border border-border bg-card p-4">
+          <section key={d.key} className="flex flex-col gap-3 rounded-card border border-border bg-card p-4">
             <header className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-foreground">
                 {d.kind === "offset" && d.offset !== "" && Number.isInteger(offsetNum)

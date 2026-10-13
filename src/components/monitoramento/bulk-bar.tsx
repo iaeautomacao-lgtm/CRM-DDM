@@ -27,7 +27,7 @@ export function BulkBar({
     <div
       role="region"
       aria-label="Ações em massa"
-      className="flex animate-ddm-fade flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2.5 pl-4 pr-3 text-background"
+      className="flex animate-ddm-fade flex-wrap items-center gap-2.5 rounded-field bg-foreground py-2.5 pl-4 pr-3 text-background"
     >
       <span className="text-[13px] font-semibold" aria-live="polite">
         {count} {count === 1 ? "conversa selecionada" : "conversas selecionadas"}
@@ -69,7 +69,7 @@ export function failureMessage(r: BatchItemResult): string {
 export function BatchReportPanel({ report, onDismiss }: { report: BatchReport; onDismiss: () => void }) {
   const { summary } = report;
   return (
-    <section role="status" aria-label={report.title} className="flex animate-ddm-fade flex-col gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
+    <section role="status" aria-label={report.title} className="flex animate-ddm-fade flex-col gap-2 rounded-card border border-border bg-card px-4 py-3">
       <header className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold text-foreground">{report.title}</h3>
         <StatusChip tone="ok">{summary.ok} ok</StatusChip>

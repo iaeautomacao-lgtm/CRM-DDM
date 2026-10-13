@@ -961,7 +961,7 @@ function MonitoramentoBoard() {
           {membersLoading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-64 rounded-[10px]" />
+                <Skeleton key={i} className="h-64 rounded-field" />
               ))}
             </div>
           ) : membersError ? (
@@ -1034,7 +1034,7 @@ function MonitoramentoBoard() {
           {teamsLoading || membersLoading || teamMembersLoading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-64 rounded-[10px]" />
+                <Skeleton key={i} className="h-64 rounded-field" />
               ))}
             </div>
           ) : teamsError || membersError ? (

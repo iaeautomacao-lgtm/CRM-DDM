@@ -161,7 +161,7 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
 
         {/* ---- stage (+ painel "Testar fluxo" ao lado, quando aberto) ---- */}
         <div className="mx-4 mt-3 flex min-h-0 flex-1 gap-3 md:mx-6">
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-[10px] border border-border bg-card-2">
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-card border border-border bg-card-2">
             {effectiveView === "canvas" ? (
               <FlowCanvas debug={debug} />
             ) : (

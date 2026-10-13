@@ -239,7 +239,7 @@ export default function AutomationsPage() {
                       key={slug}
                       type="button"
                       onClick={() => startFromTemplate(slug)}
-                      className="group flex flex-col items-start gap-2 rounded-[10px] border border-border bg-card p-4 text-left transition-[border-color,box-shadow,transform] duration-200 ease-ddm hover:-translate-y-0.5 hover:border-primary hover:shadow-overlay"
+                      className="group flex flex-col items-start gap-2 rounded-card border border-border bg-card p-4 text-left transition-[border-color,box-shadow,transform] duration-200 ease-ddm hover:-translate-y-0.5 hover:border-primary hover:shadow-overlay"
                     >
                       <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary-text">
                         <Icon className="size-[18px]" aria-hidden="true" />

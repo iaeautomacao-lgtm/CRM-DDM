@@ -978,7 +978,7 @@ export function TemplateManager() {
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <aside className="w-full shrink-0 space-y-0.5 rounded-[10px] border border-border bg-card p-1.5 lg:sticky lg:top-0 lg:w-52" aria-label="Pastas">
+          <aside className="w-full shrink-0 space-y-0.5 rounded-card border border-border bg-card p-1.5 lg:sticky lg:top-0 lg:w-52" aria-label="Pastas">
             <button
               type="button"
               onClick={() => setActiveFolder('all')}

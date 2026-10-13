@@ -469,7 +469,7 @@ export default function EnvioEmLotePage() {
         </p>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card">
+      <div className="rounded-card border border-border bg-card">
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
@@ -580,7 +580,7 @@ export default function EnvioEmLotePage() {
       </div>
 
       {!campaignId ? (
-        <div className="rounded-[10px] border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4">
           <EmptyState
             icon={Search}
             title="Selecione uma campanha"
@@ -589,7 +589,7 @@ export default function EnvioEmLotePage() {
         </div>
       ) : (
         <>
-          <div className="rounded-[10px] border border-border bg-card p-4">
+          <div className="rounded-card border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold text-foreground">Detalhes</h2>
             {detailLoading ? (
               <Skeleton className="h-32 w-full" />
@@ -634,7 +634,7 @@ export default function EnvioEmLotePage() {
             )}
           </div>
 
-          <div className="rounded-[10px] border border-border bg-card">
+          <div className="rounded-card border border-border bg-card">
             {itemsLoading ? (
               <div className="space-y-3 p-4">
                 {[0, 1, 2].map((i) => (
@@ -736,7 +736,7 @@ export default function EnvioEmLotePage() {
           </div>
 
           {items.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-card px-4 py-3">
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>

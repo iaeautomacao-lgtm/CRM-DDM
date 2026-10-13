@@ -41,7 +41,7 @@ export default function LeadExtractorPage() {
         </Button>
       </div>
 
-      <div className="relative min-h-0 w-full flex-1 animate-ddm-fade overflow-hidden rounded-[10px] border border-border bg-card">
+      <div className="relative min-h-0 w-full flex-1 animate-ddm-fade overflow-hidden rounded-card border border-border bg-card">
         <iframe
           key={iframeKey}
           src={leadExtractorUrl}

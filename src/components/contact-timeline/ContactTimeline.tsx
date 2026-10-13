@@ -213,7 +213,7 @@ export function ContactTimeline({
             </Select>
           </div>
 
-          <Button onClick={handlePesquisar} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+          <Button onClick={handlePesquisar}>
             <Search className="size-4" />
             Pesquisar
           </Button>

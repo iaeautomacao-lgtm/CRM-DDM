@@ -77,7 +77,7 @@ function PerfKpi(props: { title: string; value: ReactNode; sub?: ReactNode; tone
 
 // Painel do protótipo (borda 1px, raio 10px) com a mesma anatomia do Card antigo, para manter a marcação.
 function Card({ className, ...props }: ComponentProps<"section">) {
-  return <section className={cn("flex flex-col overflow-hidden rounded-[10px] border border-border bg-card", className)} {...props} />;
+  return <section className={cn("flex flex-col overflow-hidden rounded-card border border-border bg-card", className)} {...props} />;
 }
 function CardHeader({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("px-[18px] pb-2 pt-3.5", className)} {...props} />;
@@ -363,13 +363,13 @@ export default function DisparadorDesempenhoPage() {
       {/* Estados de carregamento e erro */}
       {loading ? (
         <div className="flex flex-col gap-3.5" aria-busy="true" aria-label="Carregando métricas de desempenho">
-          <Skeleton className="h-[104px] w-full rounded-[10px]" />
-          <Skeleton className="h-72 w-full rounded-[10px]" />
+          <Skeleton className="h-[104px] w-full rounded-field" />
+          <Skeleton className="h-72 w-full rounded-field" />
         </div>
       ) : error ? (
         <ErrorState title="Não foi possível carregar a telemetria" hint={error} onRetry={() => void fetchData(false)} />
       ) : ticks.length === 0 && !(live && (live.activeCampaigns > 0 || live.sentLast60s > 0)) ? (
-        <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-border bg-card px-6 py-10 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-card px-6 py-10 text-center">
           <EmptyState
             className="min-h-0 border-0 bg-transparent p-0"
             icon={Megaphone}
@@ -390,7 +390,7 @@ export default function DisparadorDesempenhoPage() {
           {/* 1. Indicadores da janela */}
           <section
             aria-label="Indicadores da janela"
-            className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-px overflow-hidden rounded-[10px] border border-border bg-border"
+            className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-px overflow-hidden rounded-card border border-border bg-border"
           >
             <PerfKpi
               title="Envios / min"

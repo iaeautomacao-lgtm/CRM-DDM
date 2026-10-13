@@ -105,7 +105,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
       }
     >
       {ready === false && (
-        <div className="mx-[18px] mb-3.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
+        <div className="mx-[18px] mb-3.5 rounded-field border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
           Configure <code className="font-mono text-foreground">NEXT_PUBLIC_APP_URL</code> (https) no servidor: sem ela os links do Webchat não são gerados.
         </div>
       )}

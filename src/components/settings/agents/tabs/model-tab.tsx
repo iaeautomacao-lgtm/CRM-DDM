@@ -44,7 +44,7 @@ function OptionalField({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-[10px] border border-border p-4 space-y-3">
+    <div className="rounded-card border border-border p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
           <Label htmlFor={id} className="text-sm font-medium">

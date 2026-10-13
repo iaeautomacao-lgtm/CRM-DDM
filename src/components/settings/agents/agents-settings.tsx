@@ -353,7 +353,7 @@ function AgentEditor({
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-7 w-72" />
         <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-64 w-full rounded-[10px]" />
+        <Skeleton className="h-64 w-full rounded-field" />
       </section>
     );
   }

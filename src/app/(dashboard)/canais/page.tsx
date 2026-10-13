@@ -465,7 +465,7 @@ export default function CanaisPage() {
       </PageToolbar>
 
       {canManage && selectedCount > 0 && (
-        <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2 pl-4 pr-2.5 text-background">
+        <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-field bg-foreground py-2 pl-4 pr-2.5 text-background">
           <span className="text-[13px] font-semibold">
             {selectedCount} {selectedCount === 1 ? "canal selecionado" : "canais selecionados"}
           </span>
@@ -485,7 +485,7 @@ export default function CanaisPage() {
       )}
 
       {hasInvalidTokenChannel && (
-        <div className="flex animate-ddm-fade items-center gap-3 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
+        <div className="flex animate-ddm-fade items-center gap-3 rounded-field border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
           <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" />
           <p className="text-[13px] text-foreground">
             <span className="font-semibold">Token de acesso inválido.</span>{" "}

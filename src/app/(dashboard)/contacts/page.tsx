@@ -530,7 +530,7 @@ export default function ContactsPage() {
 
       {/* Barra de seleção em massa (contraste invertido, como no protótipo) */}
       {selected.size > 0 && (
-        <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2 pl-4 pr-2.5 text-background">
+        <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-field bg-foreground py-2 pl-4 pr-2.5 text-background">
           <span role="status" className="text-[13px] font-semibold">
             {selected.size} {selected.size === 1 ? 'contato selecionado' : 'contatos selecionados'}
           </span>

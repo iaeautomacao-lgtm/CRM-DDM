@@ -1884,7 +1884,7 @@ export function MessageThread({
           responder, como no protótipo. O composer continua disponível. */}
       {!assignedAgentId && conversation.status !== "closed" && can("inbox.reply") && (
         <div className="shrink-0 border-t border-border bg-card px-3 pt-3 sm:px-6">
-          <div className="mx-auto flex w-full max-w-[760px] animate-ddm-fade items-center gap-3 rounded-[10px] border border-border bg-card-2 px-3.5 py-3">
+          <div className="mx-auto flex w-full max-w-[760px] animate-ddm-fade items-center gap-3 rounded-card border border-border bg-card-2 px-3.5 py-3">
             <Clock className="size-4 shrink-0 text-warning" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-semibold text-foreground">Conversa aguardando atendimento</p>

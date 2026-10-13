@@ -47,7 +47,7 @@ export function PhaseColumn({
   return (
     <section
       className={cn(
-        "flex min-h-0 flex-col rounded-[10px] bg-surface-3/50",
+        "flex min-h-0 flex-col rounded-field bg-surface-3/50",
         collapsed && "self-start",
       )}
     >

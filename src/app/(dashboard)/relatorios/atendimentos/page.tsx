@@ -389,7 +389,7 @@ function AttendanceSection({
     <section className="space-y-4">
       <h2 className="text-base font-semibold text-foreground">{title}</h2>
 
-      <div className="rounded-[10px] border border-border bg-card p-4">
+      <div className="rounded-card border border-border bg-card p-4">
         {loading ? (
           <Skeleton className="h-40 w-full" />
         ) : (
@@ -399,7 +399,7 @@ function AttendanceSection({
 
       {!loading && comparison.length > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-[10px] border border-border bg-card p-4">
+          <div className="rounded-card border border-border bg-card p-4">
             <p className="mb-2 text-sm font-medium text-foreground">
               % de atendimentos por {nameHeader.toLowerCase()} (TOP 5)
             </p>
@@ -424,7 +424,7 @@ function AttendanceSection({
             </div>
           </div>
 
-          <div className="rounded-[10px] border border-border bg-card p-4">
+          <div className="rounded-card border border-border bg-card p-4">
             <p className="mb-2 text-sm font-medium text-foreground">
               % de mensagens por {nameHeader.toLowerCase()} (TOP 5)
             </p>
@@ -449,7 +449,7 @@ function AttendanceSection({
             </div>
           </div>
 
-          <div className="rounded-[10px] border border-border bg-card p-4 lg:col-span-2">
+          <div className="rounded-card border border-border bg-card p-4 lg:col-span-2">
             <p className="mb-2 text-sm font-medium text-foreground">
               Atendimentos e Mensagens % por {nameHeader.toLowerCase()}
             </p>
@@ -609,7 +609,7 @@ export default function AtendimentosPage() {
         </p>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card p-4">
+      <div className="rounded-card border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.dateFrom, dateTo: draft.dateTo }}

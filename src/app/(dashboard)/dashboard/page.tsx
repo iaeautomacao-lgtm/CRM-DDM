@@ -305,5 +305,5 @@ function Row({ children }: { children: ReactNode }) {
 }
 
 function Failed({ title, onRetry, className }: { title: string; onRetry: () => void; className?: string }) {
-  return <ErrorState className={cn('min-w-0 rounded-[10px]', className)} title={title} onRetry={onRetry} />
+  return <ErrorState className={cn('min-w-0 rounded-field', className)} title={title} onRetry={onRetry} />
 }

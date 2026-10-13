@@ -263,7 +263,7 @@ export default function ExportacoesPage() {
         </Button>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card">
+      <div className="rounded-card border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (
