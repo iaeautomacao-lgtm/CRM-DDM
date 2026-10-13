@@ -144,7 +144,7 @@ export async function generateConversationExport(
   };
   push({ type: 'export_header', generated_at: new Date().toISOString(),
     format: 'crm-conversations-ndjson-v1', account_id: job.account_id,
-    date_basis: 'conversation_created_at' });
+    date_basis: job.filters.dateField || 'created_at' });
 
   let cursor = job.filters.cursor ?? null;
   let more = true;
