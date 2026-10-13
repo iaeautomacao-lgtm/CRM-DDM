@@ -41,3 +41,19 @@ export function privateChatMediaUrl(url: string): string {
   const path = chatMediaPath(url);
   return path ? chatMediaReference(path) : url;
 }
+
+/**
+ * `url` é a referência autenticada do chat (`/api/chat-media/account-<id>/<caminho>`)? Mesma regra do gatilho do banco
+ * (migration 350: media_url do chat interno). Com `accountId`, exige a pasta DA conta. Recusa `..`, `?`, `#`, `\`, `%2e/%2f/%5c`
+ * e caracteres de controle: nada de URL externa, de outra conta nem de outra rota.
+ */
+export function isChatMediaRef(url: unknown, accountId?: string): url is string {
+  const prefix = '/api/chat-media/';
+  if (typeof url !== 'string' || url.length > 600 || !url.startsWith(prefix)) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f?#\\]|\.\.|%2e|%2f|%5c/i.test(url)) return false;
+  const rest = url.slice(prefix.length);
+  if (!rest.startsWith('account-')) return false;
+  const folder = accountId ? `account-${accountId}/` : 'account-';
+  return rest.startsWith(folder) && rest.length > folder.length;
+}

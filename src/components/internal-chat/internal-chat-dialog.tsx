@@ -45,6 +45,7 @@ import {
 } from "@/lib/internal-chat/threads";
 import { useAuth } from "@/hooks/use-auth";
 import { uploadAccountMedia, deleteAccountMedia, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
+import { isChatMediaRef } from "@/lib/storage/chat-media";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,6 +163,10 @@ function extensionForAudioMime(mime: string): string {
 /** Renders a message's attached media inline, per media_type — mirrors
  *  the four buckets message-composer.tsx's MediaDraftPreview covers. */
 function MessageMedia({ url, type }: { url: string; type: string | null | undefined }) {
+  // Só renderiza a referência autenticada do chat: uma media_url de fora (mensagem antiga ou gravada por fora) não é carregada.
+  if (!isChatMediaRef(url)) {
+    return <p className="text-xs opacity-70">Anexo indisponível</p>;
+  }
   if (type?.startsWith("image/")) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={url} alt="" className="max-w-full rounded-md" />;
@@ -672,6 +677,12 @@ export function InternalChatDialog({
     }
     setSending(true);
     try {
+      // Só a referência autenticada da própria conta (o banco também recusa qualquer outra: migration 350).
+      const mediaUrl = stagedMedia?.mediaUrl ?? null;
+      if (mediaUrl !== null && !isChatMediaRef(mediaUrl, accountId)) {
+        toast.error("Anexo inválido. Envie o arquivo de novo.");
+        return;
+      }
       const supabase = createClient();
       const { data, error } = await supabase
         .from("internal_messages")
@@ -680,7 +691,7 @@ export function InternalChatDialog({
           sender_id: myUserId,
           recipient_id: selectedContact.user_id,
           content,
-          media_url: stagedMedia?.mediaUrl ?? null,
+          media_url: mediaUrl,
           media_type: stagedMedia?.mediaType ?? null,
         })
         .select()
