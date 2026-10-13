@@ -44,8 +44,10 @@ import {
   Plus,
   GripVertical,
   AlertTriangle,
+  Archive,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usePermission } from "@/hooks/use-permission";
 
 const STAGE_COLORS = [
   "#3b82f6",
@@ -97,6 +99,11 @@ export function PipelineSettings({
   onCreateNewPipeline,
 }: PipelineSettingsProps) {
   const supabase = createClient();
+  const canManage = usePermission("pipelines.manage");
+  // Excluir em definitivo é só do proprietário (pipelines.delete); o servidor também bloqueia.
+  const canDeleteForever = usePermission("pipelines.delete");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const [name, setName] = useState(pipeline.name);
   const [localStages, setLocalStages] = useState<PipelineStage[]>(stages);
@@ -118,7 +125,11 @@ export function PipelineSettings({
     if (!open) return;
     setName(pipeline.name);
     setLocalStages([...stages].sort((a, b) => a.position - b.position));
-    setShowDeleteConfirm(false);
+    // Funil arquivado: esta janela só serve para excluir em definitivo (negócios e etapas estão ocultos pelo RLS).
+    setShowDeleteConfirm(!!pipeline.archived_at);
+    setTypedName("");
+    setDealCount(null);
+    setDealCountLoading(false);
   }, [open, pipeline, stages]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -216,8 +227,13 @@ export function PipelineSettings({
   function openDeleteConfirm() {
     setTypedName("");
     setDealCount(null);
-    setDealCountLoading(true);
     setShowDeleteConfirm(true);
+    // Funil arquivado: o RLS esconde negócios e etapas, então a contagem leria 0 (falso). Fica sem número.
+    if (pipeline.archived_at) {
+      setDealCountLoading(false);
+      return;
+    }
+    setDealCountLoading(true);
     void supabase
       .from("deals")
       .select("id", { count: "exact", head: true })
@@ -232,9 +248,25 @@ export function PipelineSettings({
   function closeDeleteConfirm() {
     setShowDeleteConfirm(false);
     setTypedName("");
+    if (pipeline.archived_at) onOpenChange(false);
+  }
+
+  async function handleArchivePipeline() {
+    setArchiving(true);
+    const { error } = await supabase.rpc("archive_pipeline", { p_pipeline: pipeline.id });
+    setArchiving(false);
+    if (error) {
+      toast.error(error.code === "42501" ? "Você não pode arquivar funis" : "Falha ao arquivar funil");
+      return;
+    }
+    setArchiveOpen(false);
+    onOpenChange(false);
+    onPipelinesChanged();
+    toast.success("Funil arquivado. Dá para restaurar na lista de arquivados.");
   }
 
   async function handleDeletePipeline() {
+    if (!canDeleteForever) return;
     if (!canConfirmPipelineDelete(typedName, pipeline.name)) return;
     setDeleting(true);
     // ON DELETE CASCADE handles deals + stages.
@@ -244,7 +276,7 @@ export function PipelineSettings({
       .eq("id", pipeline.id);
     setDeleting(false);
     if (error) {
-      toast.error("Falha ao excluir funil");
+      toast.error(error.code === "42501" ? "Só o proprietário pode excluir um funil em definitivo" : "Falha ao excluir funil");
       return;
     }
     onOpenChange(false);
@@ -281,6 +313,29 @@ export function PipelineSettings({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Arquivar funil</AlertDialogTitle>
+          <AlertDialogDescription>
+            O funil &quot;{pipeline.name}&quot; sai das listas e dos relatórios, com as etapas e os negócios dele. Nada é apagado:
+            dá para restaurar depois, em &quot;Mostrar arquivados&quot;.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={archiving}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={archiving}
+            onClick={(e) => {
+              e.preventDefault();
+              void handleArchivePipeline();
+            }}
+          >
+            {archiving ? "Arquivando..." : "Arquivar funil"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md bg-popover border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -296,7 +351,7 @@ export function PipelineSettings({
                 <p className="mt-1 text-xs text-foreground">
                   {dealCountLoading
                     ? "Contando os negócios deste funil…"
-                    : pipelineDeleteWarning({ name: pipeline.name, stages: localStages.length, deals: dealCount })}
+                    : pipelineDeleteWarning({ name: pipeline.name, stages: pipeline.archived_at ? null : localStages.length, deals: dealCount })}
                 </p>
               </div>
             </div>
@@ -434,13 +489,19 @@ export function PipelineSettings({
             </div>
 
             <DialogFooter className="border-border bg-popover/50">
-              <Button
-                variant="destructive"
-                onClick={openDeleteConfirm}
-                className="mr-auto"
-              >
-                Excluir funil
-              </Button>
+              <div className="mr-auto flex flex-wrap gap-2">
+                {canManage && !pipeline.archived_at && (
+                  <Button variant="outline" onClick={() => setArchiveOpen(true)}>
+                    <Archive className="mr-1 h-3.5 w-3.5" />
+                    Arquivar funil
+                  </Button>
+                )}
+                {canDeleteForever && (
+                  <Button variant="destructive" onClick={openDeleteConfirm}>
+                    Excluir definitivamente
+                  </Button>
+                )}
+              </div>
               <Button
                 variant="outline"
                 onClick={() => onOpenChange(false)}

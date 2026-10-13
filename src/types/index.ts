@@ -417,6 +417,8 @@ export interface Pipeline {
   user_id: string;
   name: string;
   created_at: string;
+  /** Preenchido quando o funil está arquivado (migration 340); null/ausente = ativo. */
+  archived_at?: string | null;
 }
 
 export interface PipelineStage {
