@@ -1,12 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { periodStartIso, type HistoryPeriod } from "./format";
 
 type DB = SupabaseClient;
 
 export const HISTORY_PAGE_SIZE = 25;
 
+/** Situação da conversa no filtro: encerradas (padrão), em andamento ou todas (antes no relatório Conversas). */
+export type HistoryStatus = "closed" | "open" | "all";
+
+/** Período personalizado (datas yyyy-MM-dd, locais); qualquer ponta vazia fica sem limite. */
+export interface HistoryRange {
+  from: string;
+  to: string;
+}
+
 export interface ClosedConversation {
   id: string;
+  status: string;
   created_at: string;
   closed_at: string | null;
   updated_at: string;
@@ -20,17 +31,17 @@ export interface ClosedConversation {
 }
 
 const SELECT = `
-  id, created_at, closed_at, updated_at, contact_id, assigned_agent_id, team_id,
+  id, status, created_at, closed_at, updated_at, contact_id, assigned_agent_id, team_id,
   waha_session, channel_type,
   outcome_tag:outcome_tag_id ( name, color ),
   contact:contacts!contact_id ( name, phone )
 `;
 
 /**
- * Conversas encerradas da conta, mais recentes primeiro, paginadas com
- * `.range()`. `closed_at` (migration 130) ordena; conversas antigas sem a
- * data caem para o fim. A busca por nome/telefone resolve primeiro os
- * contatos (até 50) e filtra por `contact_id`.
+ * Conversas da conta, mais recentes primeiro, paginadas com `.range()`.
+ * Encerradas (padrão): `closed_at` (migration 130) ordena e filtra o período; conversas antigas sem a data
+ * caem para o fim. Em andamento ou todas: ordena e filtra o período por `created_at`. A busca por
+ * nome/telefone resolve primeiro os contatos (até 50) e filtra por `contact_id`.
  */
 export async function loadClosedConversations(
   db: DB,
@@ -40,7 +51,18 @@ export async function loadClosedConversations(
     search,
     page,
     tabulacao = null,
-  }: { accountId: string; period: HistoryPeriod; search: string; page: number; tabulacao?: string | null },
+    status = "closed",
+    range = null,
+  }: {
+    accountId: string;
+    period: HistoryPeriod;
+    search: string;
+    page: number;
+    tabulacao?: string | null;
+    status?: HistoryStatus;
+    /** Quando informado, vale no lugar do `period`. */
+    range?: HistoryRange | null;
+  },
 ): Promise<{ rows: ClosedConversation[]; hasMore: boolean }> {
   let contactIds: string[] | null = null;
   const term = search.trim().replace(/[%,"]/g, "");
@@ -57,18 +79,22 @@ export async function loadClosedConversations(
   }
 
   const from = page * HISTORY_PAGE_SIZE;
-  let query = db
-    .from("conversations")
-    .select(SELECT)
-    .eq("account_id", accountId)
-    .eq("status", "closed")
-    .order("closed_at", { ascending: false, nullsFirst: false })
+  const dateColumn = status === "closed" ? "closed_at" : "created_at";
+  let query = db.from("conversations").select(SELECT).eq("account_id", accountId);
+  if (status !== "all") query = query.eq("status", status);
+  query = query
+    .order(dateColumn, { ascending: false, nullsFirst: false })
     .order("id", { ascending: false })
     // Uma a mais que a página: acusa "tem mais" sem um COUNT.
     .range(from, from + HISTORY_PAGE_SIZE);
 
-  const start = periodStartIso(period);
-  if (start) query = query.gte("closed_at", start);
+  if (range) {
+    if (range.from) query = query.gte(dateColumn, startOfDayIso(range.from));
+    if (range.to) query = query.lte(dateColumn, endOfDayIso(range.to));
+  } else {
+    const start = periodStartIso(period);
+    if (start) query = query.gte(dateColumn, start);
+  }
   if (contactIds) query = query.in("contact_id", contactIds);
   // Filtro por tabulação (tags.id gravada em conversations.outcome_tag_id ao encerrar; índice idx_conversations_outcome_tag, 041).
   if (tabulacao) query = query.eq("outcome_tag_id", tabulacao);
