@@ -73,3 +73,8 @@ export function sanitizeCspReports(payload: unknown): CspViolation[] {
   }
   return out;
 }
+
+/** Uma linha de log por violação, só com os campos já higienizados (nunca o corpo recebido). */
+export function formatCspViolation(violation: CspViolation): string {
+  return JSON.stringify(violation);
+}

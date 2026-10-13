@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { clientIp } from "@/lib/audit/context";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-import { sanitizeCspReports } from "@/lib/security/csp-report";
+import { formatCspViolation, sanitizeCspReports } from "@/lib/security/csp-report";
 import { readCappedBody } from "@/lib/security/webhook-body";
 
 // POST /api/security/csp-report — recebe as violações do Content-Security-Policy(-Report-Only) enviadas pelo navegador.
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     return new NextResponse(null, { status: 400 });
   }
   for (const violation of sanitizeCspReports(payload)) {
-    console.warn("[csp-report]", JSON.stringify(violation));
+    console.warn("[csp-report]", formatCspViolation(violation));
   }
   return new NextResponse(null, { status: 204 });
 }
