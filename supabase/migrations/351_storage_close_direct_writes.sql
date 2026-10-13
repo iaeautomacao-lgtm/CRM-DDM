@@ -23,7 +23,24 @@
 --              Teste de fumaça: com o front novo, enviar um anexo no Inbox e no chat interno; com o token do navegador,
 --              supabase.storage.from('chat-media').upload(...) deve devolver erro de RLS.
 -- ORDEM: depois do deploy do front. Independente das demais migrations do plano.
--- ROLLBACK: recriar as policies das migrations 020 (flow-media) e 023 (chat-media): "Members can upload|update|delete ...".
+-- ROLLBACK (SQL executável; recria as 6 policies de escrita. chat-media: texto da 133 (reconciliação com produção, que supersede a 023);
+--           flow-media: texto da 020. Nos dois, a tabela é wacrm.profiles, onde ela vive hoje: 020/023 diziam public.profiles, de antes do
+--           schema wacrm):
+--             BEGIN;
+--             DROP POLICY IF EXISTS "Members can upload chat media" ON storage.objects;
+--             CREATE POLICY "Members can upload chat media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'chat-media' AND EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]));
+--             DROP POLICY IF EXISTS "Members can update chat media" ON storage.objects;
+--             CREATE POLICY "Members can update chat media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'chat-media' AND EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1])) WITH CHECK (bucket_id = 'chat-media' AND EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]));
+--             DROP POLICY IF EXISTS "Members can delete chat media" ON storage.objects;
+--             CREATE POLICY "Members can delete chat media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'chat-media' AND EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]));
+--             DROP POLICY IF EXISTS "Members can upload flow media" ON storage.objects;
+--             CREATE POLICY "Members can upload flow media" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'flow-media' AND (EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]) OR auth.uid()::text = (storage.foldername(name))[1]));
+--             DROP POLICY IF EXISTS "Members can update flow media" ON storage.objects;
+--             CREATE POLICY "Members can update flow media" ON storage.objects FOR UPDATE USING (bucket_id = 'flow-media' AND (EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]) OR auth.uid()::text = (storage.foldername(name))[1]));
+--             DROP POLICY IF EXISTS "Members can delete flow media" ON storage.objects;
+--             CREATE POLICY "Members can delete flow media" ON storage.objects FOR DELETE USING (bucket_id = 'flow-media' AND (EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND ('account-' || p.account_id::text) = (storage.foldername(name))[1]) OR auth.uid()::text = (storage.foldername(name))[1]));
+--             DELETE FROM wacrm.schema_migrations WHERE version = '351_storage_close_direct_writes';
+--             COMMIT;
 -- ============================================================
 
 BEGIN;
