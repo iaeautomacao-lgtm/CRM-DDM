@@ -4,6 +4,7 @@ import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveThroughputConfig } from "@/lib/disparador/throughput-config";
 import { listRateLimits } from "@/lib/disparador/rate-limits-service";
+import { listWahaRates } from "@/lib/disparador/waha-rate";
 import { computeRitmo, type RawSystemLogTick } from "@/lib/disparador/ritmo";
 
 // ============================================================
@@ -51,7 +52,16 @@ export async function GET() {
       metaRate = null;
     }
 
-    return NextResponse.json({ ...result, meta_rate_per_second: metaRate });
+    // Ritmo das sessões WAHA (migration 338; sem linha vale 1/s): o menor da conta. Sem sessão WAHA ou sem a tabela, segue sem o campo.
+    let wahaRate: number | null = null;
+    try {
+      const view = await listWahaRates(db, ctx.accountId);
+      if (view.channels.length) wahaRate = Math.min(...view.channels.map((c) => c.rate_per_second));
+    } catch {
+      wahaRate = null;
+    }
+
+    return NextResponse.json({ ...result, meta_rate_per_second: metaRate, waha_rate_per_second: wahaRate });
   } catch (err) {
     return toErrorResponse(err);
   }
