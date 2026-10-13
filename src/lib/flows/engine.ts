@@ -4232,6 +4232,12 @@ export async function dispatchInboundToFlows(
       // One SELECT for the whole flow's nodes — advance loop is now
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
+      // Decisão do dono (13/10, item 13): o teto de 50 voltas do go_to vale POR MENSAGEM do cliente — zera quando chega mensagem nova.
+      // O laço sem interação (go_to girando sozinho dentro do mesmo avanço) continua bloqueado em 50.
+      if (activeRun.hops_count > 0) {
+        const { error: hopsError } = await db.from("flow_runs").update({ hops_count: 0 }).eq("id", activeRun.id);
+        if (!hopsError) activeRun = { ...activeRun, hops_count: 0 };
+      }
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
     }
 
