@@ -115,20 +115,15 @@ export async function uploadAccountMedia(purpose: MediaPurpose, file: File): Pro
 }
 
 /**
- * Delete a previously-uploaded object. Used to GC media that was staged
- * (uploaded) but never sent — a cancelled draft or a failed Meta send —
- * so abandoned attachments don't accumulate in the public bucket. The
- * DELETE is gated by the same account-scoped RLS policy as the upload,
- * so a caller can only remove objects under their own account folder.
- *
- * Best-effort: callers fire-and-forget and swallow errors (a missed
- * delete is a storage nit, not something to surface to the user).
+ * Descarta um anexo em rascunho (enviado e não usado): rascunho cancelado, envio que falhou. O navegador não apaga mais direto no
+ * Storage (migration 351 removeu as policies de escrita): passa por POST /api/media/delete, que só apaga objeto da própria conta
+ * criado há pouco. Best-effort: os chamadores disparam sem esperar e ignoram o erro (anexo esquecido é sujeira, não falha).
  */
-export async function deleteAccountMedia(
-  bucket: string,
-  path: string,
-): Promise<void> {
-  const supabase = createClient();
-  const { error } = await supabase.storage.from(bucket).remove([path]);
-  if (error) throw new Error(error.message);
+export async function deleteAccountMedia(purpose: MediaPurpose, path: string): Promise<void> {
+  const res = await apiFetch("/api/media/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose, path }),
+  });
+  if (!res.ok) throw new Error(await readError(res, "Não foi possível descartar o anexo."));
 }

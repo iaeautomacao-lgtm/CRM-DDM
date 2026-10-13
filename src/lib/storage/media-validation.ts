@@ -211,3 +211,18 @@ export function isAccountMediaPath(path: string, accountId: string): boolean {
   if (!rest || rest.includes("..") || rest.includes("\\") || rest.startsWith("/")) return false;
   return !rest.split("/").some((seg) => seg === "" || seg === "." || seg === "..");
 }
+
+/** Rascunho = anexo enviado e ainda não usado. Só ele pode ser apagado pelo navegador (descarte de rascunho). */
+export const STAGED_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * O objeto foi criado há pouco (dentro de `maxAgeMs`)? Mídia mais antiga pode já estar numa mensagem, template ou fluxo e
+ * não é apagada por esta rota. Data ausente ou inválida = não é rascunho (fail-closed).
+ */
+export function isRecentlyStaged(createdAt: unknown, now: number = Date.now(), maxAgeMs: number = STAGED_MAX_AGE_MS): boolean {
+  if (typeof createdAt !== "string") return false;
+  const t = Date.parse(createdAt);
+  if (!Number.isFinite(t)) return false;
+  const age = now - t;
+  return age >= -60_000 && age <= maxAgeMs;
+}

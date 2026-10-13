@@ -54,7 +54,6 @@ import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
   MessageComposer,
-  CHAT_MEDIA_BUCKET,
   type SendMediaPayload,
   type RecallDraft,
 } from "./message-composer";
@@ -792,7 +791,7 @@ export function MessageThread({
           if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
           // The upload never reached the recipient — GC the orphaned
           // object rather than leaving it in the public bucket forever.
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+          void deleteAccountMedia("inbox", payload.path).catch(() => {});
           return;
         }
 
@@ -1116,7 +1115,7 @@ export function MessageThread({
       pendingQueueRef.current.cancel(id);
       updatePendingSends((prev) => prev.filter((p) => p.id !== id));
       if (entry?.data.kind === "media") {
-        void deleteAccountMedia(CHAT_MEDIA_BUCKET, entry.data.payload.path).catch(() => {});
+        void deleteAccountMedia("inbox", entry.data.payload.path).catch(() => {});
       }
     },
     [updatePendingSends],

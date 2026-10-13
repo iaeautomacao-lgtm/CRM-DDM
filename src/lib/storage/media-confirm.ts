@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { chatMediaReference } from "@/lib/storage/chat-media";
-import { checkStoredObject, type MediaBucket, type MediaKind } from "@/lib/storage/media-validation";
+import { checkStoredObject, isRecentlyStaged, type MediaBucket, type MediaKind } from "@/lib/storage/media-validation";
 import { safeUploadName } from "@/lib/webchat/messages";
 
 /** Quantos bytes lidos do início do arquivo para conferir o formato. */
@@ -68,4 +68,27 @@ export async function confirmUploadedMedia(bucket: MediaBucket, path: string): P
 
   const url = bucket === "chat-media" ? chatMediaReference(path) : db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
   return { ok: true, mime: checked.mime, kind: checked.kind, url };
+}
+
+export type DeleteStagedResult =
+  | { ok: true }
+  | { ok: false; status: 404 | 409 | 503; code: "not_found" | "not_staged" | "unavailable"; error: string };
+
+/**
+ * Descarta um anexo em rascunho (enviado e nunca usado). O navegador não tem mais policy de DELETE no Storage: apagar passa por
+ * aqui, e só vale para objeto da própria conta criado há pouco (STAGED_MAX_AGE_MS): mídia antiga pode estar em mensagem enviada.
+ */
+export async function deleteStagedMedia(bucket: MediaBucket, path: string): Promise<DeleteStagedResult> {
+  const db = supabaseAdmin();
+  const slash = path.lastIndexOf("/");
+  const { data: objects, error } = await db.storage.from(bucket).list(path.slice(0, slash), { search: path.slice(slash + 1), limit: 5 });
+  if (error) return { ok: false, status: 503, code: "unavailable", error: "Não foi possível verificar o arquivo." };
+  const object = objects?.find((o) => o.name === path.slice(slash + 1));
+  if (!object) return { ok: false, status: 404, code: "not_found", error: "Arquivo não encontrado." };
+  if (!isRecentlyStaged(object.created_at)) {
+    return { ok: false, status: 409, code: "not_staged", error: "Só anexos recém-enviados e ainda não usados podem ser descartados." };
+  }
+  const { error: removeError } = await db.storage.from(bucket).remove([path]);
+  if (removeError) return { ok: false, status: 503, code: "unavailable", error: "Não foi possível apagar o arquivo." };
+  return { ok: true };
 }

@@ -92,6 +92,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   // account.view no chat interno) e é checada na própria rota por MEDIA_PURPOSES; aqui só o piso: qualquer membro autenticado.
   session("media/upload-url", "POST", "account.view"),
   session("media/confirm", "POST", "account.view"),
+  session("media/delete", "POST", "account.view"),
   pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
   pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
   pg("account/members/[userId]/status", "POST", "admin", "members.manage"),

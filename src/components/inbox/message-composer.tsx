@@ -182,7 +182,7 @@ export function MessageComposer({
   // Best-effort GC of a staged object the user never sent. Fire-and-forget.
   const removeStaged = useCallback((path: string | undefined) => {
     if (!path) return;
-    void deleteAccountMedia(CHAT_MEDIA_BUCKET, path).catch(() => {});
+    void deleteAccountMedia("inbox", path).catch(() => {});
   }, []);
 
   // Voice recording state. The recorder encodes Ogg/Opus in-browser

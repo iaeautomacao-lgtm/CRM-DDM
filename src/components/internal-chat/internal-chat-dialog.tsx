@@ -58,7 +58,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ErrorState } from "@/components/dashboard/error-state";
 import type { InternalMessage } from "@/types";
 
-const CHAT_MEDIA_BUCKET = "chat-media";
 const MAX_RECORDING_SECONDS = 5 * 60;
 
 type InternalChatMode = "operator" | "supervisor";
@@ -243,7 +242,7 @@ export function InternalChatDialog({
       // GC a staged-but-unsent upload so it doesn't linger as an
       // orphan in chat-media.
       if (stagedMedia) {
-        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+        deleteAccountMedia("internal_chat", stagedMedia.path).catch((err) => {
           console.error("[InternalChatDialog] failed to GC staged media on close:", err);
         });
       }
@@ -550,7 +549,7 @@ export function InternalChatDialog({
 
   function discardStagedMedia() {
     if (stagedMedia) {
-      deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+      deleteAccountMedia("internal_chat", stagedMedia.path).catch((err) => {
         console.error("[InternalChatDialog] failed to GC staged media:", err);
       });
     }
@@ -571,7 +570,7 @@ export function InternalChatDialog({
     try {
       const { publicUrl, path } = await uploadAccountMedia("internal_chat", file);
       if (stagedMedia) {
-        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch(() => {});
+        deleteAccountMedia("internal_chat", stagedMedia.path).catch(() => {});
       }
       setStagedMedia({ kind, mediaUrl: publicUrl, mediaType: file.type, path, filename: file.name });
     } catch (err) {

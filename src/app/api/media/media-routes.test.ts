@@ -16,7 +16,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 // Storage simulado: um objeto por caminho, com os metadados gravados e o conteúdo.
-const objects = new Map<string, { size: number; mimetype: string; head: number[] }>();
+const objects = new Map<string, { size: number; mimetype: string; head: number[]; createdAt?: string }>();
 const removed: string[] = [];
 const createSignedUploadUrl = vi.fn(async (path: string) => ({ data: { path, token: "tok" }, error: null }));
 vi.mock("@/lib/flows/admin-client", () => ({
@@ -27,7 +27,7 @@ vi.mock("@/lib/flows/admin-client", () => ({
         list: async (folder: string, opts: { search?: string }) => ({
           data: [...objects.entries()]
             .filter(([p]) => p.startsWith(`${folder}/`) && p.slice(folder.length + 1) === opts.search)
-            .map(([p, o]) => ({ name: p.slice(folder.length + 1), metadata: { size: o.size, mimetype: o.mimetype } })),
+            .map(([p, o]) => ({ name: p.slice(folder.length + 1), created_at: o.createdAt ?? new Date().toISOString(), metadata: { size: o.size, mimetype: o.mimetype } })),
           error: null,
         }),
         createSignedUrl: async (p: string) => ({ data: { signedUrl: `https://storage.test/${bucket}/${p}` }, error: null }),
@@ -53,6 +53,7 @@ vi.stubGlobal(
 
 const uploadUrl = await import("./upload-url/route");
 const confirm = await import("./confirm/route");
+const del = await import("./delete/route");
 
 const post = (handler: (r: Request) => Promise<Response>, body: unknown) =>
   handler(new Request("https://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
@@ -186,5 +187,48 @@ describe("POST /api/media/confirm", () => {
     expect((await post(confirm.POST, { purpose: "nada", path })).status).toBe(400);
     requirePermission.mockRejectedValue(Object.assign(new Error("sem permissão"), { status: 403 }));
     expect((await post(confirm.POST, { purpose: "flow", path })).status).toBe(403);
+  });
+});
+
+describe("POST /api/media/delete (descarte de rascunho)", () => {
+  const path = `account-${ACC}/abc-rascunho.png`;
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+
+  it("apaga anexo RECÉM-enviado da própria conta e pede a permissão da origem", async () => {
+    objects.set(path, { size: 100, mimetype: "image/png", head: PNG_HEAD, createdAt: hoursAgo(0.1) });
+    const res = await post(del.POST, { purpose: "inbox", path });
+    expect(res.status).toBe(200);
+    expect(removed).toEqual([path]);
+    expect(requirePermission).toHaveBeenCalledWith("inbox.reply");
+  });
+
+  it("NÃO apaga mídia antiga (pode estar numa mensagem enviada): 409 e o objeto fica", async () => {
+    objects.set(path, { size: 100, mimetype: "image/png", head: PNG_HEAD, createdAt: hoursAgo(5) });
+    const res = await post(del.POST, { purpose: "inbox", path });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("not_staged");
+    expect(removed).toEqual([]);
+    expect(objects.has(path)).toBe(true);
+  });
+
+  it("outra conta, '..' e pasta fora da conta: 404 sem tocar no Storage", async () => {
+    objects.set(`account-${OTHER}/x.png`, { size: 100, mimetype: "image/png", head: PNG_HEAD });
+    for (const p of [`account-${OTHER}/x.png`, `account-${ACC}/../account-${OTHER}/x.png`, "meta/x.png", ""]) {
+      expect((await post(del.POST, { purpose: "inbox", path: p })).status, p).toBe(404);
+    }
+    expect(removed).toEqual([]);
+  });
+
+  it("objeto inexistente: 404; corpo inválido: 400; sem permissão da origem: 403", async () => {
+    expect((await post(del.POST, { purpose: "inbox", path })).status).toBe(404);
+    expect((await post(del.POST, { purpose: "inbox" })).status).toBe(400);
+    expect((await post(del.POST, { purpose: "avatars", path })).status).toBe(400);
+    requirePermission.mockRejectedValue(Object.assign(new Error("sem permissão"), { status: 403 }));
+    expect((await post(del.POST, { purpose: "flow", path })).status).toBe(403);
+  });
+
+  it("limite de descartes por minuto", async () => {
+    checkRateLimit.mockResolvedValue({ success: false });
+    expect((await post(del.POST, { purpose: "inbox", path })).status).toBe(429);
   });
 });

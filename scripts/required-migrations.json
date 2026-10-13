@@ -426,6 +426,10 @@
     {
       "version": "336_campaign_template_pause",
       "kind": "registry"
+    },
+    {
+      "version": "351_storage_close_direct_writes",
+      "kind": "registry"
     }
   ]
 }

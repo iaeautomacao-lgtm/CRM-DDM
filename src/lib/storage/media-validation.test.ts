@@ -5,6 +5,7 @@ import {
   checkStoredObject,
   checkUploadRequest,
   isAccountMediaPath,
+  isRecentlyStaged,
   isMediaPurpose,
   magicMatchesMime,
   maxBytesFor,
@@ -132,5 +133,19 @@ describe("media-validation: caminho da conta", () => {
     expect(isAccountMediaPath(`account-${acc}\\x.png`, acc)).toBe(false);
     expect(isAccountMediaPath(`meta/abc.png`, acc)).toBe(false);
     expect(isAccountMediaPath("", acc)).toBe(false);
+  });
+});
+
+describe("media-validation: rascunho recente", () => {
+  const now = Date.parse("2026-10-13T12:00:00Z");
+  it("só objeto criado há pouco é descartável; data ausente ou inválida = não é rascunho", () => {
+    expect(isRecentlyStaged("2026-10-13T11:30:00Z", now)).toBe(true);
+    expect(isRecentlyStaged("2026-10-13T10:00:01Z", now)).toBe(true);
+    expect(isRecentlyStaged("2026-10-13T09:59:00Z", now)).toBe(false); // passou de 2 h
+    expect(isRecentlyStaged("2026-10-13T12:00:30Z", now)).toBe(true); // relógio levemente adiantado
+    expect(isRecentlyStaged("2026-10-13T13:00:00Z", now)).toBe(false); // criado "no futuro"
+    expect(isRecentlyStaged(undefined, now)).toBe(false);
+    expect(isRecentlyStaged("não é data", now)).toBe(false);
+    expect(isRecentlyStaged(null, now)).toBe(false);
   });
 });
