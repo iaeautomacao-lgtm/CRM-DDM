@@ -226,7 +226,7 @@ export default function ExportacoesPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Exportações</h1>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Exportações</h2>
         <p className="text-sm text-muted-foreground">
           Histórico de arquivos exportados nos relatórios — baixe novamente sem gerar de novo.
         </p>
@@ -237,6 +237,7 @@ export default function ExportacoesPage() {
         <Input
           value={draftSearch}
           onChange={(e) => setDraftSearch(e.target.value)}
+          aria-label="Pesquisar exportações por descrição ou solicitante"
           placeholder="Pesquisar por descrição ou solicitante"
           className="pl-8"
         />

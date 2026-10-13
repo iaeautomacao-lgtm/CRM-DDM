@@ -20,7 +20,7 @@
 // combobox.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { format } from "date-fns";
 import {
   Ban,
@@ -32,7 +32,6 @@ import {
   Info,
   Search,
   SlidersHorizontal,
-  UserX,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -233,6 +232,7 @@ function defaultItemFilters(): ItemFilters {
 }
 
 export default function EnvioEmLotePage() {
+  const uid = useId();
   // Exportar exige reports.export (supervisor+); o servidor revalida.
   const canExport = usePermissions().can("reports.export");
   const { accountId } = useAuth();
@@ -453,13 +453,6 @@ export default function EnvioEmLotePage() {
     }
   }
 
-  // Placeholder — remoção em massa de contatos com falha ainda não tem
-  // fluxo definido (exclusão de contatos tem efeitos em outras telas do
-  // CRM, não só no Disparador). Só a UI por enquanto, conforme pedido.
-  function handleRemoveFromBase() {
-    toast.info("Em breve — exportar a lista de falhas e remover manualmente.");
-  }
-
   function campaignLabel(id: string | null) {
     if (!id) return "Selecione uma campanha";
     const c = campaigns.find((c) => c.id === id);
@@ -470,7 +463,7 @@ export default function EnvioEmLotePage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h1>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h2>
         <p className="text-sm text-muted-foreground">
           Campanhas do Disparador com métricas agregadas e detalhe por contato.
         </p>
@@ -480,6 +473,8 @@ export default function EnvioEmLotePage() {
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          aria-controls={`${uid}-filtros`}
           className="flex w-full items-center justify-between gap-2 px-4 py-3"
         >
           <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -490,13 +485,13 @@ export default function EnvioEmLotePage() {
         </button>
 
         {filtersOpen && (
-          <div className="border-t border-border p-4">
+          <div id={`${uid}-filtros`} className="border-t border-border p-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[240px] space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Campanha</label>
+                  <label htmlFor={`${uid}-campanha`} className="text-xs font-medium text-muted-foreground">Campanha</label>
                   <Select value={campaignId ?? ""} onValueChange={(v) => v && setCampaignId(v)}>
-                    <SelectTrigger className="w-64">
+                    <SelectTrigger id={`${uid}-campanha`} className="w-64">
                       <SelectValue>{() => campaignLabel(campaignId)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent className="z-50">
@@ -510,8 +505,9 @@ export default function EnvioEmLotePage() {
                 </div>
 
                 <div className="min-w-[200px] space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Contato</label>
+                  <label htmlFor={`${uid}-contato`} className="text-xs font-medium text-muted-foreground">Contato</label>
                   <Input
+                    id={`${uid}-contato`}
                     value={draft.search}
                     onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
                     placeholder="Nome ou telefone do contato"
@@ -520,12 +516,12 @@ export default function EnvioEmLotePage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Status</label>
+                  <label htmlFor={`${uid}-status`} className="text-xs font-medium text-muted-foreground">Status</label>
                   <Select
                     value={draft.status}
                     onValueChange={(v) => v && setDraft((d) => ({ ...d, status: v }))}
                   >
-                    <SelectTrigger className="w-40" disabled={!campaignId}>
+                    <SelectTrigger id={`${uid}-status`} className="w-40" disabled={!campaignId}>
                       <SelectValue>
                         {(v: string) => STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v}
                       </SelectValue>
@@ -541,12 +537,12 @@ export default function EnvioEmLotePage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Tipo de erro</label>
+                  <label htmlFor={`${uid}-tipo`} className="text-xs font-medium text-muted-foreground">Tipo de erro</label>
                   <Select
                     value={errorTypeFilter}
                     onValueChange={(v) => v && setErrorTypeFilter(v as ErrorTypeFilter)}
                   >
-                    <SelectTrigger className="w-48" disabled={!campaignId}>
+                    <SelectTrigger id={`${uid}-tipo`} className="w-48" disabled={!campaignId}>
                       <SelectValue>
                         {(v: string) => ERROR_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v}
                       </SelectValue>
@@ -691,7 +687,7 @@ export default function EnvioEmLotePage() {
                                     render={
                                       <button
                                         type="button"
-                                        className="text-muted-foreground hover:text-foreground"
+                                        className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
                                         aria-label="Ver erro"
                                       />
                                     }
@@ -726,15 +722,6 @@ export default function EnvioEmLotePage() {
                                   >
                                     <Ban className="size-4" />
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={handleRemoveFromBase}
-                                    className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
-                                    title="Remover da base"
-                                    aria-label="Remover da base"
-                                  >
-                                    <UserX className="size-4" />
-                                  </button>
                                 </>
                               )}
                             </div>
@@ -753,7 +740,7 @@ export default function EnvioEmLotePage() {
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>
-              <div className="flex items-center gap-1">
+              <nav aria-label="Paginação" className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="icon-sm"
@@ -774,6 +761,8 @@ export default function EnvioEmLotePage() {
                       variant={p === page ? "default" : "outline"}
                       size="icon-sm"
                       onClick={() => setPage(p)}
+                      aria-label={`Página ${p}`}
+                      aria-current={p === page ? "page" : undefined}
                       className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
                     >
                       {p}
@@ -789,7 +778,7 @@ export default function EnvioEmLotePage() {
                 >
                   <ChevronRight className="size-4" />
                 </Button>
-              </div>
+              </nav>
             </div>
           )}
         </>
