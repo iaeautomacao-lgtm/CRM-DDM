@@ -1,3 +1,5 @@
+import { enforceRateLimit, rejectOversizedBody } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { decodeTextBytes } from "@/lib/text/decode-text";
 import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
@@ -23,6 +25,8 @@ export async function POST(request: Request) {
     } catch (err) {
       return toErrorResponse(err);
     }
+    const limited = await enforceRateLimit(`disp:contactsImport:${userId ?? accountId}`, RATE_LIMITS.importBlock);
+    if (limited) return limited;
 
     // 2. Parse da requisição. Dois formatos:
     //   - JSON (assistente "Nova campanha"): { rows, chunk_index, ... } — um
@@ -57,6 +61,9 @@ export async function POST(request: Request) {
         }
       }
     } else {
+      // Content-Length ANTES do formData(): o arquivo inteiro (até 20 MB) + os campos do formulário.
+      const tooBig = rejectOversizedBody(request, MAX_IMPORT_FILE_BYTES + 1024 * 1024);
+      if (tooBig) return tooBig;
       formData = await request.formData();
       file = formData.get("file") as File | null;
       if (!file) {

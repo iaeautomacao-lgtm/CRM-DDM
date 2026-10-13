@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { suggestOutcomeTag } from "@/lib/ai/tabulacao-suggest";
 
@@ -20,7 +22,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { supabase, accountId } = await requirePermission("inbox.ai_assist");
+    const { supabase, accountId, userId } = await requirePermission("inbox.ai_assist");
+    // Cada chamada gasta a chave de IA da conta: limite por operador.
+    const limited = await enforceRateLimit(`ai:suggestTag:${userId}`, RATE_LIMITS.aiSuggestTag);
+    if (limited) return limited;
     const { id: conversationId } = await params;
     if (!UUID_RE.test(conversationId)) {
       return NextResponse.json({ error: "Conversa inválida" }, { status: 400 });

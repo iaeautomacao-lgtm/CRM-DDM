@@ -1,3 +1,5 @@
+import { enforceRateLimit } from '@/lib/api/guards'
+import { RATE_LIMITS } from '@/lib/rate-limit'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardPermission } from '@/lib/auth/route-guard'
@@ -152,6 +154,8 @@ export async function POST() {
     // (mesmo papel das páginas /templates e /canais).
     const auth = await guardPermission('templates.manage')
     if (!auth.ok) return auth.response
+    const limited = await enforceRateLimit(`wa:templateSync:${auth.ctx.userId ?? auth.ctx.accountId}`, RATE_LIMITS.templateSync)
+    if (limited) return limited
     const { supabase, accountId } = auth.ctx
 
     // Todos os canais Meta habilitados da conta, agrupados por WABA: cada

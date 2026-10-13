@@ -1,3 +1,5 @@
+import { enforceRateLimit } from '@/lib/api/guards'
+import { RATE_LIMITS } from '@/lib/rate-limit'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardPermission } from '@/lib/auth/route-guard'
@@ -10,6 +12,8 @@ export async function POST(request: Request) {
     // poderia vincular o próprio WhatsApp ao canal e receber as conversas.
     const auth = await guardPermission('channels.manage')
     if (!auth.ok) return auth.response
+    const limited = await enforceRateLimit(`wa:waha:pairing-code:${auth.ctx.userId ?? auth.ctx.accountId}`, RATE_LIMITS.wahaControl)
+    if (limited) return limited
     const { supabase, accountId } = auth.ctx
 
     const body = await request.json()

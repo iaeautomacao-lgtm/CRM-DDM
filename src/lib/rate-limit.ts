@@ -283,6 +283,19 @@ export const RATE_LIMITS = {
   apiV1CampaignCreate: { limit: 6, windowMs: 60_000 },
   /** API v1: extração de conversas e mensagens (TASK38); 60/min por chave nas três rotas, além do limite geral. */
   apiV1Extract: { limit: 60, windowMs: 60_000 },
+  /** Plano de segurança 13/10 (Âncora 1): rotas que gastam IA, banco ou a Meta/WAHA. Por usuário (ou conta, nas de admin). */
+  aiSuggestTag: { limit: 20, windowMs: 60_000 },
+  campaignStart: { limit: 10, windowMs: 60_000 },
+  exportCreate: { limit: 6, windowMs: 60_000 },
+  queueDetails: { limit: 10, windowMs: 60_000 },
+  importCreate: { limit: 10, windowMs: 60_000 },
+  /** Blocos de uma importação grande (até 10.000 linhas cada): 100 mil linhas = 10 blocos. */
+  importBlock: { limit: 60, windowMs: 60_000 },
+  templateSubmit: { limit: 30, windowMs: 60_000 },
+  templateSync: { limit: 6, windowMs: 60_000 },
+  avatarSync: { limit: 3, windowMs: 60_000 },
+  /** QR e código de pareamento são consultados em polling (~3 s) enquanto o operador conecta o número. */
+  wahaControl: { limit: 60, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

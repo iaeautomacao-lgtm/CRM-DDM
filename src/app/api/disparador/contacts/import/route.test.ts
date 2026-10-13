@@ -42,6 +42,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
   }),
 }));
 
+import { __resetRateLimitForTests } from "@/lib/rate-limit";
 import { POST } from "./route";
 
 const DRAFT = "11111111-1111-4111-8111-111111111111";
@@ -55,6 +56,7 @@ const post = (value: unknown) => POST(new Request("https://crm.test/api", {
 }));
 
 describe("import: escopo do rascunho e preservação dos blocos", () => {
+    __resetRateLimitForTests();
   beforeEach(() => {
     state.calls = []; state.foreignDraftTable = ""; state.draftError = false; state.failContact = false; state.contactsReturn = null;
     vi.spyOn(console, "error").mockImplementation(() => {});

@@ -3,6 +3,8 @@ import { toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { reuseImportList, type ImportJob } from "@/lib/disparador/import-lists";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,8 @@ export const dynamic = "force-dynamic";
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const ctx = await requireDisparadorAccess();
+    const limited = await enforceRateLimit(`disp:importReuse:${ctx.userId ?? ctx.accountId}`, RATE_LIMITS.importCreate);
+    if (limited) return limited;
     const { id } = await params;
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Importação não encontrada" }, { status: 404 });
     const db = supabaseAdmin();
