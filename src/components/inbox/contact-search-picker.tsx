@@ -7,6 +7,7 @@
 // the same "search box on top, live-filtered list below" shape cmdk
 // gives you, rather than pulling in a new package for one screen.
 
+import { orIlikeContains } from "@/lib/postgrest/or-filter";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -116,15 +117,12 @@ export function ContactSearchPicker({
 
     const timer = setTimeout(async () => {
       const supabase = createClient();
-      // Same escaping concern as contacts/page.tsx's search — a raw "%"
-      // or "," in the term would otherwise break the PostgREST filter
-      // string this .or() call builds.
-      const escaped = trimmed.replace(/[%,]/g, "");
+      // Escape único dos filtros .or() do PostgREST (src/lib/postgrest/or-filter.ts): o termo nunca sai do valor entre aspas.
       const { data, error } = await supabase
         .from("contacts")
         .select("id, name, phone, avatar_url, instituicao")
         .eq("account_id", accountId)
-        .or(`name.ilike.%${escaped}%,phone.ilike.%${escaped}%`)
+        .or(orIlikeContains(["name", "phone"], trimmed))
         .limit(RESULT_LIMIT);
 
       if (error) {
