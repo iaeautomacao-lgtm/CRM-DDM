@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type ReactElement } from "react";
 import {
+  ChevronDown,
   Headphones,
   KeyRound,
   PanelLeftClose,
@@ -23,6 +24,7 @@ import {
   matchesPrefix,
   NAV_GROUPS,
   navItems,
+  type NavGroup,
 } from "@/lib/nav";
 import { OmniDdmLogo } from "@/components/ui/omniddm-logo";
 import { ChangePasswordDialog } from "@/components/layout/change-password-dialog";
@@ -74,6 +76,27 @@ function RailDot() {
   );
 }
 
+// Grupos que o usuário recolheu, guardados no navegador (preferência por pessoa).
+const CLOSED_GROUPS_KEY = "wacrm.sidebar.closedGroups";
+
+function readClosedGroups(): NavGroup[] {
+  try {
+    const raw = window.localStorage.getItem(CLOSED_GROUPS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((g): g is NavGroup => typeof g === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeClosedGroups(groups: NavGroup[]) {
+  try {
+    window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify(groups));
+  } catch {
+    // sem localStorage (aba anônima, bloqueio): só não lembra a escolha
+  }
+}
+
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
@@ -98,7 +121,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const visibleNavItems = navItems
     .filter((item) => canOpen(item.href.split("?")[0]))
     // Agentes de IA: quem não vê agentes não vê o item (a aba de Configurações exige ai.agents.view).
-    .filter((item) => item.href !== "/settings?tab=agents" || can("ai.agents.view"));
+    .filter((item) => item.href !== "/settings?tab=agents" || can("ai.agents.view"))
+    .filter((item) => !item.permission || can(item.permission));
 
   const visibleBottomNavItems = bottomNavItems.filter((item) => canOpen(item.href.split("?")[0]));
 
@@ -111,6 +135,31 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           .map((item) => item.href)
           .filter((href) => !href.startsWith("/settings") && !href.startsWith("/relatorios")),
       );
+
+  // Grupos recolhidos. O grupo da tela atual abre sozinho ao navegar.
+  const [closedGroups, setClosedGroups] = useState<NavGroup[]>([]);
+  useEffect(() => {
+    setClosedGroups(readClosedGroups());
+  }, []);
+  const activeGroup = visibleNavItems.find(
+    (item) => item.href === activeNavHref || (item.href === "/relatorios/atendimentos" && pathname.startsWith("/relatorios")),
+  )?.group;
+  useEffect(() => {
+    if (!activeGroup) return;
+    setClosedGroups((prev) => {
+      if (!prev.includes(activeGroup)) return prev;
+      const next = prev.filter((g) => g !== activeGroup);
+      writeClosedGroups(next);
+      return next;
+    });
+  }, [activeGroup]);
+  const toggleGroup = (id: NavGroup) => {
+    setClosedGroups((prev) => {
+      const next = prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id];
+      writeClosedGroups(next);
+      return next;
+    });
+  };
 
   const homeHref = accountRole ? getDefaultRoute(accountRole) : "/dashboard";
 
@@ -248,10 +297,19 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </div>
 
         <TooltipProvider>
-          <nav className={cn("flex-1 overflow-x-hidden overflow-y-auto py-3", rail ? "px-2" : "px-2.5")}>
+          <nav
+            className={cn(
+              // rola com roda/toque, sem mostrar a barra
+              "flex-1 overflow-x-hidden overflow-y-auto py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+              rail ? "px-2" : "px-2.5",
+            )}
+          >
             {NAV_GROUPS.map((group, groupIndex) => {
               const items = visibleNavItems.filter((item) => item.group === group.id);
               if (items.length === 0) return null;
+              // No modo só ícones todos os grupos ficam abertos.
+              const groupOpen = rail || !closedGroups.includes(group.id);
+              const listId = `nav-group-${group.id}`;
 
               return (
                 <div
@@ -261,12 +319,22 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   )}
                 >
                   {!rail && (
-                    <p className="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70">
-                      {group.label}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.id)}
+                      aria-expanded={groupOpen}
+                      aria-controls={listId}
+                      className="mb-1.5 flex w-full items-center justify-between rounded-md px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70 transition-colors hover:text-foreground"
+                    >
+                      <span>{group.label}</span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={cn("size-3.5 transition-transform duration-150", !groupOpen && "-rotate-90")}
+                      />
+                    </button>
                   )}
 
-                  <ul className="flex flex-col gap-0.5">
+                  <ul id={listId} className={cn("flex-col gap-0.5", groupOpen ? "flex" : "hidden")}>
                     {items.map((item) => {
                       const reportsActive =
                         item.href === "/relatorios/atendimentos" && pathname.startsWith("/relatorios");
