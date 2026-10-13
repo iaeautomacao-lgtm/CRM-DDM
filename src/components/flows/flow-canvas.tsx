@@ -415,6 +415,7 @@ export function FlowCanvas({ debug }: { debug?: FlowDebugState }) {
 
 function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const {
+    readOnly,
     state,
     setState,
     updateNodeConfig,
@@ -433,6 +434,8 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const builderNodes = state.nodes;
   const entryNodeId = state.entry_node_id;
   const isDebugMode = debug?.isDebugMode ?? false;
+  // Debug e modo leitura travam a edição do diagrama do mesmo jeito.
+  const locked = isDebugMode || readOnly;
 
   // Side-panel state — which node's form is open. Canvas-only UI; the
   // list view's analogue is the per-card expanded set in
@@ -572,7 +575,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       // Setas do teclado movem o nó selecionado com dragging=false e sem
       // disparar onNodeDragStop: sem isto o movimento não entrava no
       // histórico, não era salvo e o nó voltava na próxima edição.
-      if (isDebugMode || pointerDragRef.current) return;
+      if (locked || pointerDragRef.current) return;
       const moved: Record<string, { x: number; y: number }> = {};
       for (const c of changes) {
         if (c.type === 'position' && c.dragging === false && c.position) {
@@ -581,7 +584,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       }
       if (Object.keys(moved).length > 0) moveNodes(moved);
     },
-    [isDebugMode, moveNodes]
+    [locked, moveNodes]
   );
 
   const handleNodeDragStart = useCallback(() => {
@@ -620,7 +623,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const handleNodeDragStop = useCallback<OnNodeDrag<RfNode<NodeData>>>(
     (_event, node, dragged) => {
       pointerDragRef.current = false;
-      if (isDebugMode) return;
+      if (locked) return;
       // Seleção múltipla: grava todos os nós arrastados numa edição só
       // (antes só o nó sob o cursor ficava; os outros voltavam).
       if (dragged && dragged.length > 1) {
@@ -631,7 +634,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       }
       updateNodePosition(node.id, node.position.x, node.position.y);
     },
-    [updateNodePosition, moveNodes, isDebugMode]
+    [updateNodePosition, moveNodes, locked]
   );
 
   // Pan to the flashed node when the validator panel requests one.
@@ -670,7 +673,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   // the next render — no need to maintain a separate edge list.
   const handleConnect = useCallback(
     (connection: Connection) => {
-      if (isDebugMode) return;
+      if (locked) return;
       if (
         !connection.source ||
         !connection.target ||
@@ -693,7 +696,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       );
       if (patch) updateNodeConfig(connection.source, patch);
     },
-    [builderNodes, updateNodeConfig, isDebugMode]
+    [builderNodes, updateNodeConfig, locked]
   );
 
   // Keyboard delete (Backspace / Delete) + drag-to-trash. React-Flow
@@ -704,13 +707,13 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   // node currently being edited.
   const handleNodesDelete = useCallback(
     (deleted: RfNode<NodeData>[]) => {
-      if (isDebugMode) return;
+      if (locked) return;
       for (const n of deleted) {
         removeNode(n.id);
         if (selectedNodeKey === n.id) setSelectedNodeKey(null);
       }
     },
-    [removeNode, selectedNodeKey, isDebugMode]
+    [removeNode, selectedNodeKey, locked]
   );
 
   // Edge delete: clear the source node's slot rather than removing
@@ -718,7 +721,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   // "delete" one is to null out its underlying next_node_key.
   const handleEdgesDelete = useCallback(
     (deleted: RfEdge[]) => {
-      if (isDebugMode) return;
+      if (locked) return;
       for (const e of deleted) {
         if (!e.sourceHandle) continue;
         const sourceNode = builderNodes.find((n) => n.node_key === e.source);
@@ -728,7 +731,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       }
       setSelectedEdgeId(null);
     },
-    [builderNodes, updateNodeConfig, isDebugMode]
+    [builderNodes, updateNodeConfig, locked]
   );
 
   // Clique na aresta só seleciona (destaque); Delete/Backspace apaga via
@@ -774,7 +777,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
         <p className="max-w-xs text-center text-xs">
           Adicione o primeiro nó: uma mensagem de boas-vindas ou um menu de botões.
         </p>
-        {!isDebugMode && <CanvasAddNodeButton onAdded={setSelectedNodeKey} />}
+        {!locked && <CanvasAddNodeButton onAdded={setSelectedNodeKey} />}
       </div>
     );
   }
@@ -811,15 +814,15 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           onPaneClick={() => setSelectedEdgeId(null)}
           // Default is "Backspace" only — accept both so Mac users
           // hitting Delete (Fn+Backspace) get the same behavior.
-          deleteKeyCode={isDebugMode ? [] : ['Backspace', 'Delete']}
+          deleteKeyCode={locked ? [] : ['Backspace', 'Delete']}
           // Debug mode is readonly: no dragging nodes around, no
           // wiring new connections. Clicking still works (it opens
           // the per-node event panel instead of the edit sheet) and
           // panning/zoom/minimap stay live — only graph EDITS are
           // disabled.
-          nodesDraggable={!isDebugMode}
-          nodesConnectable={!isDebugMode}
-          edgesFocusable={!isDebugMode}
+          nodesDraggable={!locked}
+          nodesConnectable={!locked}
+          edgesFocusable={!locked}
           elementsSelectable={true}
           // Lower default min/max zoom than the lib's defaults; the
           // tiles already truncate their summary at a reasonable
@@ -851,7 +854,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           />
           {!isDebugMode && (
             <Panel position="top-left" className="!top-4 !left-4 flex flex-wrap items-center gap-2">
-              <CanvasAddNodeButton onAdded={setSelectedNodeKey} />
+              {!readOnly && <CanvasAddNodeButton onAdded={setSelectedNodeKey} />}
               <Button
                 variant="outline"
                 size="sm"
@@ -867,9 +870,11 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
                 Disparo
               </Button>
               <CanvasNodeSearch nodes={builderNodes} onFound={requestFlash} />
-              <p className="text-muted-foreground max-w-xs text-[11px] leading-snug">
-                Sem arrastar: use a visão Lista ou o campo &quot;Próximo nó&quot; no formulário do nó para ligar etapas.
-              </p>
+              {!readOnly && (
+                <p className="text-muted-foreground max-w-xs text-[11px] leading-snug">
+                  Sem arrastar: use a visão Lista ou o campo &quot;Próximo nó&quot; no formulário do nó para ligar etapas.
+                </p>
+              )}
             </Panel>
           )}
         </ReactFlow>
@@ -884,11 +889,14 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
             </SheetDescription>
           </SheetHeader>
           <div className="overflow-y-auto p-4">
-            <TriggerPanel
-              state={state}
-              setState={setState}
-              triggerIssues={issues.filter((i) => i.scope === 'trigger')}
-            />
+            {/* Modo leitura: o fieldset desabilita todos os campos de uma vez. */}
+            <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
+              <TriggerPanel
+                state={state}
+                setState={setState}
+                triggerIssues={issues.filter((i) => i.scope === 'trigger')}
+              />
+            </fieldset>
           </div>
         </SheetContent>
       </Sheet>
@@ -944,7 +952,7 @@ function NodeEditSheet({
 }) {
   // Sheet is controlled — opens when a node is selected, closes via
   // Esc / overlay / close button (all delegated to onClose).
-  const { historyEpoch } = useFlowEditor();
+  const { historyEpoch, readOnly } = useFlowEditor();
   const open = node !== null;
   if (!node) {
     return (
@@ -982,15 +990,19 @@ function NodeEditSheet({
         </SheetHeader>
 
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
-          <NodeConfigForm
-            key={historyEpoch}
-            node={node}
-            allNodes={allNodes}
-            showAdvanced={false}
-            onUpdateConfig={onUpdateConfig}
-          />
+          {/* Modo leitura: o fieldset desabilita todos os campos de uma vez. */}
+          <fieldset disabled={readOnly} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
+            <NodeConfigForm
+              key={historyEpoch}
+              node={node}
+              allNodes={allNodes}
+              showAdvanced={false}
+              onUpdateConfig={onUpdateConfig}
+            />
+          </fieldset>
         </div>
 
+        {!readOnly && (
         <SheetFooter className="border-border border-t px-5 py-3 sm:flex-row sm:justify-between">
           {!isEntry ? (
             <Button variant="ghost" size="sm" onClick={onSetEntry}>
@@ -1017,6 +1029,7 @@ function NodeEditSheet({
             </Button>
           </div>
         </SheetFooter>
+        )}
       </SheetContent>
     </Sheet>
   );

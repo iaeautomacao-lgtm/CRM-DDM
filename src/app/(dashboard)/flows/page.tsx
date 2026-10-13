@@ -21,7 +21,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { usePermission } from "@/hooks/use-permission";
+import { usePermission, usePermissions } from "@/hooks/use-permission";
+import { ForbiddenState } from "@/components/ddm/states";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -102,6 +103,30 @@ const TEMPLATE_ICONS = {
 const FLOWS_PAGE = 100;
 
 export default function FlowsPage() {
+  const { loading, can } = usePermissions();
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  // A lista (GET /api/flows) exige flows.edit. Quem só vê execuções
+  // (flows.view_runs) abre cada fluxo em modo leitura pelo card do Inbox.
+  if (!can("flows.edit")) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ForbiddenState
+          title="A lista de fluxos é só para quem edita"
+          hint="Para ver o fluxo de uma conversa, abra o card “Fluxo” no Inbox."
+        />
+      </div>
+    );
+  }
+  return <FlowsList />;
+}
+
+function FlowsList() {
   const router = useRouter();
   const canCreate = usePermission("flows.edit");
   const [flows, setFlows] = useState<FlowRow[]>([]);
