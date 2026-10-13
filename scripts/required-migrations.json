@@ -418,6 +418,10 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "336_campaign_template_pause",
+      "kind": "registry"
     }
   ]
 }

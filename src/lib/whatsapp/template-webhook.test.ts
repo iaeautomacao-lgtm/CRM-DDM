@@ -217,6 +217,30 @@ describe('handleTemplateWebhookChange — quality update', () => {
   });
 });
 
+describe('handleTemplateWebhookChange — category update', () => {
+  it('reconhece o campo e grava a categoria nova em maiúsculas', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    expect(isTemplateWebhookField('template_category_update')).toBe(true);
+    const { stub, calls } = makeSupabaseStub();
+    await handleTemplateWebhookChange(
+      {
+        field: 'template_category_update',
+        value: { message_template_id: '42', message_template_name: 'x', previous_category: 'UTILITY', new_category: 'marketing' },
+      },
+      stub,
+    );
+    expect(calls[0].update).toEqual({ category: 'MARKETING' });
+    expect(calls[0].filter).toEqual({ column: 'meta_template_id', value: '42' });
+  });
+
+  it('sem new_category não grava nada', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stub, calls } = makeSupabaseStub();
+    await handleTemplateWebhookChange({ field: 'template_category_update', value: { message_template_id: '42' } }, stub);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe('handleTemplateWebhookChange — components update', () => {
   it('is an info-log no-op (does not write to DB)', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
