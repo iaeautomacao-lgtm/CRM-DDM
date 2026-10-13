@@ -1,5 +1,6 @@
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
 import { can } from '@/lib/auth/permissions';
+import { isHttpsOrAllowlistedUrl } from '@/lib/security/ssrf-guard';
 import { NextResponse } from 'next/server';
 
 // /api/calls/* — proxy autenticado do navegador para o servidor VoIP (Go).
@@ -18,6 +19,11 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
     if (!can(ctx, 'calls.use')) return NextResponse.json({ error: 'Sem permissão para chamadas' }, { status: 403 });
     const secret = process.env.VOIP_SERVICE_SECRET;
     if (!secret || !process.env.VOIP_URL) return NextResponse.json({ error: 'VoIP indisponível' }, { status: 503 });
+    // O segredo do VoIP viaja neste proxy: só https:// (http apenas para host em SSRF_ALLOWED_HOSTS, ex.: container interno).
+    if (!isHttpsOrAllowlistedUrl(process.env.VOIP_URL)) {
+      console.error('[calls] VOIP_URL precisa usar https:// (ou o host estar em SSRF_ALLOWED_HOSTS).');
+      return NextResponse.json({ error: 'VoIP indisponível' }, { status: 503 });
+    }
     let { path } = await context.params;
     // Aceita tanto /api/calls/sessions/... quanto /api/calls/api/sessions/...
     if (path[0] === 'api') path = path.slice(1);

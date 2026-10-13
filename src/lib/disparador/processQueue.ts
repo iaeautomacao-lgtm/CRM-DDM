@@ -273,8 +273,12 @@ const META_INVALID_PHONE_CODES = metaCodesWhere((e) => e.numeroInvalido === true
 // Derivado do catálogo único (meta-error-catalog.ts): flag `permanente`.
 const META_PERMANENT_CODES = metaCodesWhere((e) => e.permanente === true);
 
-/** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
-export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
+/**
+ * Limites de taxa da Meta que reagendam sem gastar tentativa (F8). Decisão do dono (13/10): 80007 (por WABA) e 4 (por app) também.
+ * DERIVADO do catálogo único (meta-error-catalog.ts): sinal de freio que não é motivo de pausa da campanha. Sem lista duplicada:
+ * mudar o comportamento de um código é editar uma linha do catálogo.
+ */
+export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = metaCodesWhere((e) => e.freio === true && e.pausaAutomatica !== true);
 export function isMetaRateLimitNoAttempt(err: unknown): boolean {
   return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
 }

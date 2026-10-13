@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MIN_PASSWORD_LENGTH, translateAuthError } from "@/lib/auth/auth-errors";
+import { endOtherSessions } from "@/lib/auth/end-other-sessions";
 
 // Regra única de tamanho mínimo (lib/auth/auth-errors.ts).
 const MIN_PASSWORD = MIN_PASSWORD_LENGTH;
@@ -91,7 +92,10 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
         return;
       }
 
-      toast.success("Senha atualizada");
+      // Senha nova: os outros aparelhos saem (revisão de segurança 13/10); esta sessão continua.
+      const ended = await endOtherSessions();
+      toast.success(ended ? "Senha atualizada. Os outros aparelhos foram desconectados." : "Senha atualizada");
+      if (!ended) toast.warning('Não foi possível desconectar os outros aparelhos. Use "Sair dos outros dispositivos" em Sessões.');
       handleOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro desconhecido");

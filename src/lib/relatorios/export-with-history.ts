@@ -16,6 +16,14 @@ export interface ExportOptions {
   format: "xlsx" | "csv";
 }
 
+/**
+ * Opções do SheetJS para gravar o arquivo. CSV: separador `;` (o Excel pt-BR abre `,` tudo numa coluna só); o SheetJS já grava o BOM UTF-8.
+ * Usadas no arquivo baixado E no enviado ao histórico — os dois têm de sair iguais.
+ */
+export function sheetWriteOptions(format: "xlsx" | "csv"): { bookType: "xlsx" | "csv"; FS?: string } {
+  return format === "csv" ? { bookType: "csv", FS: ";" } : { bookType: "xlsx" };
+}
+
 // Generates the file exactly as the existing export buttons already
 // do (SheetJS, download via XLSX.writeFile — behavior unchanged), and
 // additionally uploads it + records it in export_history via
@@ -35,7 +43,7 @@ export async function exportWithHistory(options: ExportOptions): Promise<void> {
   const fileName = `${options.exportType}_${new Date().toISOString().slice(0, 10)}.${ext}`;
 
   const wbout = XLSX.write(wb, {
-    bookType: options.format === "csv" ? "csv" : "xlsx",
+    ...sheetWriteOptions(options.format),
     type: "base64",
   }) as string;
 
@@ -60,8 +68,6 @@ export async function exportWithHistory(options: ExportOptions): Promise<void> {
     // the export itself is more important than its own record.
   }
 
-  XLSX.writeFile(wb, fileName, {
-    bookType: options.format === "csv" ? "csv" : "xlsx",
-  });
+  XLSX.writeFile(wb, fileName, sheetWriteOptions(options.format));
 }
 import { apiFetch } from "@/lib/api-fetch";
