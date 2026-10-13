@@ -418,6 +418,10 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "336_contacts_write_rls_has_perm",
+      "kind": "registry"
     }
   ]
 }
