@@ -35,6 +35,18 @@ ALTER TABLE wacrm.cron_heartbeat ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON wacrm.cron_heartbeat FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.cron_heartbeat TO service_role;
 
+-- 2FA (migration 310): na rodada de deploy esta migration roda ANTES da 310, que então cobre a tabela.
+-- Se a 310 já estiver aplicada (rodada fora de ordem), aplica a policy aqui (idempotente).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'wacrm' AND p.proname = 'apply_mfa_policy'
+  ) THEN
+    PERFORM wacrm.apply_mfa_policy('wacrm.cron_heartbeat'::regclass);
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION wacrm.cron_heartbeat_record(
   p_job text,
   p_expected_every_seconds integer,
