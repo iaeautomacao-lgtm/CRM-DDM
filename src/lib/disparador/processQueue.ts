@@ -462,6 +462,17 @@ async function markPhoneInvalid(item: QueueItem): Promise<void> {
         .maybeSingle();
       if (!contact?.phone_normalized) return;
 
+      // Migration 335: lembra o telefone principal recusado, para as próximas campanhas não reenviarem. Vale só enquanto o telefone
+      // do contato continuar este (comparação por phone_normalized). Sem as colunas: ignora em silêncio.
+      const { error: markError } = await supabaseAdmin()
+        .from("contacts")
+        .update({ phone_invalid_at: new Date().toISOString(), phone_invalid_normalized: contact.phone_normalized })
+        .eq("id", item.contact_id)
+        .eq("phone_normalized", contact.phone_normalized);
+      if (markError && markError.code !== "42703" && markError.code !== "PGRST204") {
+        console.error("[Disparador] markPhoneInvalid: falha ao marcar o contato:", safeDbError(markError));
+      }
+
       ({ error } = await supabaseAdmin()
         .from("contact_phones")
         .update({

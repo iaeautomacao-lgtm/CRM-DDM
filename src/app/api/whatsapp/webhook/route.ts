@@ -31,6 +31,7 @@ import {
 import { extractPricingEvents, recordMessagePricing } from '@/lib/whatsapp/message-pricing'
 import { processCallEvents, type CallsValue } from '@/lib/whatsapp/calls'
 import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
+import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import {
   allowExpensiveRejection,
   cacheChannel,
@@ -221,6 +222,7 @@ export async function POST(request: Request) {
   // Mas sem uma assinatura bem formada (sha256=<64 hex>) nada é parseado nem chega ao banco.
   if (!isWellFormedHubSignature(signature)) {
     console.warn('[webhook] rejected request without a well-formed X-Hub-Signature-256')
+    logWebhookRejection('webhook_meta', 'malformed_signature')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -282,6 +284,7 @@ export async function POST(request: Request) {
       '[webhook] no App Secret configured for channels:',
       rejectedKeys
     )
+    logWebhookRejection('webhook_meta', 'missing_secret', { channels: rejectedKeys })
     return NextResponse.json(
       { error: 'App Secret não configurado para este canal' },
       { status: 401 }
