@@ -27,6 +27,12 @@ export async function POST(request: Request) {
     .eq('status', 'processing').lt('started_at', cutoff);
   if (staleError) return NextResponse.json({ error: 'unavailable' }, { status: 503 });
 
+  // Expired queued jobs must not occupy a key's two pending slots forever.
+  const { error: expiredQueueError } = await db.from('conversation_export_jobs')
+    .update({ status: 'failed', error_code: 'expired_before_processing', finished_at: now })
+    .eq('status', 'queued').lte('expires_at', now);
+  if (expiredQueueError) return NextResponse.json({ error: 'unavailable' }, { status: 503 });
+
   // Remove files after expiry. Private bucket uses no public SELECT policy.
   const { data: expired, error: expiredError } = await db.from('conversation_export_jobs')
     .select('id,storage_path').eq('status', 'completed').lt('expires_at', now)
