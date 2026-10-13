@@ -171,3 +171,64 @@ describe("AP-21: nome do cookie de sessão derivado de NEXT_PUBLIC_SUPABASE_URL"
     }
   });
 });
+
+describe("middleware: proteção por padrão, diagnóstico só fora de produção e checagem de origem", () => {
+  it("uma tela nova (fora da lista pública) já nasce protegida", async () => {
+    for (const path of ["/uma-tela-nova", "/membros", "/seguranca", "/ddm-logs", "/inbox"]) {
+      const res = await middleware(new NextRequest(`https://app.test${path}`));
+      expect(res.status, path).toBe(307);
+      expect(res.headers.get("location"), path).toContain("/login");
+    }
+  });
+
+  it("as páginas públicas seguem abertas sem sessão", async () => {
+    for (const path of ["/login", "/signup", "/forgot-password", "/reset-password", "/join/abc", "/docs/api", "/unauthorized", "/w/tok"]) {
+      const res = await middleware(new NextRequest(`https://app.test${path}`));
+      expect(res.headers.get("location"), path).toBeNull();
+    }
+  });
+
+  it("em produção o redirect e a resposta não vazam diagnóstico (X-Auth-Fx-*, auth_err, missing_env_*)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const res = await middleware(new NextRequest("https://app.test/dashboard"));
+      const location = res.headers.get("location") ?? "";
+      expect(location).toContain("/login");
+      expect(location).toContain("next=%2Fdashboard");
+      for (const leaked of ["auth_failed", "auth_err", "missing_env"]) expect(location).not.toContain(leaked);
+      expect([...res.headers.keys()].filter((k) => k.toLowerCase().startsWith("x-auth-fx"))).toEqual([]);
+      const ok = await middleware(authedRequest("https://app.test/dashboard"));
+      expect([...ok.headers.keys()].filter((k) => k.toLowerCase().startsWith("x-auth-fx"))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("fora de produção o diagnóstico continua (útil para depurar)", async () => {
+    const res = await middleware(new NextRequest("https://app.test/dashboard"));
+    expect(res.headers.get("x-auth-fx-mode")).toBe("cookie-only");
+  });
+
+  it("POST /api/* de outro site com a sessão do usuário é barrado com 403; do mesmo site passa", async () => {
+    const cross = authedRequestWith("https://app.test/api/contacts", "POST", { "sec-fetch-site": "cross-site" });
+    const resCross = await middleware(cross);
+    expect(resCross.status).toBe(403);
+    expect(await resCross.json()).toEqual({ error: "Origem da requisição não permitida" });
+
+    const same = authedRequestWith("https://app.test/api/contacts", "POST", { "sec-fetch-site": "same-origin" });
+    expect((await middleware(same)).status).toBe(200);
+  });
+
+  it("webhook de fora (sem Origin de navegador) e GET cross-site não são afetados", async () => {
+    const hook = new NextRequest("https://app.test/api/whatsapp/webhook", { method: "POST", headers: { "sec-fetch-site": "cross-site" } });
+    expect((await middleware(hook)).status).not.toBe(403);
+    const get = authedRequestWith("https://app.test/api/contacts", "GET", { "sec-fetch-site": "cross-site" });
+    expect((await middleware(get)).status).toBe(200);
+  });
+});
+
+function authedRequestWith(url: string, method: string, headers: Record<string, string>): NextRequest {
+  const req = new NextRequest(url, { method, headers });
+  req.cookies.set(AUTH_COOKIE_NAME, sessionCookieJson());
+  return req;
+}
