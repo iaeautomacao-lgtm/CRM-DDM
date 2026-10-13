@@ -326,6 +326,7 @@ export default function EquipeDetailPage({
   // granted them; this just hides the controls per this task's scope.
   // Também sem `teams.manage` (papel personalizado) a tela fica só leitura.
   const { can } = usePermissions();
+  const [activeTab, setActiveTab] = useState("overview");
   const isReadOnly = accountRole === "admin" || !can("teams.manage");
 
   const [loading, setLoading] = useState(true);
@@ -1011,7 +1012,7 @@ export default function EquipeDetailPage({
         </div>
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList variant="line" className="h-auto w-full justify-start gap-6 border-b border-border bg-transparent p-0">
           <TabsTrigger value="overview" className={ACTIVE_TAB_CLASS}>
             Visão Geral
@@ -1226,7 +1227,16 @@ export default function EquipeDetailPage({
                   <Loader2 className="size-5 animate-spin text-muted-foreground" />
                 </div>
               ) : tabulacoes.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Nenhuma tabulação ainda.</p>
+                <p className="text-xs text-muted-foreground">
+                  Nenhuma tabulação ainda.{" "}
+                  {can("tags.manage") ? (
+                    <Link href="/tabulacoes" className="font-medium text-primary-text hover:underline">
+                      Criar em Tabulações
+                    </Link>
+                  ) : (
+                    "Peça a um administrador."
+                  )}
+                </p>
               ) : (
                 (() => {
                   const normalizedSearch = normalizeForSearch(tabulacaoSearch.trim());
@@ -1406,11 +1416,25 @@ export default function EquipeDetailPage({
                 </div>
               ) : approvedTemplates.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Nenhum template aprovado nesta conta ainda.
+                  Nenhum template aprovado nesta conta ainda.{" "}
+                  {can("templates.manage") ? (
+                    <Link href="/templates" className="font-medium text-primary-text hover:underline">
+                      Ir para Templates
+                    </Link>
+                  ) : (
+                    "Peça a um administrador."
+                  )}
                 </p>
               ) : channelFilteredTemplates.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Nenhum template aprovado para os canais vinculados a esta equipe.
+                  Nenhum template aprovado para os canais vinculados a esta equipe.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("overview")}
+                    className="font-medium text-primary-text hover:underline"
+                  >
+                    Ver canais da equipe
+                  </button>
                 </p>
               ) : (
                 (() => {
@@ -1503,7 +1527,14 @@ export default function EquipeDetailPage({
             </div>
           ) : unlinkedChannels.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Nenhum canal sem equipe disponível nesta conta.
+              Nenhum canal sem equipe disponível nesta conta.{" "}
+              {can("channels.manage") ? (
+                <Link href="/canais" className="font-medium text-primary-text hover:underline">
+                  Ir para Canais
+                </Link>
+              ) : (
+                "Peça a um administrador."
+              )}
             </p>
           ) : (
             <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">

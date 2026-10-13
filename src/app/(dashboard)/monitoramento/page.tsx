@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -1055,7 +1056,17 @@ function MonitoramentoBoard() {
               <p>Nenhuma equipe criada ainda.</p>
               <Can
                 permission="teams.manage"
-                fallback={<p>Peça a um administrador ou supervisor para criar equipes em Configurações → Equipes.</p>}
+                fallback={
+                  <p>
+                    Peça a um administrador ou supervisor para criar equipes em Equipes.
+                    <Can permission="teams.view">
+                      {" "}
+                      <Link href="/equipes" className="font-medium text-primary-text hover:underline">
+                        Abrir Equipes
+                      </Link>
+                    </Can>
+                  </p>
+                }
               >
                 <Button onClick={openCreateTeam}>
                   <Plus className="size-4" />
