@@ -187,7 +187,7 @@ export function ReportPanel({ ruler }: { ruler: Ruler }) {
             <section className="flex flex-col gap-2">
               <h3 className="text-sm font-semibold text-foreground">Por dia</h3>
               <div className="max-h-64 overflow-y-auto rounded-card border border-border">
-                <table className="w-full border-collapse text-[13px]">
+                <table className="w-full min-w-[420px] border-collapse text-[13px]">
                   <thead className="sticky top-0">
                     <tr className="bg-surface-3 text-left text-xs text-muted-foreground">
                       <th className="px-3 py-2 font-semibold">Dia</th>

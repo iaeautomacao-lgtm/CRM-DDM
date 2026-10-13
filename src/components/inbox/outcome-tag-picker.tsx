@@ -202,7 +202,7 @@ export function OutcomeTagPicker({
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-primary uppercase tracking-wide">
-                    ✨ Sugestão · {suggestionSourceLabel(aiSuggestion.source)}
+                    Sugestão · {suggestionSourceLabel(aiSuggestion.source)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {Math.round(aiSuggestion.confidence * 100)}% de confiança
