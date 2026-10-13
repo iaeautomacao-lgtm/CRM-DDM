@@ -44,7 +44,16 @@
     "src/lib/ai/knowledge/vector-store.ts",
     "src/lib/members/member-status.ts",
     "src/lib/roles/custom-roles.ts",
-    "src/lib/roles/http.ts"
+    "src/lib/roles/http.ts",
+    "src/lib/auth/operational-secret.ts",
+    "src/lib/whatsapp/flows-crypto.ts",
+    "src/lib/webhooks-out/signature.ts",
+    "src/lib/push/web-push.ts",
+    "src/lib/whatsapp/webhook-signature.ts",
+    "src/lib/whatsapp/waha-webhook-auth.ts",
+    "src/lib/ai/llm-shared.ts",
+    "src/lib/flows/simulator/ai.ts",
+    "src/lib/whatsapp/inbound-message.ts"
   ],
   "clientOnlyDirs": [
     "src/components",

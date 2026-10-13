@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,

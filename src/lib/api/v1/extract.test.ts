@@ -62,6 +62,12 @@ describe('parâmetros', () => {
     expect(decodeCursor(null, 2)).toBeNull()
     expect(() => decodeCursor('!!', 2)).toThrow()
     expect(() => decodeCursor(encodeCursor(['a']), 2)).toThrow()
+    // cada parte entra num filtro .or() do PostgREST: nada que feche aspas, separe filtros ou abra grupo
+    for (const bad of ['a"', 'x,id.gt.0', 'a)', '(a', 'a.b', 'a b', 'a/b', "a'", '']) {
+      expect(() => decodeCursor(encodeCursor(['2026-10-08T14:01:00+00:00', bad]), 2), JSON.stringify(bad)).toThrow()
+    }
+    expect(decodeCursor(encodeCursor(['2026-10-08T14:01:00.123456+00:00', '7c9e6679-7425-40de-944b-e07fc1f90ae7']), 2)).toHaveLength(2)
+    expect(decodeCursor(encodeCursor(['updated_at', '2026-10-08T14:01:00Z', 'abc']), 3)).toHaveLength(3)
   })
   it('datas ISO e filtros de conversa', () => {
     expect(parseIso('2026-10-01', 'from')).toBe('2026-10-01T00:00:00.000Z')

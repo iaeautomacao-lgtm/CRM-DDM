@@ -6,6 +6,7 @@
 //   Resposta        base64( AES-128-GCM(resposta JSON) + tag ), com a MESMA chave de sessão e o IV INVERTIDO (cada byte negado).
 //   Qualquer falha ao decifrar ⇒ DataExchangeError ⇒ a rota responde HTTP 421 (a Meta então busca a chave pública de novo).
 // Puro: sem rede, sem banco, sem segredo guardado aqui. A chave privada chega por parâmetro (PEM) e nunca é logada.
+import "server-only";
 import { createCipheriv, createDecipheriv, generateKeyPairSync, privateDecrypt, constants } from "node:crypto";
 
 export class FlowCryptoError extends Error {

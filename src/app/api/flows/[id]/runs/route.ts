@@ -1,3 +1,4 @@
+import { orIlikeContains } from '@/lib/postgrest/or-filter'
 import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -68,11 +69,10 @@ export async function GET(
   // flow_runs query when nothing could match.
   let contactIds: string[] | null = null
   if (contactFilter && contactFilter.trim()) {
-    const like = contactFilter.trim().replace(/[%,]/g, '')
     const { data: matches } = await supabase
       .from('contacts')
       .select('id')
-      .or(`name.ilike."%${like}%",phone.ilike."%${like}%"`)
+      .or(orIlikeContains(['name', 'phone'], contactFilter))
     const resolvedIds = (matches ?? []).map((c: { id: string }) => c.id)
     if (resolvedIds.length === 0) {
       return NextResponse.json({ flow, runs: [], events: [], has_more: false })
