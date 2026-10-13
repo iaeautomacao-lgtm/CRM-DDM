@@ -138,14 +138,15 @@ describe('migrations 312/313 — papel personalizado', { timeout: 120_000 }, () 
         [],
         ['inbox.reply'],
         ['inbox.view', 'inbox.reply'],
-        ['nada.disso', 'roles.manage', 'ownership.transfer', 'inbox.view'],
+        ['nada.disso', 'members.reset_password', 'ownership.transfer', 'inbox.view'],
         ['integrations.manage'],
         ['reports.view_all', 'reports.export'],
         ['monitoring.view_all', 'monitoring.assign'],
         ['monitoring.assign'],
         ['exports.manage', 'reports.export'],
         ['billing.manage'],
-        ...(['admin', 'supervisor', 'agent', 'viewer'] as const).map((r) => [...SYSTEM_ROLE_PERMISSIONS[r]].filter((p) => !permissionDef(p).future)),
+        // roles.manage não é concedível desde a 318 (aqui só 312/313): fica fora da comparação
+        ...(['admin', 'supervisor', 'agent', 'viewer'] as const).map((r) => [...SYSTEM_ROLE_PERMISSIONS[r]].filter((p) => !permissionDef(p).future && !permissionDef(p).notGrantable)),
       ]
       for (const perms of cases) expect(await dbErrors(perms), perms.join(',')).toEqual(tsErrors(perms))
     })

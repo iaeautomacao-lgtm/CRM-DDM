@@ -135,6 +135,14 @@ export interface AccountContext {
   permissions: ReadonlySet<Permission>;
   /** Papel personalizado do chamador; ausente/null = papel de sistema. */
   customRole?: CustomRoleInfo | null;
+  /** Cargo do membro (account_roles.id); null em perfil antigo. */
+  roleId?: string | null;
+  /** Nível do cargo (regra "só abaixo de você", migration 318): sistema 5..1; personalizado até 3,5. */
+  roleLevel?: number;
+  /** Cargo de sistema com permissões ajustadas nesta organização (318). */
+  roleCustomized?: boolean;
+  /** Chave do cargo de sistema (null no personalizado); o nome exibido sai daqui, não do compat. */
+  roleKey?: AccountRole | null;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
 }
@@ -251,6 +259,10 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     role: data.account_role,
     permissions: effective.permissions,
     customRole: effective.customRole,
+    roleId: effective.roleId,
+    roleLevel: effective.level,
+    roleCustomized: effective.customized,
+    roleKey: effective.systemKey,
     account: { id: account.id, name: account.name },
   };
 }

@@ -44,7 +44,8 @@
     "src/lib/ai/knowledge/vector-store.ts",
     "src/lib/members/member-status.ts",
     "src/lib/roles/custom-roles.ts",
-    "src/lib/roles/http.ts"
+    "src/lib/roles/http.ts",
+    "src/lib/roles/invite-role.ts"
   ],
   "clientOnlyDirs": [
     "src/components",

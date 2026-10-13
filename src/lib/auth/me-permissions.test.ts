@@ -21,6 +21,8 @@ describe("buildMePermissions (contrato do front, PRD 20 seção 8)", () => {
       name: SYSTEM_ROLE_NAMES[role],
       kind: "system",
       rank: ACCOUNT_ROLES.indexOf(role) + 1,
+      level: ACCOUNT_ROLES.indexOf(role) + 1,
+      customized: false,
     });
     expect(me.status).toBe("active");
   });
@@ -72,7 +74,7 @@ describe("buildPermissionCatalogGroups", () => {
 
   it("campos do contrato: escopo, ownerOnly/grantable e dependências", () => {
     const byKey = Object.fromEntries(flat.map((p) => [p.key, p]));
-    expect(byKey["roles.manage"]).toMatchObject({ ownerOnly: true, grantable: false })
+    expect(byKey["roles.manage"]).toMatchObject({ ownerOnly: false, grantable: false }) // admin e acima (TASK5), nunca em cargo
     expect(byKey["inbox.reply"]).toMatchObject({ ownerOnly: false, grantable: true, dependsOn: ["inbox.view"], scope: "n/a" });
     expect(byKey["conversations.scope_all"].scope).toBe("account");
     for (const p of PERMISSIONS) {
@@ -90,7 +92,7 @@ describe("buildMePermissions com papel personalizado (migrations 312/313)", () =
       permissions: new Set(["inbox.view", "inbox.reply", "reports.view_team"]),
       customRole: { id: "c1", name: "Cobrança" },
     });
-    expect(me.role).toEqual({ id: "c1", key: "supervisor", name: "Cobrança", kind: "custom", rank: 3 });
+    expect(me.role).toEqual({ id: "c1", key: "supervisor", name: "Cobrança", kind: "custom", rank: 3, level: 3, customized: false });
     expect(me.permissions.sort()).toEqual(["inbox.reply", "inbox.view", "reports.view_team"]);
     expect(me.scopes).toEqual({ inbox: "own", monitoring: "none", reports: "team", intelligence: "none" });
   });
@@ -98,5 +100,20 @@ describe("buildMePermissions com papel personalizado (migrations 312/313)", () =
   it("catálogo: future não é concedível (integrations.manage)", () => {
     const all = buildPermissionCatalogGroups().flatMap((g) => g.permissions);
     expect(all.find((p) => p.key === "integrations.manage")).toMatchObject({ ownerOnly: false, grantable: false });
+  });
+});
+
+describe("buildMePermissions com cargo de sistema ajustado (TASK5, migration 318)", () => {
+  it("nome e nível vêm do cargo (Supervisor), não do compat (Admin); customized e o conjunto efetivo", () => {
+    const me = buildMePermissions({
+      account: { id: "acc-1", name: "Acme" },
+      role: "admin", // compat recalculado pelo ajuste
+      roleKey: "supervisor",
+      roleLevel: 3,
+      roleCustomized: true,
+      permissions: new Set(["inbox.view", "campaigns.view", "campaigns.manage", "channels.view"]),
+    });
+    expect(me.role).toEqual({ id: null, key: "admin", name: "Supervisor", kind: "system", rank: 4, level: 3, customized: true });
+    expect(me.permissions).toContain("campaigns.manage");
   });
 });

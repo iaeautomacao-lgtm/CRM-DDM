@@ -32,6 +32,10 @@ export interface MePermissions {
     kind: "system" | "custom";
     /** Sistema: owner 5 … viewer 1 (no personalizado, o do compat_role). */
     rank: number;
+    /** Nível para a regra "só abaixo de você" (migration 318): sistema 5..1; personalizado até 3,5. */
+    level: number;
+    /** Cargo de sistema com permissões ajustadas nesta organização. */
+    customized: boolean;
   };
   permissions: Permission[];
   scopes: {
@@ -49,6 +53,10 @@ export interface MePermissionsInput {
   role: AccountRole;
   permissions: ReadonlySet<string>;
   customRole?: { id: string; name: string } | null;
+  /** Nível do cargo (318); ausente = rank do papel de sistema. */
+  roleLevel?: number;
+  roleCustomized?: boolean;
+  roleKey?: AccountRole | null;
 }
 
 /** Escopo de visibilidade por domínio: a variante ampla vence a estreita; sem nenhuma, `fallback`. */
@@ -66,9 +74,11 @@ export function buildMePermissions(ctx: MePermissionsInput): MePermissions {
     role: {
       id: ctx.customRole?.id ?? null,
       key: ctx.role,
-      name: ctx.customRole?.name ?? SYSTEM_ROLE_NAMES[ctx.role],
+      name: ctx.customRole?.name ?? SYSTEM_ROLE_NAMES[ctx.roleKey ?? ctx.role],
       kind: ctx.customRole ? "custom" : "system",
       rank: ACCOUNT_ROLES.indexOf(ctx.role) + 1,
+      level: ctx.roleLevel ?? ACCOUNT_ROLES.indexOf(ctx.role) + 1,
+      customized: ctx.roleCustomized ?? false,
     },
     permissions: PERMISSIONS.filter(has),
     scopes: {

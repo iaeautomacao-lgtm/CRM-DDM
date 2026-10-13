@@ -38,6 +38,8 @@ export interface PermissionDef {
   dependsOn?: readonly string[];
   /** Ainda sem checagem no código atual (previsto em PRD 19/20). */
   future?: true;
+  /** Não entra em cargo personalizado nem em ajuste de cargo de sistema (ex.: roles.manage). */
+  notGrantable?: true;
 }
 
 const atLeast = (min: AccountRole): readonly AccountRole[] => ACCOUNT_ROLES.filter((r) => hasMinRole(r, min));
@@ -116,7 +118,7 @@ export const PERMISSION_CATALOG = {
   "members.bulk_invite": { label: "Convite em lote", description: "Criar vários membros de uma vez.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "ownership.transfer": { label: "Transferir a propriedade", description: "Passar a organização a outro membro.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "account.delete": { label: "Excluir a organização", description: "Excluir a organização e seus dados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
-  "roles.manage": { label: "Gerir papéis personalizados", description: "Criar, editar, apagar e atribuir papéis personalizados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
+  "roles.manage": { label: "Gerir cargos", description: "Criar e editar cargos personalizados, ajustar as permissões dos cargos abaixo do seu e atribuí-los.", group: "Pessoas", scope: "none", roles: atLeast("admin"), notGrantable: true },
 
   // ── Organização ─────────────────────────────────────────
   "account.view": { label: "Ver a organização", description: "Ver nome e dados gerais da organização.", group: "Organização", scope: "none", roles: ALL },
@@ -225,7 +227,7 @@ export const MAX_CUSTOM_ROLES = 20;
  * fora do catálogo. Mesmo valor de permission_catalog.grantable (migration 312).
  */
 export function isGrantableToCustomRole(permission: string): permission is Permission {
-  return isPermission(permission) && !DEFS[permission].ownerOnly && !DEFS[permission].future;
+  return isPermission(permission) && !DEFS[permission].ownerOnly && !DEFS[permission].future && !DEFS[permission].notGrantable;
 }
 
 /**
@@ -245,7 +247,7 @@ export function validateCustomRolePermissions(permissions: readonly string[]): R
       errors.push({ code: "owner_only", permission: key });
       continue;
     }
-    if (DEFS[key].future) {
+    if (DEFS[key].future || DEFS[key].notGrantable) {
       errors.push({ code: "not_grantable", permission: key });
       continue;
     }

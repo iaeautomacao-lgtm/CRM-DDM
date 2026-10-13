@@ -17,6 +17,16 @@ vi.mock("@/lib/auth/account", () => ({
   }),
   toErrorResponse: (e: unknown) => new Response(JSON.stringify({ error: String(e) }), { status: 500 }),
 }));
+const roleCalls = vi.hoisted(() => [] as unknown[]);
+const roleResult = vi.hoisted(() => ({ value: { roleId: "r-agent", role: "agent" } as unknown, error: null as unknown }));
+vi.mock("@/lib/account/admin-client", () => ({ supabaseAdmin: () => ({}) }));
+vi.mock("@/lib/roles/invite-role", () => ({
+  resolveInviteRole: async (_db: unknown, input: unknown) => {
+    roleCalls.push(input);
+    if (roleResult.error) throw roleResult.error;
+    return roleResult.value;
+  },
+}));
 vi.mock("@/lib/rate-limit", () => ({
   checkRateLimit: () => ({ success: true }),
   rateLimitResponse: () => new Response(null, { status: 429 }),
@@ -31,6 +41,8 @@ const post = (headers: Record<string, string> = {}) =>
 const saved = { app: process.env.NEXT_PUBLIC_APP_URL, site: process.env.NEXT_PUBLIC_SITE_URL, hosts: process.env.ALLOWED_INVITE_HOSTS };
 beforeEach(() => {
   inserts.length = 0;
+  roleCalls.length = 0;
+  roleResult.error = null;
   delete process.env.NEXT_PUBLIC_APP_URL;
   delete process.env.NEXT_PUBLIC_SITE_URL;
   delete process.env.ALLOWED_INVITE_HOSTS;
@@ -67,6 +79,38 @@ describe("POST /api/account/invitations — host do link", () => {
     const { error } = (await res.json()) as { error: string };
     expect(error).toMatch(/NEXT_PUBLIC_APP_URL/);
     expect(error).not.toContain("wacrm.tech");
+    expect(inserts).toHaveLength(0);
+  });
+});
+
+describe("POST /api/account/invitations — cargo do convite (TASK5, 318/319)", () => {
+  const send = (body: unknown) =>
+    POST(new Request("https://interno.local/api/account/invitations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://crm.exemplo.com";
+  });
+
+  it("role_id escolhido: conferido pela regra de nível e gravado com o compat em `role`", async () => {
+    const ROLE = "00000000-0000-0000-0000-0000000000c3";
+    roleResult.value = { roleId: ROLE, role: "supervisor" };
+    expect((await send({ role_id: ROLE })).status).toBe(201);
+    expect(roleCalls[0]).toEqual({ accountId: "acc-1", actorId: "u1", roleId: ROLE, role: null });
+    expect(inserts[0]).toMatchObject({ role: "supervisor", role_id: ROLE, account_id: "acc-1" });
+  });
+
+  it("formato antigo (role) também passa pela regra; cargo acima do seu = 403 role_level, sem criar convite", async () => {
+    const { CustomRoleError } = await import("@/lib/roles/custom-roles");
+    roleResult.error = new CustomRoleError("Esse cargo é do seu nível ou acima", 403, "role_level");
+    const res = await send({ role: "admin" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "role_level" });
+    expect(roleCalls[0]).toMatchObject({ roleId: null, role: "admin" });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("role_id inválido ou sem cargo: 400", async () => {
+    expect((await send({ role_id: "x" })).status).toBe(400);
+    expect((await send({})).status).toBe(400);
     expect(inserts).toHaveLength(0);
   });
 });
