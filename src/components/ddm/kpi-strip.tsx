@@ -30,8 +30,8 @@ const NOTE_TONE: Record<KpiTone, string> = {
 }
 
 /**
- * Faixa de KPIs do protótipo DDM: células separadas por linha de 1px
- * dentro de uma borda única (raio 10px), número de 24px. Com `loading`
+ * Faixa de KPIs (Design System DDM): cartões separados (canto 20px, sombra
+ * sm), número em Poppins de 24px. Com `loading`
  * mostra skeletons no lugar dos valores.
  */
 export function KpiStrip({
@@ -53,7 +53,7 @@ export function KpiStrip({
       role="group"
       aria-label={ariaLabel}
       aria-busy={loading || undefined}
-      className={cn('grid gap-px overflow-hidden rounded-[10px] border border-border bg-border', className)}
+      className={cn('grid gap-3', className)}
       style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${minWidth}px, 1fr))` }}
     >
       {items.map((k) => (
@@ -61,9 +61,9 @@ export function KpiStrip({
           key={k.label}
           title={k.title}
           className={cn(
-            'relative flex flex-col gap-1.5 bg-card px-4 py-3.5 text-left',
-            k.onClick && 'transition-colors hover:bg-surface-hover',
-            k.active && 'bg-selected shadow-[inset_0_-2px_0_var(--primary)]',
+            'relative flex flex-col gap-1.5 rounded-card bg-card px-5 py-4 text-left shadow-sm dark:border dark:border-border',
+            k.onClick && 'transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-md',
+            k.active && 'bg-selected ring-2 ring-primary',
           )}
         >
           {/* O botão cobre a célula; o "i" fica acima dele (z-index) para não aninhar botões. */}
@@ -73,10 +73,10 @@ export function KpiStrip({
               aria-pressed={k.active}
               aria-label={k.label}
               onClick={k.onClick}
-              className="absolute inset-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              className="absolute inset-0 rounded-card focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             />
           )}
-          <span className="pointer-events-none flex items-center gap-1 text-[12.5px] text-foreground-2">
+          <span className="pointer-events-none flex items-center gap-1 text-[13px] text-muted-foreground">
             {k.label}
             {k.info != null && (
               <span className="pointer-events-auto">
@@ -88,7 +88,7 @@ export function KpiStrip({
             {loading ? (
               <Skeleton className="h-6 w-20" />
             ) : (
-              <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">{k.value}</span>
+              <span className="font-heading text-2xl font-bold tracking-[-0.02em] tabular-nums text-foreground">{k.value}</span>
             )}
             {!loading && k.note != null && (
               <span className={cn('text-xs font-semibold tabular-nums', NOTE_TONE[k.noteTone ?? 'muted'])}>{k.note}</span>
