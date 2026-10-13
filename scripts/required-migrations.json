@@ -443,6 +443,10 @@
     {
       "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "348_deals_pipelines_write_rls_has_perm",
+      "kind": "registry"
     }
   ]
 }
