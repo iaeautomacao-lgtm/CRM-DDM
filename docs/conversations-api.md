@@ -38,8 +38,8 @@ GET /api/v1/conversations?from=2026-10-13&to=2026-10-13&status=active&limit=50
 Authorization: Bearer wacrm_live_...
 ```
 
-Filtros: `from`, `to` (data de **criação** da conversa, calendário de Brasília,
-ambos opcionais; máximo de 366 dias entre eles), `status` (`all`, `active`,
+Filtros: `from`, `to` (datas no calendário de Brasília; `date_field=created_at` por padrão,
+`date_field=last_message_at` para conversas movimentadas no período ou `date_field=closed_at` para finalizadas; ambos opcionais; máximo de 366 dias entre eles), `status` (`all`, `active`,
 `attending`, `waiting`, `open`, `pending`, `closed`), `team_id`,
 `agent_id`, `contact_id`, `channel`, `q` (nome/telefone do contato).
 Páginas de 1 a 100, ordenadas por `created_at DESC, id DESC`.
@@ -66,6 +66,8 @@ Páginas de 1 a 100, ordenadas por `created_at DESC, id DESC`.
   }
 }
 ```
+
+Para acompanhar conversas ATENDIDAS hoje mesmo quando criadas antes, use `date_field=last_message_at`. Para encerramentos no dia, use `date_field=closed_at`.
 
 O `control_state` representa a atribuição/heartbeat observado, não
 comprova que um operador está digitando: `human` quando existe atribuição,
@@ -179,6 +181,7 @@ Content-Type: application/json
   "from": "2026-10-01",
   "to": "2026-10-13",
   "status": "all",
+  "date_field": "last_message_at",
   "max_conversations": 500
 }
 ```
