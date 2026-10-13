@@ -10,6 +10,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { Loader2, Plus, Search, Trash2, Zap } from 'lucide-react';
 
@@ -80,6 +81,7 @@ export function QuickRepliesManager() {
   const supabase = useMemo(() => createClient(), []);
   const { user, accountId, profile } = useAuth();
   const canManage = usePermission('inbox.quick_replies.manage');
+  const canManageTeams = usePermission('teams.manage');
   const canReply = usePermission('inbox.reply');
   const canCreate = canManage || canReply;
   const ctx = useMemo(() => ({ userId: user?.id, canManage }), [user?.id, canManage]);
@@ -516,7 +518,19 @@ export function QuickRepliesManager() {
                   ))}
                   {form.teamId && !teamNameById.has(form.teamId) && <option value={form.teamId}>Equipe atual</option>}
                 </select>
-                {teams.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma equipe cadastrada.</p>}
+                {teams.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhuma equipe cadastrada.{' '}
+                    {canManageTeams ? (
+                      <Link href="/equipes" className="font-medium text-primary-text hover:underline">
+                        Criar equipe
+                      </Link>
+                    ) : (
+                      'Peça a um administrador.'
+                    )}{' '}
+                    Para uso só seu, escolha o escopo pessoal.
+                  </p>
+                )}
               </div>
             )}
           </div>

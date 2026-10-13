@@ -13,6 +13,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   Loader2,
@@ -87,6 +88,7 @@ export function TabulacoesManager() {
   const { user, accountId } = useAuth();
   // RLS de tags exige admin; espelha a chave tags.manage.
   const canManage = usePermission('tags.manage');
+  const canManageTeams = usePermission('teams.manage');
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -477,7 +479,15 @@ export function TabulacoesManager() {
                         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                           {teamIds.length === 0 ? (
                             <span className="text-muted-foreground text-xs">
-                              Nenhuma equipe vinculada
+                              Nenhuma equipe vinculada: o vínculo é feito pela equipe.
+                              {canManageTeams && (
+                                <>
+                                  {' '}
+                                  <Link href="/equipes" className="text-primary-text font-medium hover:underline">
+                                    Vincular em Equipes
+                                  </Link>
+                                </>
+                              )}
                             </span>
                           ) : (
                             teamIds.map((teamId) => (
@@ -637,7 +647,12 @@ export function TabulacoesManager() {
                 </Label>
                 {teams.length === 0 ? (
                   <p className="text-muted-foreground text-xs">
-                    Nenhuma equipe criada ainda.
+                    Nenhuma equipe criada ainda.{' '}
+                    {canManageTeams && (
+                      <Link href="/equipes" className="text-primary-text font-medium hover:underline">
+                        Criar equipe
+                      </Link>
+                    )}
                   </p>
                 ) : (
                   <div className="border-border max-h-40 space-y-0.5 overflow-y-auto rounded-lg border p-1.5">
