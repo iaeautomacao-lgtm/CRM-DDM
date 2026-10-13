@@ -15,6 +15,7 @@
 // user creation rather than spreadsheet parsing.
 // ============================================================
 
+import { MEMBER_IMPORT_TEMPLATE_CSV } from '@/lib/members/import-template';
 import { useRef, useState } from 'react';
 import * as Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -45,9 +46,6 @@ import { StatusChip } from '@/components/ddm/status-chip';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
-
-const TEMPLATE_CSV =
-  'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,supervisor\n';
 
 const MIN_PASSWORD_LENGTH = 6;
 const MAX_ROWS = 200;
@@ -189,7 +187,7 @@ export function BulkImportMembersDialog({
   }
 
   function downloadTemplate() {
-    const blob = new Blob([TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([MEMBER_IMPORT_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
