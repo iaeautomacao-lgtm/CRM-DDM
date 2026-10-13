@@ -134,6 +134,9 @@ export const PERMISSION_CATALOG = {
   // ── Chaves de leitura (RLS fase 2, migration 304): todos os papéis; as policies de SELECT de campanhas e funis passam a perguntar o catálogo (305) ──
   "campaigns.view": { label: "Ver campanhas", description: "Ler campanhas, métricas e fila de envio (leitura direta; o Inbox mostra a origem da conversa).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
   "pipelines.view": { label: "Ver funis e negócios", description: "Ler funis, etapas e negócios (leitura direta do CRM).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
+
+  // ── Funis (decisão do dono 13/10, migration 340): arquivar é o caminho normal (pipelines.manage); excluir em definitivo só o proprietário ──
+  "pipelines.delete": { label: "Excluir funil em definitivo", description: "Apagar um funil com etapas e negócios, sem volta (arquivar é o caminho normal).", group: "Funis", scope: "none", roles: ["owner"], ownerOnly: true, dependsOn: ["pipelines.manage"] },
 } as const satisfies Record<string, PermissionDef>;
 
 export type Permission = keyof typeof PERMISSION_CATALOG;

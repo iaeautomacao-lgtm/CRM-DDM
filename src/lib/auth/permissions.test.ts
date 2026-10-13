@@ -56,7 +56,7 @@ describe("catálogo", () => {
     for (const key of PERMISSIONS) visit(key);
   });
 
-  it("só o proprietário tem as permissões ownerOnly (e são exatamente estas 5; roles.manage passou a ser do admin, TASK5)", () => {
+  it("só o proprietário tem as permissões ownerOnly (e são exatamente estas 6; roles.manage passou a ser do admin na TASK5 e pipelines.delete veio na 340)", () => {
     const ownerOnly = PERMISSIONS.filter((p) => permissionDef(p).ownerOnly).sort();
     expect(ownerOnly).toEqual([
       "account.delete",
@@ -64,6 +64,7 @@ describe("catálogo", () => {
       "members.bulk_invite",
       "members.reset_password",
       "ownership.transfer",
+      "pipelines.delete",
     ]);
     for (const p of ownerOnly) {
       for (const role of ACCOUNT_ROLES) expect(can({ role }, p), `${role} ${p}`).toBe(role === "owner");

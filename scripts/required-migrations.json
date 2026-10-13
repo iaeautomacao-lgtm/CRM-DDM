@@ -430,6 +430,10 @@
     {
       "version": "337_ops_alert_dedupe",
       "kind": "registry"
+    },
+    {
+      "version": "340_pipeline_archive",
+      "kind": "registry"
     }
   ]
 }
