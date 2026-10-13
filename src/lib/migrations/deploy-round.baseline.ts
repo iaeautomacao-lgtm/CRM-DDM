@@ -176,7 +176,7 @@ CREATE TABLE wacrm.campaigns (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), acc
 CREATE TABLE wacrm.campaign_metrics (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id));
-CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), pipeline_id uuid REFERENCES wacrm.pipelines(id));
 ALTER TABLE wacrm.campaigns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wacrm.campaign_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wacrm.disp_message_queue ENABLE ROW LEVEL SECURITY;
