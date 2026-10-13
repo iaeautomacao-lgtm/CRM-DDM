@@ -108,10 +108,25 @@ export class ExportLimitError extends Error {
   }
 }
 
+async function assertExportKeyStillActive(
+  db: SupabaseClient, accountId: string, apiKeyId: string,
+) {
+  const { data, error } = await db.from('api_keys')
+    .select('id,revoked_at,expires_at,scopes')
+    .eq('id', apiKeyId).eq('account_id', accountId).maybeSingle();
+  if (error) throw error;
+  if (!data || data.revoked_at ||
+      (data.expires_at && Date.parse(data.expires_at) <= Date.now()) ||
+      !Array.isArray(data.scopes) || !data.scopes.includes('conversations:export')) {
+    throw new ExportLimitError('api_key_revoked_or_scope_removed');
+  }
+}
+
 /** Processes one job. Not invoked in normal API requests; cron only. */
 export async function generateConversationExport(
   db: SupabaseClient, job: ExportJobRow,
 ): Promise<{ path: string; bytes: number; conversations: number; messages: number; events: number; nextCursor: string | null }> {
+  await assertExportKeyStillActive(db, job.account_id, job.api_key_id);
   const chunks: Buffer[] = [];
   let totalBytes = 0, recordCount = 0, messageCount = 0, eventCount = 0;
   let conversationCount = 0;
@@ -173,6 +188,8 @@ export async function generateConversationExport(
   const nextCursor = more ? cursor : null;
   push({ type: 'export_footer', conversations: conversationCount,
     messages: messageCount, events: eventCount, next_cursor: nextCursor });
+  // A key revoked while this job was being generated must not receive a new file.
+  await assertExportKeyStillActive(db, job.account_id, job.api_key_id);
   const storagePath = job.account_id + '/' + job.api_key_id + '/' + job.id + '.ndjson';
   const blob = Buffer.concat(chunks, totalBytes);
   const { error } = await db.storage.from(EXPORT_BUCKET)
