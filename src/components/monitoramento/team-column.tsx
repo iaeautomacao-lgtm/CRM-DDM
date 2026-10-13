@@ -1,6 +1,7 @@
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
+import { useState } from "react";
 import { Pencil, Users } from "lucide-react";
 import { Can } from "@/components/auth/can";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,9 @@ import type { AccountMember, Team } from "@/types";
 import { AgentDragCard } from "./agent-drag-card";
 import { ConversationCard } from "./conversation-card";
 import type { ConversationCardActions } from "./card-actions";
+
+// Conversas desenhadas por vez; "Ver mais" revela o resto em passos.
+const TEAM_CONVERSATIONS_PAGE = 100;
 
 export function TeamColumn({
   team,
@@ -52,6 +56,7 @@ export function TeamColumn({
   // StageColumn: a drag over the header shouldn't highlight the
   // entire column.
   const { setNodeRef, isOver } = useDroppable({ id: team.id });
+  const [limit, setLimit] = useState(TEAM_CONVERSATIONS_PAGE);
 
   const hasBadges = team.session_timeout_minutes != null || !!overflowTeamName;
 
@@ -147,7 +152,7 @@ export function TeamColumn({
             className="h-full"
           />
         ) : (
-          conversations.map((c) => (
+          conversations.slice(0, limit).map((c) => (
             <ConversationCard
               key={c.id}
               conversation={c}
@@ -161,6 +166,17 @@ export function TeamColumn({
               onHistoryClick={actions.onHistoryClick}
             />
           ))
+        )}
+        {conversations.length > limit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => setLimit((n) => n + TEAM_CONVERSATIONS_PAGE)}
+          >
+            Ver mais ({conversations.length - limit}{" "}
+            {conversations.length - limit === 1 ? "restante" : "restantes"})
+          </Button>
         )}
       </div>
     </section>
