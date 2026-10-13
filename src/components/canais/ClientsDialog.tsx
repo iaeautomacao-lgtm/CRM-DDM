@@ -6,6 +6,7 @@ import { Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,7 @@ export function ClientsDialog({
   const [name, setName] = useState("");
   const [color, setColor] = useState("#6366f1");
   const [busy, setBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ClientOption | null>(null);
 
   async function addClient() {
     // busy: o Enter não respeitava o botão desabilitado e criava o cliente em dobro.
@@ -111,7 +113,7 @@ export function ClientsDialog({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 shrink-0 text-muted-foreground hover:text-danger"
-                onClick={() => removeClient(c.id)}
+                onClick={() => setRemoveTarget(c)}
                 aria-label={`Remover ${c.name}`}
               >
                 <Trash2 className="size-4" />
@@ -142,6 +144,17 @@ export function ClientsDialog({
           </Button>
         </div>
       </DialogContent>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(next) => !next && setRemoveTarget(null)}
+        title={`Remover o cliente ${removeTarget?.name ?? ""}?`}
+        description="As linhas e conversas deste cliente ficam sem cliente. Esta ação não pode ser desfeita."
+        confirmLabel="Remover"
+        onConfirm={async () => {
+          if (removeTarget) await removeClient(removeTarget.id);
+        }}
+      />
     </Dialog>
   );
 }
