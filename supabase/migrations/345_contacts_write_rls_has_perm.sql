@@ -1,5 +1,5 @@
 -- ============================================================
--- 336_contacts_write_rls_has_perm.sql   (revisão de segurança 13/10, item 8 — RLS fase 3, escrita: contatos e filhas)
+-- 345_contacts_write_rls_has_perm.sql   (revisão de segurança 13/10, item 8 — RLS fase 3, escrita: contatos e filhas)
 --
 -- Escrita de contatos pelo PostgREST só exigia "membro com papel >= agent" (017/087) e as filhas contact_tags / contact_custom_values tinham uma policy FOR ALL
 -- ("..._modify") que, além de escrever, CONCEDIA SELECT por papel — anulando a leitura por permissão da 323. Passa a decidir pelo catálogo (has_perm), com a MESMA regra
@@ -59,7 +59,7 @@
 --             CREATE POLICY tags_insert ON wacrm.tags FOR INSERT WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
 --             CREATE POLICY tags_update ON wacrm.tags FOR UPDATE USING (wacrm.is_account_member(account_id, 'admin'));
 --             CREATE POLICY tags_delete ON wacrm.tags FOR DELETE USING (wacrm.is_account_member(account_id, 'admin'));
---             DELETE FROM wacrm.schema_migrations WHERE version = '336_contacts_write_rls_has_perm';
+--             DELETE FROM wacrm.schema_migrations WHERE version = '345_contacts_write_rls_has_perm';
 --             COMMIT;
 -- ============================================================
 
@@ -71,19 +71,19 @@ DECLARE
   t text;
 BEGIN
   IF to_regprocedure('wacrm.has_perm(text)') IS NULL THEN
-    RAISE EXCEPTION '336: falta wacrm.has_perm(text) (migration 241)';
+    RAISE EXCEPTION '345: falta wacrm.has_perm(text) (migration 241)';
   END IF;
   IF (SELECT count(*) FROM wacrm.permission_catalog WHERE key IN ('contacts.edit', 'tags.manage')) <> 2 THEN
-    RAISE EXCEPTION '336: faltam chaves no catálogo (contacts.edit, tags.manage — migration 240)';
+    RAISE EXCEPTION '345: faltam chaves no catálogo (contacts.edit, tags.manage — migration 240)';
   END IF;
   FOREACH t IN ARRAY ARRAY['contacts', 'contact_notes', 'contact_phones', 'contact_tags', 'contact_custom_values', 'custom_fields', 'tags'] LOOP
     IF to_regclass('wacrm.' || t) IS NULL THEN
-      RAISE EXCEPTION '336: falta wacrm.% — confira o schema vivo', t;
+      RAISE EXCEPTION '345: falta wacrm.% — confira o schema vivo', t;
     END IF;
   END LOOP;
   SELECT count(*) INTO v_orphans FROM wacrm.profiles WHERE role_id IS NULL;
   IF v_orphans > 0 THEN
-    RAISE EXCEPTION '336: % perfil(is) sem role_id perderiam a escrita (has_perm é fail-closed) — preencha o role_id antes. Nada foi alterado.', v_orphans;
+    RAISE EXCEPTION '345: % perfil(is) sem role_id perderiam a escrita (has_perm é fail-closed) — preencha o role_id antes. Nada foi alterado.', v_orphans;
   END IF;
 END $$;
 
@@ -173,7 +173,7 @@ CREATE POLICY tags_delete ON wacrm.tags FOR DELETE USING (wacrm.is_account_membe
 
 DO $$ BEGIN
   IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
-    INSERT INTO wacrm.schema_migrations (version) VALUES ('336_contacts_write_rls_has_perm') ON CONFLICT DO NOTHING;
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('345_contacts_write_rls_has_perm') ON CONFLICT DO NOTHING;
   END IF;
 END $$;
 

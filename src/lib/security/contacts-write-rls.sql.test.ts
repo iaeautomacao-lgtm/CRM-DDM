@@ -1,4 +1,4 @@
-// Migration 336 (RLS fase 3, escrita): contatos e filhas por permissão (contacts.edit / tags.manage).
+// Migration 345 (RLS fase 3, escrita): contatos e filhas por permissão (contacts.edit / tags.manage).
 // Papéis de sistema: o que cada um ESCREVE é idêntico antes e depois (as telas continuam). Papel personalizado passa a valer pelo catálogo.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -26,7 +26,7 @@ const ADMIN_TABLES = ["custom_fields", "tags"];
 
 const only = (snap: WriteSnap, tables: string[]) => Object.entries(snap).filter(([k]) => tables.includes(k.split(".")[0]));
 
-describe("migration 336 — escrita de contatos e filhas por permissão", { timeout: 240_000 }, () => {
+describe("migration 345 — escrita de contatos e filhas por permissão", { timeout: 240_000 }, () => {
   let db: PGlite;
   const before: Record<string, WriteSnap> = {};
   const after: Record<string, WriteSnap> = {};
@@ -87,11 +87,11 @@ describe("migration 336 — escrita de contatos e filhas por permissão", { time
     for (const who of everyone()) before[who] = await writeSnapshot(db, who, PROBES);
 
     await db.exec(`SET session_replication_role = replica; UPDATE wacrm.profiles SET role_id = NULL WHERE user_id = '${U.viewer}'; SET session_replication_role = DEFAULT;`);
-    await expect(db.exec(migration("336_contacts_write_rls_has_perm.sql"))).rejects.toThrow(/sem role_id/);
+    await expect(db.exec(migration("345_contacts_write_rls_has_perm.sql"))).rejects.toThrow(/sem role_id/);
     await db.exec("ROLLBACK");
     await db.exec(`SET session_replication_role = replica; UPDATE wacrm.profiles SET role_id = (SELECT id FROM wacrm.account_roles WHERE key = 'viewer' AND account_id IS NULL) WHERE user_id = '${U.viewer}'; SET session_replication_role = DEFAULT;`);
 
-    await db.exec(migration("336_contacts_write_rls_has_perm.sql"));
+    await db.exec(migration("345_contacts_write_rls_has_perm.sql"));
     for (const who of everyone()) after[who] = await writeSnapshot(db, who, PROBES);
   }, 200_000);
   afterAll(async () => {
@@ -130,10 +130,10 @@ describe("migration 336 — escrita de contatos e filhas por permissão", { time
   });
 
   it("ROLLBACK do cabeçalho é SQL executável: devolve EXATAMENTE a escrita de antes (todos os usuários); reaplicar funciona", async () => {
-    await db.exec(headerRollback("336_contacts_write_rls_has_perm.sql"));
+    await db.exec(headerRollback("345_contacts_write_rls_has_perm.sql"));
     for (const who of everyone()) expect(await writeSnapshot(db, who, PROBES), `${who} depois do rollback`).toEqual(before[who]);
-    expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '336%'`)).rows).toEqual([]);
-    await db.exec(migration("336_contacts_write_rls_has_perm.sql"));
+    expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '345%'`)).rows).toEqual([]);
+    await db.exec(migration("345_contacts_write_rls_has_perm.sql"));
     for (const who of everyone()) expect(await writeSnapshot(db, who, PROBES), `${who} reaplicada`).toEqual(after[who]);
   });
 });
