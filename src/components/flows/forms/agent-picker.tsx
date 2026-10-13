@@ -6,7 +6,9 @@
 // aparecem para escolher; um desligado já vinculado aparece com aviso.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-fetch";
+import { usePermission } from "@/hooks/use-permission";
 import type { BuilderNode } from "../shared";
 import { NextNodeRow } from "./fields";
 
@@ -51,6 +53,7 @@ export function AgentPicker({
     };
   }, []);
 
+  const canEditAgents = usePermission("ai.agents.edit");
   const selected = agents?.find((a) => a.id === agentId);
   const choices = (agents ?? []).filter((a) => a.enabled || a.id === agentId);
 
@@ -82,6 +85,18 @@ export function AgentPicker({
 
       {agentId && selected && !selected.enabled && (
         <p className="text-xs text-amber-600">Desligado: o nó não vai responder e segue pela saída de falha (ou fila humana).</p>
+      )}
+      {agents && choices.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          Nenhum agente ligado.{" "}
+          {canEditAgents ? (
+            <Link href="/settings?tab=agents" target="_blank" rel="noopener" className="text-primary-text hover:underline">
+              Criar agente
+            </Link>
+          ) : (
+            "Peça a um administrador para criar um agente."
+          )}
+        </p>
       )}
       {agentId && agents && !selected && (
         <p className="text-xs text-destructive">Este agente não existe mais nesta conta. Escolha outro ou volte para a configuração legada.</p>
