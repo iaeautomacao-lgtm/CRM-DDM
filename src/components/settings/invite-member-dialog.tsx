@@ -34,6 +34,8 @@ import {
 } from '@/components/ui/select';
 import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
+// Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -49,7 +51,6 @@ interface InviteMemberDialogProps {
 // created here.
 const INVITE_ROLES: AccountRole[] = ['agent', 'supervisor', 'admin', 'owner', 'viewer'];
 
-const MIN_PASSWORD_LENGTH = 6;
 
 export function InviteMemberDialog({
   open,
