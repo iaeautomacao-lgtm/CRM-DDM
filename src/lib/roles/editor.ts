@@ -105,6 +105,17 @@ export function deselectWithDependents(selected: ReadonlySet<string>, key: strin
   return next;
 }
 
+/**
+ * Posso desmarcar `key`? Não, se a cascata (dependentes que ficariam sem a dependência) removeria uma permissão TRAVADA
+ * (que o usuário não tem e, portanto, não pode remover). `locked` vem de GET /api/account/roles (`locked_permissions`).
+ */
+export function canDeselect(selected: ReadonlySet<string>, key: string, locked: ReadonlySet<string>): boolean {
+  if (locked.has(key)) return false;
+  const next = deselectWithDependents(selected, key);
+  for (const k of selected) if (locked.has(k) && !next.has(k)) return false;
+  return true;
+}
+
 /** Papel de sistema equivalente no acesso direto aos dados (mesma função do servidor). */
 export function compatRoleOf(selected: Iterable<string>): AccountRole {
   return compatRoleFor([...selected].filter((k) => isGrantableToCustomRole(k)) as Permission[]);
@@ -155,6 +166,10 @@ export function roleErrorMessage(
   const code = typeof p.code === "string" ? p.code : "";
   if (code === "role_in_use" && typeof p.members === "number") {
     return `Este cargo está em uso por ${p.members} ${p.members === 1 ? "membro" : "membros"}. Troque o cargo deles antes de apagar.`;
+  }
+  if (code === "locked" && Array.isArray(p.permissions) && p.permissions.length > 0) {
+    const list = (p.permissions as unknown[]).filter((x): x is string => typeof x === "string").map(labelOf).join(", ");
+    return `Você não pode mudar permissões que não tem: ${list}.`;
   }
   if (code === "escalation" && Array.isArray(p.permissions) && p.permissions.length > 0) {
     const list = (p.permissions as unknown[]).filter((x): x is string => typeof x === "string").map(labelOf).join(", ");

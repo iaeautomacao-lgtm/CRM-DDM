@@ -4,6 +4,7 @@ import { permissionsForRole } from "@/lib/auth/permissions";
 import {
   assignableRoles,
   blockedReason,
+  canDeselect,
   compatRoleOf,
   deselectWithDependents,
   differsFromDefault,
@@ -134,5 +135,25 @@ describe("roles/editor", () => {
     expect(differsFromDefault({ permissions: ["a", "b"], default_permissions: ["b", "a"] })).toBe(false);
     expect(differsFromDefault({ permissions: ["a"], default_permissions: ["a", "b"] })).toBe(true);
     expect(differsFromDefault({ permissions: ["a"], default_permissions: null })).toBe(false);
+  });
+
+  it("travadas: não dá para desmarcar uma travada, nem uma permissão cuja cascata removeria uma travada", () => {
+    const withDeps = [...catalog.values()].find((p) => p.grantable && p.dependsOn.length > 0)!;
+    const dep = withDeps.dependsOn[0];
+    const all = selectWithDependencies(new Set(), withDeps.key, catalog);
+    // Nada travado: desmarcar a dependência é permitido (e leva o dependente junto).
+    expect(canDeselect(all, dep, new Set())).toBe(true);
+    // A própria permissão travada não pode ser desmarcada.
+    expect(canDeselect(all, withDeps.key, new Set([withDeps.key]))).toBe(false);
+    // O dependente é travado: desmarcar a dependência removeria o dependente na cascata, então é recusado.
+    expect(canDeselect(all, dep, new Set([withDeps.key]))).toBe(false);
+    // Uma travada que NÃO está no conjunto não atrapalha.
+    expect(canDeselect(all, dep, new Set(["permissao.que.nao.esta"]))).toBe(true);
+  });
+
+  it("erro locked: lista as permissões pelo rótulo", () => {
+    expect(roleErrorMessage({ code: "locked", permissions: ["a.b", "c.d"] }, "", (p) => (p === "a.b" ? "Rótulo A" : p))).toBe(
+      "Você não pode mudar permissões que não tem: Rótulo A, c.d.",
+    );
   });
 });

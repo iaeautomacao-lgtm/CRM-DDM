@@ -37,6 +37,7 @@ import {
   ROLE_NAME_MAX,
   blockedReason,
   compatRoleOf,
+  canDeselect,
   deselectWithDependents,
   differsFromDefault,
   myLevel,
@@ -52,6 +53,8 @@ import {
 interface RolesPayload {
   roles: RoleItem[];
   limits: { max_custom_roles: number; custom_roles: number };
+  /** Permissões concedíveis que EU não tenho (vazio para o proprietário): ficam travadas no editor. */
+  locked_permissions?: string[];
 }
 
 const SCOPE_LABEL: Record<CatalogPermission['scope'], string | null> = {
@@ -106,6 +109,8 @@ export function PapeisView() {
   );
 
   const roles = data?.roles ?? [];
+  // Permissões travadas: o servidor manda (locked_permissions); sem o campo, calcula pelo que o usuário tem.
+  const lockedFromServer = useMemo(() => (data?.locked_permissions ? new Set<string>(data.locked_permissions) : null), [data]);
   const customCount = data?.limits.custom_roles ?? 0;
   const maxCustom = data?.limits.max_custom_roles ?? 20;
   const atLimit = customCount >= maxCustom;
@@ -262,6 +267,7 @@ export function PapeisView() {
         level={level}
         isOwn={openRole ? isOwnRole(openRole) : false}
         myPermissions={myPermissions}
+        lockedPermissions={lockedFromServer}
         onClose={() => setOpenId(null)}
         onChanged={async () => {
           await load();
@@ -281,6 +287,7 @@ function RoleDrawer({
   level,
   isOwn,
   myPermissions,
+  lockedPermissions,
   onClose,
   onChanged,
 }: {
@@ -293,6 +300,7 @@ function RoleDrawer({
   level: number;
   isOwn: boolean;
   myPermissions: ReadonlySet<string>;
+  lockedPermissions: ReadonlySet<string> | null;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -320,9 +328,16 @@ function RoleDrawer({
 
   const labelOf = (key: string) => catalog.get(key)?.label ?? key;
   /** Só concedo o que eu tenho. */
-  const canGrant = (key: string) => myPermissions.has(key);
+  // Travada = permissão que EU não tenho: não posso marcar nem desmarcar (fica no estado em que o cargo está). O servidor manda a lista.
+  const isLocked = (key: string) => (lockedPermissions ? lockedPermissions.has(key) : !myPermissions.has(key));
+  const canGrant = (key: string) => !isLocked(key);
+  const lockedKeys = new Set<string>([...catalog.keys()].filter((k) => isLocked(k) && !blockedReason(catalog.get(k)!)));
 
   function toggle(key: string, checked: boolean) {
+    if (!checked && !canDeselect(selected, key, lockedKeys)) {
+      toast.error("Esta permissão é exigida por outra que você não tem e não pode mudar.");
+      return;
+    }
     setSelected((prev) => (checked ? selectWithDependencies(prev, key, catalog, canGrant) : deselectWithDependents(prev, key)));
   }
 
@@ -571,6 +586,7 @@ function RoleDrawer({
                               )}
                               {editable && lacks && (
                                 <StatusChip tone="warn" dot={false}>
+                                  <Lock className="mr-1 inline size-3" aria-hidden="true" />
                                   Você não tem esta permissão
                                 </StatusChip>
                               )}
@@ -582,7 +598,7 @@ function RoleDrawer({
                                   ? 'Só o proprietário tem esta permissão.'
                                   : blocked
                                     ? 'Esta permissão ainda não pode ser concedida a cargos.'
-                                    : 'Você só concede permissões que você mesmo tem.'}
+                                    : 'Você não tem esta permissão; só quem tem pode mudá-la.'}
                               </p>
                             )}
                           </div>
