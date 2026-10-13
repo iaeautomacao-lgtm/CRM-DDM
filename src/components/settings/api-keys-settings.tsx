@@ -283,6 +283,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
                       size="sm"
                       onClick={() => handleRevoke(k)}
                       disabled={revoking === k.id}
+                      aria-label={`Revogar chave ${k.name}`}
                       className="self-start border-destructive/40 text-destructive hover:bg-danger-soft hover:text-destructive sm:self-auto"
                     >
                       {revoking === k.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
