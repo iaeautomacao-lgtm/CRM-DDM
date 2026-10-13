@@ -14,7 +14,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
-import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -98,6 +98,7 @@ function ErrosContent() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const seq = useRef(0);
@@ -118,8 +119,9 @@ function ErrosContent() {
       setNumbers(data.numbers ?? []);
       setCampaigns(data.campaigns ?? []);
       setError(null);
+      setLoadError(null);
     } catch (err) {
-      if (mine === seq.current) setError(err instanceof Error ? err.message : "Falha ao carregar os erros");
+      if (mine === seq.current) setLoadError(err instanceof Error ? err.message : "Falha ao carregar os erros");
     } finally {
       if (mine === seq.current) setLoading(false);
     }
@@ -307,6 +309,7 @@ function ErrosContent() {
         )}
       </section>
 
+      {loadError && <ErrorState className="min-h-0 py-4" title="Não foi possível carregar os erros" hint={loadError} onRetry={() => void load(filters)} />}
       {error && (
         <div role="alert" className="flex animate-ddm-fade items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px] text-foreground">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />

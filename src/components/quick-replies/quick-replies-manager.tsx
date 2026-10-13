@@ -36,14 +36,7 @@ import {
   type QuickReplyVisibility,
 } from '@/lib/quick-replies';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -293,6 +286,7 @@ export function QuickRepliesManager() {
     } catch (err) {
       console.error('[QuickRepliesManager] delete error:', err);
       toast.error('Falha ao excluir a resposta rápida');
+      throw err; // mantém o diálogo aberto para tentar de novo
     } finally {
       setDeleting(false);
     }
@@ -645,36 +639,26 @@ export function QuickRepliesManager() {
         </div>
       </DetailDrawer>
 
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Excluir resposta rápida</DialogTitle>
-            <DialogDescription>
-              Excluir /{deleteTarget?.shortcut} — &quot;{deleteTarget?.title}&quot;?{' '}
-              {deleteTarget && visibilityOf(deleteTarget) === 'personal'
-                ? 'Ela some só para você.'
-                : deleteTarget && visibilityOf(deleteTarget) === 'team'
-                  ? 'Ela some do Inbox dos membros da equipe.'
-                  : 'Ela some do Inbox de todos os atendentes.'}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
-              {deleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                  Excluindo…
-                </>
-              ) : (
-                'Excluir'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        title="Excluir resposta rápida"
+        description={
+          <>
+            Excluir /{deleteTarget?.shortcut} — &quot;{deleteTarget?.title}&quot;?{' '}
+            {deleteTarget && visibilityOf(deleteTarget) === 'personal'
+              ? 'Ela some só para você.'
+              : deleteTarget && visibilityOf(deleteTarget) === 'team'
+                ? 'Ela some do Inbox dos membros da equipe.'
+                : 'Ela some do Inbox de todos os atendentes.'}
+          </>
+        }
+        confirmLabel="Excluir"
+        busy={deleting}
+        onConfirm={handleDelete}
+      />
     </PageBody>
   );
 }

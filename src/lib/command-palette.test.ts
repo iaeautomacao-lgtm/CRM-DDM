@@ -29,7 +29,8 @@ describe('paleta: catálogo', () => {
   it('routeGate usa a mesma ordem de prefixos do servidor', () => {
     expect(routeGate('/relatorios/atendimentos')).toBe('/relatorios/atendimentos')
     expect(routeGate('/relatorios/auditoria')).toBe('/relatorios')
-    expect(routeGate('/historico')).toBeNull()
+    expect(routeGate('/historico')).toBe('/historico')
+    expect(routeGate('/unauthorized')).toBeNull()
     expect(Object.keys(ROUTE_ALLOWLIST)).toContain('/disparador')
   })
 })
@@ -49,14 +50,14 @@ describe('paleta: filtrada por /api/me/permissions', () => {
     expect(hrefs).toContain('/relatorios/auditoria')
   })
 
-  it('supervisor não vê Disparador, Auditoria, Exportações nem Configurações', () => {
+  it('supervisor não vê Disparador, Auditoria nem Exportações (Configurações abre, com abas filtradas)', () => {
     const hrefs = hrefsFor('supervisor')
     expect(hrefs).toContain('/monitoramento')
     expect(hrefs).toContain('/relatorios/atendimentos')
     expect(hrefs).not.toContain('/disparador/campanhas')
     expect(hrefs).not.toContain('/relatorios/auditoria')
     expect(hrefs).not.toContain('/relatorios/exportacoes')
-    expect(hrefs).not.toContain('/settings')
+    expect(hrefs).toContain('/settings')
     expect(hrefs).not.toContain('/ddm-logs')
   })
 

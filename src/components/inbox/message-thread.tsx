@@ -210,12 +210,12 @@ const STATUS_DOT: Record<string, string> = {
 // Cores do rótulo de autor por atendente (item 21 do PRD 23): fixas por
 // sender_id (hash), legíveis no claro e no escuro. "Você" usa a cor da marca.
 const AUTHOR_COLORS = [
-  "text-sky-400 [html[data-mode=light]_&]:text-sky-700",
-  "text-violet-400 [html[data-mode=light]_&]:text-violet-700",
-  "text-emerald-400 [html[data-mode=light]_&]:text-emerald-700",
-  "text-rose-400 [html[data-mode=light]_&]:text-rose-700",
-  "text-teal-400 [html[data-mode=light]_&]:text-teal-700",
-  "text-amber-400 [html[data-mode=light]_&]:text-amber-800",
+  "text-info",
+  "text-primary-text",
+  "text-success",
+  "text-danger",
+  "text-foreground-2",
+  "text-warning",
 ];
 
 function authorColor(senderId: string): string {

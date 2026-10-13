@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -167,6 +168,7 @@ export function UsuariosView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [revokeInvite, setRevokeInvite] = useState<Invitation | null>(null);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(null);
@@ -328,23 +330,26 @@ export function UsuariosView() {
     }
   }
 
-  async function handleRemove() {
-    if (!removingMember) return;
+  // Devolve se removeu; o ConfirmDialog só fecha quando deu certo.
+  async function handleRemove(): Promise<boolean> {
+    if (!removingMember) return false;
     setPendingMemberAction(removingMember.user_id);
     try {
       const res = await apiFetch(`/api/account/members/${removingMember.user_id}`, { method: 'DELETE' });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
         toast.error(payload.error || 'Falha ao remover usuário');
-        return;
+        return false;
       }
       toast.success(`${removingMember.full_name || 'Usuário'} removido`);
       setMembers((prev) => prev.filter((m) => m.user_id !== removingMember.user_id));
       if (selectedId === removingMember.user_id) setSelectedId(null);
       setRemovingMember(null);
+      return true;
     } catch (err) {
       console.error('[UsuariosView] remove error:', err);
       toast.error('Não foi possível conectar ao servidor');
+      return false;
     } finally {
       setPendingMemberAction(null);
     }
@@ -614,7 +619,7 @@ export function UsuariosView() {
                             <StatusChip tone="warn">{fmtExpiresIn(inv.expires_at)}</StatusChip>
                           </Td>
                           <Td align="right">
-                            <Button variant="outline" size="sm" onClick={() => void handleRevoke(inv)}>
+                            <Button variant="outline" size="sm" onClick={() => setRevokeInvite(inv)}>
                               <MailX className="size-3.5" />
                               Revogar
                             </Button>
@@ -874,38 +879,38 @@ export function UsuariosView() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <ConfirmDialog
+        open={revokeInvite !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeInvite(null);
+        }}
+        title={`Revogar o convite de ${revokeInvite?.label || 'sem título'}?`}
+        description="O link deixa de funcionar."
+        confirmLabel="Revogar convite"
+        onConfirm={async () => {
+          if (revokeInvite) await handleRevoke(revokeInvite);
+        }}
+      />
+
       <InviteMemberDialog open={inviteOpen} onOpenChange={setInviteOpen} onCreated={load} />
       <BulkImportMembersDialog open={bulkImportOpen} onOpenChange={setBulkImportOpen} onImported={load} />
 
-      <Dialog open={removingMember !== null} onOpenChange={(open) => !open && setRemovingMember(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="size-4 text-warning" />
-              Remover usuário
-            </DialogTitle>
-            <DialogDescription>
-              Remover <span className="font-medium text-foreground">{removingMember?.full_name || 'este usuário'}</span> da conta? A pessoa será
-              desconectada desta conta e receberá uma nova conta pessoal no próximo login. O login dela não será excluído.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemovingMember(null)}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={() => void handleRemove()} disabled={!!pendingMemberAction}>
-              {pendingMemberAction ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Removendo...
-                </>
-              ) : (
-                'Remover usuário'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={removingMember !== null}
+        onOpenChange={(open) => !open && setRemovingMember(null)}
+        title="Remover usuário"
+        description={
+          <>
+            Remover <span className="font-medium text-foreground">{removingMember?.full_name || 'este usuário'}</span> da conta? A pessoa será
+            desconectada desta conta e receberá uma nova conta pessoal no próximo login. O login dela não será excluído.
+          </>
+        }
+        confirmLabel="Remover usuário"
+        busy={!!pendingMemberAction}
+        onConfirm={async () => {
+          if (!(await handleRemove())) throw new Error('remove failed');
+        }}
+      />
 
       <Dialog open={resetPasswordMember !== null} onOpenChange={(open) => !open && closeResetPasswordDialog()}>
         <DialogContent className="sm:max-w-sm">

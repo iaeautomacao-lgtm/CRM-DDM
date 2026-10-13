@@ -244,7 +244,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
       {!debugVisual && (errorCount > 0 || warningCount > 0) && (
         <span
           className={cn(
-            'absolute -top-2 -right-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
+            'absolute -top-2 -right-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-primary-foreground shadow-md',
             errorCount > 0 ? 'bg-danger' : 'bg-warning'
           )}
           title={
@@ -264,7 +264,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
       )}
       {debugVisual?.badge && (
         <span
-          className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+          className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-primary-foreground shadow-md"
           style={{
             backgroundColor: debugVisual.badge === 'check' ? 'var(--success)' : 'var(--danger)',
           }}

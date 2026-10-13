@@ -5,6 +5,7 @@ type AskConfirm = (request: {
   title: string;
   message: string;
   confirmLabel?: string;
+  destructive?: boolean;
 }) => Promise<boolean>;
 
 /**
@@ -27,5 +28,6 @@ export async function confirmNodeRemoval(
     title: keys.length === 1 ? "Excluir nó" : "Excluir nós",
     message: `Excluir ${what}? ${incoming} conexão(ões) que chegam nele(s) serão desligadas. Você pode desfazer com Ctrl+Z.`,
     confirmLabel: "Excluir",
+    destructive: true,
   });
 }

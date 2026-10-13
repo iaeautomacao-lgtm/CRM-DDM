@@ -2,9 +2,6 @@ import {
   Building2,
   KeyRound,
   LayoutGrid,
-  Palette,
-  Shield,
-  User,
   Bot,
   LockKeyhole,
   Wrench,
@@ -35,9 +32,6 @@ import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
  */
 export const SETTINGS_SECTIONS = [
   'overview',
-  'profile',
-  'security',
-  'appearance',
   'organization',
   'api',
   'secrets',
@@ -60,7 +54,7 @@ export interface SectionMeta {
   id: SettingsSection;
   label: string;
   icon: LucideIcon;
-  group: 'top' | 'account' | 'workspace';
+  group: 'top' | 'workspace';
   ownerOnly?: boolean;
   /** Papel mínimo para ver a seção (some do menu e a URL volta à Visão geral). */
   minRole?: AccountRole;
@@ -70,9 +64,6 @@ export interface SectionMeta {
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   overview: { id: 'overview', label: 'Visão geral', icon: LayoutGrid, group: 'top' },
-  profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
-  security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
-  appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
   organization: { id: 'organization', label: 'Organização', icon: Building2, group: 'workspace', minRole: 'admin' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', integrationTab: true },
   secrets: {
@@ -106,7 +97,6 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
 
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
   { label: null, group: 'top' },
-  { label: 'Conta', group: 'account' },
   { label: 'Espaço de trabalho', group: 'workspace' },
 ];
 
@@ -146,9 +136,17 @@ function isSection(value: string | null): value is SettingsSection {
  * Resolve a raw `?tab=` value to a section. Anything unknown — including
  * 'tags'/'custom-fields'/'fields'/'whatsapp'/'templates'/'deals'/'members',
  * all legacy values from before those sections moved to their own
- * routes — falls back to the Overview landing.
+ * routes — falls back to the Overview landing. 'profile'/'security'/'appearance'
+ * (grupo Conta) agora vivem em /perfil; a página redireciona (ver LEGACY_ACCOUNT_TABS).
  */
 export function resolveSection(raw: string | null): SettingsSection {
   if (isSection(raw)) return raw;
   return DEFAULT_SECTION;
 }
+
+/** Abas antigas do grupo "Conta": hoje são abas de /perfil (?tab=perfil|seguranca|aparencia). */
+export const LEGACY_ACCOUNT_TABS: Record<string, string> = {
+  profile: '/perfil?tab=perfil',
+  security: '/perfil?tab=seguranca',
+  appearance: '/perfil?tab=aparencia',
+};

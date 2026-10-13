@@ -11,14 +11,7 @@ import { Laptop, Loader2, LogOut, Smartphone } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { StatusChip } from '@/components/ddm/status-chip';
 import { Skeleton } from '@/components/ddm/states';
 
@@ -56,6 +49,8 @@ export function SessionsCard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [confirmOthers, setConfirmOthers] = useState(false);
+  const [pendingRevoke, setPendingRevoke] = useState<SessionItem | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,7 +74,6 @@ export function SessionsCard() {
   }, [load]);
 
   async function revoke(s: SessionItem) {
-    if (s.current && !window.confirm('Encerrar esta sessão? Você sai deste dispositivo agora.')) return;
     setBusy(s.id);
     try {
       const res = await apiFetch(`/api/me/sessions/${s.id}`, { method: 'DELETE' });
@@ -143,7 +137,7 @@ export function SessionsCard() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => void revokeOthers()} disabled={!!busy || others === 0}>
+          <Button variant="outline" size="sm" onClick={() => setConfirmOthers(true)} disabled={!!busy || others === 0}>
             {busy === 'others' && <Loader2 className="size-3.5 animate-spin" />}
             Sair dos outros dispositivos
           </Button>
@@ -192,7 +186,7 @@ export function SessionsCard() {
                     {s.ip ? ` · IP ${s.ip}` : ''}
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => void revoke(s)} disabled={!!busy}>
+                <Button variant="outline" size="sm" onClick={() => setPendingRevoke(s)} disabled={!!busy}>
                   {busy === s.id && <Loader2 className="size-3.5 animate-spin" />}
                   {s.current ? 'Sair' : 'Encerrar'}
                 </Button>
@@ -202,26 +196,41 @@ export function SessionsCard() {
         </ul>
       )}
 
-      <Dialog open={confirmAll} onOpenChange={setConfirmAll}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Sair de todos os dispositivos?</DialogTitle>
-            <DialogDescription>
-              Todos os dispositivos conectados a esta conta serão desconectados, incluindo este, e precisarão fazer login
-              novamente.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setConfirmAll(false)} disabled={busy === 'all'}>
-              Cancelar
-            </Button>
-            <Button type="button" onClick={() => void signOutAll()} disabled={busy === 'all'}>
-              {busy === 'all' && <Loader2 className="size-4 animate-spin" />}
-              Sair de todos os dispositivos
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmAll}
+        onOpenChange={setConfirmAll}
+        title="Sair de todos os dispositivos?"
+        description="Todos os dispositivos conectados a esta conta serão desconectados, incluindo este, e precisarão fazer login novamente."
+        confirmLabel="Sair de todos os dispositivos"
+        busy={busy === 'all'}
+        onConfirm={signOutAll}
+      />
+      <ConfirmDialog
+        open={confirmOthers}
+        onOpenChange={setConfirmOthers}
+        title="Sair dos outros dispositivos?"
+        description="Todos os outros dispositivos serão desconectados e precisarão fazer login novamente. Este continua conectado."
+        confirmLabel="Sair dos outros"
+        busy={busy === 'others'}
+        onConfirm={revokeOthers}
+      />
+      <ConfirmDialog
+        open={pendingRevoke !== null}
+        onOpenChange={(o) => {
+          if (!o) setPendingRevoke(null);
+        }}
+        title={pendingRevoke?.current ? 'Encerrar esta sessão?' : 'Encerrar a sessão deste dispositivo?'}
+        description={
+          pendingRevoke?.current
+            ? 'Você sai deste dispositivo agora.'
+            : `${pendingRevoke?.device ?? 'O dispositivo'} será desconectado e precisará fazer login novamente.`
+        }
+        confirmLabel="Encerrar sessão"
+        busy={!!pendingRevoke && busy === pendingRevoke.id}
+        onConfirm={async () => {
+          if (pendingRevoke) await revoke(pendingRevoke);
+        }}
+      />
     </section>
   );
 }

@@ -14,11 +14,12 @@ describe('page-access: gate pela mesma regra do servidor', () => {
     expect(pageGate('/relatorios/atendimentos')).toBe('/relatorios/atendimentos')
     expect(pageGate('/relatorios/exportacoes')).toBe('/relatorios')
     expect(pageGate('/disparador/campanhas/123')).toBe('/disparador')
-    expect(pageGate('/historico')).toBeNull()
+    expect(pageGate('/historico')).toBe('/historico')
+    expect(pageGate('/unauthorized')).toBeNull()
   })
 
   it('rota sem gate é livre mesmo com pages vazio', () => {
-    expect(canOpenPage([], '/historico')).toBe(true)
+    expect(canOpenPage([], '/unauthorized')).toBe(true)
     expect(canOpenPage([], '/inbox')).toBe(false)
   })
 

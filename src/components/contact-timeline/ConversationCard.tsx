@@ -19,9 +19,9 @@ const STATUS_BADGE: Record<
   TimelineConversation["status"],
   { label: string; className: string }
 > = {
-  open: { label: "Em andamento", className: "bg-[#DBEAFE] text-[#1E40AF]" },
-  pending: { label: "Pendente", className: "bg-[#FEF3C7] text-[#92400E]" },
-  closed: { label: "Encerrado", className: "bg-[#F3F4F6] text-[#374151]" },
+  open: { label: "Em andamento", className: "bg-info-soft text-info" },
+  pending: { label: "Pendente", className: "bg-warning-soft text-warning" },
+  closed: { label: "Encerrado", className: "bg-surface-3 text-foreground-2" },
 };
 
 export function ConversationCard({
@@ -77,7 +77,7 @@ export function ConversationCard({
   return (
     <div className="relative pl-8">
       <span className="absolute top-1 left-0 flex size-6 items-center justify-center rounded-full border border-border bg-card">
-        <MessageCircle className="size-3.5 text-[#25D366]" />
+        <MessageCircle className="size-3.5 text-success" />
       </span>
 
       <div
@@ -87,7 +87,7 @@ export function ConversationCard({
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") toggleExpand();
         }}
-        className="cursor-pointer rounded-xl border border-border bg-card p-4 shadow-[0_1px_3px_rgba(0,0,0,0.1)] transition-colors hover:bg-[#FFF7F4]"
+        className="cursor-pointer rounded-card border border-border bg-card p-4 shadow-sm transition-colors hover:bg-surface-hover"
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1 space-y-1.5">

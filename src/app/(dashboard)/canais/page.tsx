@@ -37,14 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
@@ -133,6 +126,7 @@ export default function CanaisPage() {
   const [deleteTargets, setDeleteTargets] = useState<ChannelConfig[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState<string | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<ChannelConfig | null>(null);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [clientsOpen, setClientsOpen] = useState(false);
   const [clientBusyId, setClientBusyId] = useState<string | null>(null);
@@ -630,7 +624,7 @@ export default function CanaisPage() {
                         c={c}
                         stopBusy={stopBusyId === c.id}
                         onConnect={() => setConnecting(c)}
-                        onDisconnect={() => handleDisconnect(c)}
+                        onDisconnect={() => setDisconnectTarget(c)}
                         onTest={() => setTesting(c)}
                         onEdit={() => setEditing(c)}
                         onDelete={() => setDeleteTargets([c])}
@@ -750,29 +744,30 @@ export default function CanaisPage() {
 
       <TestChannelDialog channel={testing} onClose={() => setTesting(null)} />
 
-      <Dialog open={deleteTargets !== null} onOpenChange={(open) => !open && setDeleteTargets(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              Excluir canal{(deleteTargets?.length ?? 0) > 1 ? "is" : ""}?
-            </DialogTitle>
-            <DialogDescription>
-              {deleteTargets && deleteTargets.length === 1
-                ? `${channelName(deleteTargets[0])} será removido permanentemente.`
-                : `${deleteTargets?.length ?? 0} canais serão removidos permanentemente.`}{" "}
-              Essa ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTargets(null)} disabled={deleteBusy}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleteBusy}>
-              {deleteBusy ? "Excluindo…" : "Excluir"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteTargets !== null}
+        onOpenChange={(open) => !open && setDeleteTargets(null)}
+        title={`Excluir canal${(deleteTargets?.length ?? 0) > 1 ? "is" : ""}?`}
+        description={`${
+          deleteTargets && deleteTargets.length === 1
+            ? `${channelName(deleteTargets[0])} será removido permanentemente.`
+            : `${deleteTargets?.length ?? 0} canais serão removidos permanentemente.`
+        } Essa ação não pode ser desfeita.`}
+        confirmLabel="Excluir"
+        busy={deleteBusy}
+        onConfirm={confirmDelete}
+      />
+
+      <ConfirmDialog
+        open={disconnectTarget !== null}
+        onOpenChange={(open) => !open && setDisconnectTarget(null)}
+        title={`Desconectar a sessão de ${disconnectTarget ? channelName(disconnectTarget) : ""}?`}
+        description="O canal para de enviar e receber mensagens até ser reconectado."
+        confirmLabel="Desconectar"
+        onConfirm={async () => {
+          if (disconnectTarget) await handleDisconnect(disconnectTarget);
+        }}
+      />
     </PageBody>
   );
 }

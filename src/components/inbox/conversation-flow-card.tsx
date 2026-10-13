@@ -34,15 +34,15 @@ interface FlowRunsResponse {
 }
 
 const STATUS_LABEL: Record<string, { label: string; className: string }> = {
-  active: { label: "Ativo", className: "bg-emerald-500/10 text-emerald-400 [html[data-mode=light]_&]:text-emerald-700" },
-  delayed: { label: "Aguardando", className: "bg-sky-500/10 text-sky-300 [html[data-mode=light]_&]:text-sky-700" },
-  paused_by_agent: { label: "Pausado pelo atendente", className: "bg-amber-500/10 text-amber-400 [html[data-mode=light]_&]:text-amber-700" },
-  handed_off: { label: "Transferido p/ atendente", className: "bg-violet-500/10 text-violet-300 [html[data-mode=light]_&]:text-violet-700" },
-  transferred: { label: "Foi para outro fluxo", className: "bg-violet-500/10 text-violet-300 [html[data-mode=light]_&]:text-violet-700" },
-  completed: { label: "Concluído", className: "bg-muted text-muted-foreground" },
-  timed_out: { label: "Expirado", className: "bg-muted text-muted-foreground" },
-  failed: { label: "Falhou", className: "bg-rose-500/10 text-rose-400 [html[data-mode=light]_&]:text-rose-700" },
-  error: { label: "Erro", className: "bg-rose-500/10 text-rose-400 [html[data-mode=light]_&]:text-rose-700" },
+  active: { label: "Ativo", className: "bg-success-soft text-success" },
+  delayed: { label: "Aguardando", className: "bg-info-soft text-info" },
+  paused_by_agent: { label: "Pausado pelo atendente", className: "bg-warning-soft text-warning" },
+  handed_off: { label: "Transferido p/ atendente", className: "bg-primary-soft text-primary-text" },
+  transferred: { label: "Foi para outro fluxo", className: "bg-primary-soft text-primary-text" },
+  completed: { label: "Concluído", className: "bg-surface-3 text-foreground-2" },
+  timed_out: { label: "Expirado", className: "bg-surface-3 text-foreground-2" },
+  failed: { label: "Falhou", className: "bg-danger-soft text-danger" },
+  error: { label: "Erro", className: "bg-danger-soft text-danger" },
 };
 
 function nodeLabel(run: ConversationFlowRun): string | null {
@@ -165,7 +165,7 @@ function RunRow({
 }) {
   const status = STATUS_LABEL[run.status] ?? {
     label: run.status,
-    className: "bg-muted text-muted-foreground",
+    className: "bg-surface-3 text-foreground-2",
   };
   const node = nodeLabel(run);
   const when = run.ended_at ?? run.last_advanced_at;

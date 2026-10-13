@@ -6,7 +6,11 @@ import {
   Bot,
   Megaphone,
   GitBranch,
-  HelpCircle
+  HelpCircle,
+  Lightbulb,
+  FolderOpen,
+  Mic,
+  Phone,
 } from "lucide-react";
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { PageHeader } from "@/components/ddm/page-header";
@@ -69,9 +73,9 @@ export default function HelpPage() {
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => onTabKeyDown(e, index)}
-              className={`flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2.5 text-[12.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              className={`flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-[12.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 isActive
-                  ? "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]"
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-border"
                   : "text-foreground-2 hover:text-foreground"
               }`}
             >
@@ -129,7 +133,7 @@ export default function HelpPage() {
             </div>
 
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex gap-3 items-start">
-              <span className="text-lg" aria-hidden="true">💡</span>
+              <Lightbulb className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
               <div className="space-y-1">
                 <h5 className="text-xs font-bold text-primary">Importante:</h5>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -154,7 +158,7 @@ export default function HelpPage() {
 
             <div className="space-y-4">
               <div className="flex gap-4 items-start border-b border-border pb-4">
-                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true">🤖</div>
+                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true"><Bot className="size-4" /></div>
                 <div className="space-y-1 flex-1">
                   <h4 className="text-xs font-bold text-foreground">1. Instruções de Comportamento (System Prompt)</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
@@ -164,7 +168,7 @@ export default function HelpPage() {
               </div>
 
               <div className="flex gap-4 items-start border-b border-border pb-4">
-                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true">📂</div>
+                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true"><FolderOpen className="size-4" /></div>
                 <div className="space-y-1 flex-1">
                   <h4 className="text-xs font-bold text-foreground">2. Base de Conhecimento (RAG)</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
@@ -174,7 +178,7 @@ export default function HelpPage() {
               </div>
 
               <div className="flex gap-4 items-start">
-                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true">🎙️</div>
+                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true"><Mic className="size-4" /></div>
                 <div className="space-y-1 flex-1">
                   <h4 className="text-xs font-bold text-foreground">3. Transcrição de Áudio (Whisper)</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
@@ -201,7 +205,7 @@ export default function HelpPage() {
             <div className="space-y-4">
               <div className="bg-muted/30 border border-border rounded-xl p-4 space-y-3">
                 <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                  <span className="p-1 rounded bg-primary-soft text-primary-text" aria-hidden="true">📞</span> Como configurar Ligações Automáticas:
+                  <span className="rounded-md bg-primary-soft p-1 text-primary-text" aria-hidden="true"><Phone className="size-3.5" /></span> Como configurar Ligações Automáticas:
                 </h4>
                 <ol className="list-decimal list-inside text-xs leading-relaxed text-muted-foreground space-y-1.5 pl-2">
                   <li>No menu <strong>Disparador</strong>, clique em <strong>Nova Campanha</strong>.</li>
@@ -214,7 +218,7 @@ export default function HelpPage() {
 
               <div className="bg-muted/30 border border-border rounded-xl p-4 space-y-3">
                 <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                  <span className="p-1 rounded bg-primary-soft text-primary-text" aria-hidden="true">🎙️</span> Diferença entre Áudio Chat e Ligação:
+                  <span className="rounded-md bg-primary-soft p-1 text-primary-text" aria-hidden="true"><Mic className="size-3.5" /></span> Diferença entre Áudio Chat e Ligação:
                 </h4>
                 <div className="grid md:grid-cols-2 gap-4 text-xs leading-relaxed text-muted-foreground">
                   <div className="space-y-1">
@@ -284,21 +288,21 @@ export default function HelpPage() {
 
             <div className="space-y-3.5">
               <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
-                <h4 className="text-xs font-bold text-foreground"><span aria-hidden="true">❓</span> A Inteligência Artificial parou de responder, o que fazer?</h4>
+                <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> A Inteligência Artificial parou de responder, o que fazer?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Verifique se o interruptor <strong>&quot;Ativo&quot;</strong> na página do Agente de IA está ligado. Também confirme se o seu WhatsApp está conectado com o ícone verde de sucesso no menu superior. Se a conexão cair, a IA não consegue responder.
                 </p>
               </div>
 
               <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
-                <h4 className="text-xs font-bold text-foreground"><span aria-hidden="true">❓</span> O robô de IA atende todos os contatos que entram no WhatsApp?</h4>
+                <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> O robô de IA atende todos os contatos que entram no WhatsApp?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Sim. Quando ativo, ele assume o atendimento. Caso um atendente humano envie uma mensagem manual no chat pelo CRM, o robô é pausado automaticamente para aquele cliente para evitar conflito com o vendedor humano.
                 </p>
               </div>
 
               <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
-                <h4 className="text-xs font-bold text-foreground"><span aria-hidden="true">❓</span> Posso usar mais de uma Base de Conhecimento na IA?</h4>
+                <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> Posso usar mais de uma Base de Conhecimento na IA?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Sim! Você pode carregar múltiplos arquivos TXT ou PDF na seção <strong>Base de Conhecimento</strong> do Agente. O robô irá ler e combinar os dados de todos eles para responder aos clientes.
                 </p>

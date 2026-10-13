@@ -25,8 +25,8 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import {
-  AlertTriangle,
   KeyRound,
   Loader2,
   Mail,
@@ -169,6 +169,7 @@ export function MembersTab() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [revokeInvite, setRevokeInvite] = useState<Invitation | null>(null);
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
     null,
   );
@@ -285,7 +286,7 @@ export function MembersTab() {
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
         toast.error(payload.error || 'Falha ao remover usuário');
-        return;
+        throw new Error('remove-failed'); // mantém o diálogo aberto
       }
       toast.success(`${removingMember.full_name || 'Usuário'} removido`);
       setMembers((prev) =>
@@ -293,8 +294,10 @@ export function MembersTab() {
       );
       setRemovingMember(null);
     } catch (err) {
+      if (err instanceof Error && err.message === 'remove-failed') throw err;
       console.error('[MembersTab] remove error:', err);
       toast.error('Não foi possível conectar ao servidor');
+      throw err;
     } finally {
       setPendingMemberAction(null);
     }
@@ -746,7 +749,7 @@ export function MembersTab() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleRevoke(inv)}
+                        onClick={() => setRevokeInvite(inv)}
                         aria-label={`Revogar convite ${inv.label || 'sem título'}`}
                         className="border-danger/40 bg-danger-soft text-danger hover:bg-danger-soft hover:border-danger/60 hover:text-danger"
                       >
@@ -775,53 +778,39 @@ export function MembersTab() {
         onImported={loadEverything}
       />
 
-      <Dialog
+      <ConfirmDialog
         open={removingMember !== null}
         onOpenChange={(open) => {
           if (!open) setRemovingMember(null);
         }}
-      >
-        <DialogContent className="bg-popover border-border sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-popover-foreground">
-              <AlertTriangle className="size-4 text-warning" />
-              Remover usuário
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Remover{' '}
-              <span className="font-medium text-muted-foreground">
-                {removingMember?.full_name || 'este usuário'}
-              </span>{' '}
-              da conta? A pessoa será desconectada desta conta e receberá
-              uma nova conta pessoal no próximo login. O login dela não
-              será excluído.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setRemovingMember(null)}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleRemove}
-              disabled={!!pendingMemberAction}
-              className="bg-destructive hover:bg-destructive/90 text-white"
-            >
-              {pendingMemberAction ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Removendo...
-                </>
-              ) : (
-                'Remover usuário'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="Remover usuário"
+        description={
+          <>
+            Remover{' '}
+            <span className="font-medium text-foreground">
+              {removingMember?.full_name || 'este usuário'}
+            </span>{' '}
+            da conta? A pessoa será desconectada desta conta e receberá uma nova conta pessoal no próximo
+            login. O login dela não será excluído.
+          </>
+        }
+        confirmLabel="Remover usuário"
+        busy={!!pendingMemberAction}
+        onConfirm={handleRemove}
+      />
+
+      <ConfirmDialog
+        open={revokeInvite !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeInvite(null);
+        }}
+        title={`Revogar o convite de ${revokeInvite?.label || 'sem título'}?`}
+        description="O link deixa de funcionar."
+        confirmLabel="Revogar convite"
+        onConfirm={async () => {
+          if (revokeInvite) await handleRevoke(revokeInvite);
+        }}
+      />
 
       <Dialog
         open={resetPasswordMember !== null}

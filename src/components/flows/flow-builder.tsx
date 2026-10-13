@@ -666,7 +666,7 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
               const meta = NODE_META[t];
               return (
                 <DropdownMenuItem key={t} onClick={() => onAdd(t)}>
-                  <meta.icon className={cn('h-3.5 w-3.5', meta.color)} />
+                  <meta.icon className="h-3.5 w-3.5" style={{ color: nodeColors(t).solid }} />
                   {meta.label}
                 </DropdownMenuItem>
               );

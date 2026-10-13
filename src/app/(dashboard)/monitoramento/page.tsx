@@ -106,7 +106,7 @@ export default function MonitoramentoPage() {
 
 function MonitoramentoBoard() {
   const { accountId, profile } = useAuth();
-  const { can } = usePermissions();
+  const { can, canOpen } = usePermissions();
   // Arrastar agente entre equipes grava em /api/account/teams/[teamId]/members, que exige teams.manage (não o papel).
   const canManageTeams = can("teams.manage");
   const canBulkTransfer = can("inbox.transfer");
@@ -1039,13 +1039,15 @@ function MonitoramentoBoard() {
                 permission="teams.manage"
                 fallback={
                   <p>
-                    Peça a um administrador ou supervisor para criar equipes em Equipes.
-                    <Can permission="teams.view">
-                      {" "}
-                      <Link href="/equipes" className="font-medium text-primary-text hover:underline">
-                        Abrir Equipes
-                      </Link>
-                    </Can>
+                    Peça a um administrador para criar equipes em Equipes.
+                    {canOpen("/equipes") ? (
+                      <>
+                        {" "}
+                        <Link href="/equipes" className="font-medium text-primary-text hover:underline">
+                          Abrir Equipes
+                        </Link>
+                      </>
+                    ) : null}
                   </p>
                 }
               >

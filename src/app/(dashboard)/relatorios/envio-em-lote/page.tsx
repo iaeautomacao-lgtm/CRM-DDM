@@ -86,11 +86,11 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  agendado: { label: "Agendado", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
-  enviando: { label: "Enviando", className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" },
+  agendado: { label: "Agendado", className: "bg-warning-soft text-warning" },
+  enviando: { label: "Enviando", className: "bg-primary-soft text-primary-text" },
   enviado: { label: "Enviado", className: "bg-info-soft text-info" },
-  erro: { label: "Erro", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
-  cancelado: { label: "Cancelado", className: "bg-muted text-muted-foreground" },
+  erro: { label: "Erro", className: "bg-danger-soft text-danger" },
+  cancelado: { label: "Cancelado", className: "bg-surface-3 text-foreground-2" },
 };
 
 // Filtro "Tipo de erro" — aplicado client-side sobre os itens já
@@ -679,7 +679,7 @@ export default function EnvioEmLotePage() {
                     {visibleItems.map((item) => {
                       const badge = STATUS_BADGE[item.status] ?? {
                         label: item.status,
-                        className: "bg-muted text-muted-foreground",
+                        className: "bg-surface-3 text-foreground-2",
                       };
                       return (
                         <TableRow key={item.id}>

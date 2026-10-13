@@ -48,10 +48,10 @@ interface TurnLog {
 const TIMELINE_COLORS: Record<SimTimelineEvent["type"], string> = {
   node: "text-muted-foreground",
   branch: "text-info",
-  tag: "text-violet-600 dark:text-violet-400",
+  tag: "text-primary-text",
   tool_call: "text-warning",
   tool_result: "text-warning",
-  handoff: "text-orange-600 dark:text-orange-400",
+  handoff: "text-warning",
   run_end: "text-success",
   error: "text-destructive",
   note: "text-muted-foreground italic",

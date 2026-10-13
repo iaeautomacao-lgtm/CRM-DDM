@@ -41,7 +41,7 @@ import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { Segmented } from "@/components/ddm/segmented";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
-import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { CampaignExportsPanel } from "@/components/disparador/export/campaign-exports";
 
 interface QueueRow {
@@ -108,6 +108,8 @@ export default function CampanhaContatosPage({
   const [campaignName, setCampaignName] = useState<string>("");
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   // Links do Monitor/Erros chegam com ?status=erro&codigo=131049 (lista filtrada por código de erro).
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get("status");
@@ -187,13 +189,16 @@ export default function CampanhaContatosPage({
         setRows(data as unknown as QueueRow[]);
         setHasMore(data.length === PAGE_SIZE);
         setTotalCount(count ?? null);
+        setLoadError(false);
+      } else {
+        setLoadError(true);
       }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [allowed, campaignId, statusFilter, codigoFilter, page]);
+  }, [allowed, campaignId, statusFilter, codigoFilter, page, reloadKey]);
 
   // Troca de filtro de status reseta a paginação direto no handler (não
   // num useEffect derivado) — senão uma página > 0 de um filtro anterior
@@ -330,6 +335,15 @@ export default function CampanhaContatosPage({
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : loadError ? (
+          <ErrorState
+            className="m-4"
+            title="Não foi possível carregar os envios desta campanha"
+            onRetry={() => {
+              setLoading(true);
+              setReloadKey((k) => k + 1);
+            }}
+          />
         ) : rows.length === 0 ? (
           <EmptyState
             className="m-4"

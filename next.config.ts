@@ -121,6 +121,10 @@ const nextConfig: NextConfig = {
    * they apply to every response regardless of which cache rule
    * matched.
    */
+  // /settings/api-docs só repassa para a documentação pública: redireciona antes de qualquer gate de /settings.
+  async redirects() {
+    return [{ source: "/settings/api-docs", destination: "/docs/api", permanent: false }];
+  },
   async headers() {
     return [
       {

@@ -44,6 +44,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import { getDisparadorScope } from "@/lib/disparador/scope";
@@ -442,6 +443,7 @@ export default function CampanhasPage() {
   >(null);
   const [starting, setStarting] = useState(false);
   const [stopConfirm, setStopConfirm] = useState<{ id: string; nome: string } | null>(null);
+  const [pauseTarget, setPauseTarget] = useState<{ id: string; nome: string } | null>(null);
   // Campanha cujo público está sendo calculado (descarta resposta atrasada).
   const audienceForRef = useRef<string | null>(null);
 
@@ -1273,7 +1275,7 @@ export default function CampanhasPage() {
                 {/* Ações */}
                 <div className="ml-auto flex flex-none flex-wrap items-center gap-1.5">
                   {!canManage ? null : c.status === "em_execucao" ? (
-                    <Button variant="outline" onClick={() => handlePause(c.id)}>
+                    <Button variant="outline" onClick={() => setPauseTarget({ id: c.id, nome: c.nome })}>
                       <Pause className="size-3.5" aria-hidden="true" /> Pausar
                     </Button>
                   ) : c.status === "agendado" ? (
@@ -1580,6 +1582,19 @@ export default function CampanhasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Pausar: os envios param até retomar (ação reversível, botão sem tom destrutivo). */}
+      <ConfirmDialog
+        open={pauseTarget !== null}
+        onOpenChange={(open) => !open && setPauseTarget(null)}
+        title="Pausar campanha?"
+        description={`Pausar a campanha ${pauseTarget?.nome ?? ""}? Os envios param até você retomar.`}
+        confirmLabel="Pausar"
+        destructive={false}
+        onConfirm={async () => {
+          if (pauseTarget) await handlePause(pauseTarget.id);
+        }}
+      />
 
       {/* Métricas da campanha: gaveta da direita (protótipo). Atualiza a cada 15 s enquanto aberta. */}
       <DetailDrawer
