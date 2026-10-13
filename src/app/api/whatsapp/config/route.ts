@@ -23,6 +23,7 @@ import {
   assertWahaUrlIsSafe,
   WahaUrlBlockedError,
 } from '@/lib/whatsapp/waha-api'
+import { isHttpsOrAllowlistedUrl } from '@/lib/security/ssrf-guard'
 import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 
 // Migration 113 — a WAHA session with no message activity for longer
@@ -437,6 +438,10 @@ export async function POST(request: Request) {
       // waha_url é do tenant: precisa ser pública (ou estar em SSRF_ALLOWED_HOSTS). Validada
       // aqui no cadastro E a cada chamada (wahaFetch → safeFetch). PRD 14, SW-1.
       if (typeof waha_url === 'string' && waha_url) {
+        // Só https: (http apenas para host em SSRF_ALLOWED_HOSTS): a api key do WAHA viaja nesta conexão.
+        if (!isHttpsOrAllowlistedUrl(waha_url)) {
+          return NextResponse.json({ error: 'waha_url deve usar https://.' }, { status: 400 })
+        }
         try {
           await assertWahaUrlIsSafe(waha_url)
         } catch (err) {
