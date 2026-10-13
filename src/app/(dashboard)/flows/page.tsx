@@ -61,9 +61,9 @@ import {
 /**
  * Flows list page.
  *
- * Open to every authenticated user. Flows is in soft-GA — the "Beta"
- * chip in the header is the only remaining signal that the surface
- * is new. The previous per-account beta gate was removed in PR #134.
+ * Abre para proprietário e admin (ROUTE_ALLOWLIST) e, em modo leitura, para quem tem
+ * flows.view_runs (cargo personalizado). Flows está em soft-GA: o chip "Beta" do
+ * cabeçalho é o único sinal de que a tela é nova (o gate por conta saiu no PR #134).
  */
 
 interface FlowRow {

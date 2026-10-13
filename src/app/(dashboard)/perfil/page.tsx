@@ -1,10 +1,10 @@
 "use client";
 
-// /perfil — self-service profile + security, accessible to every role
-// (ROUTE_ALLOWLIST["/perfil"] = all four roles), unlike /settings
-// (owner/admin only). ProfileForm and SecurityPanel are the exact
-// same components /settings?tab=profile and /settings?tab=security
-// already render — reused as-is, no new API routes.
+// /perfil — perfil e segurança do próprio usuário, aberto a todos os papéis
+// (ROUTE_ALLOWLIST["/perfil"] = owner, admin, supervisor, agent e viewer; decisão do
+// dono de 13/10). ProfileForm e SecurityPanel são os mesmos componentes que
+// /settings?tab=profile e /settings?tab=security renderizam — reaproveitados como estão,
+// sem rotas de API novas.
 
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { ProfileForm } from "@/components/settings/profile-form";

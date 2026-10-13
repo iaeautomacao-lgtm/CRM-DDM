@@ -122,7 +122,7 @@ describe("páginas (ROUTE_ALLOWLIST)", () => {
 
   it("as divergências conhecidas (G5–G8) são exatamente estas — qualquer outra é regressão", () => {
     const divergent = PAGE_MATRIX.filter((p) => !p.aligned).map((p) => p.prefix);
-    expect(divergent).toEqual(["/canais", "/contacts", "/pipelines", "/ajuda", "/perfil", "/seguranca"]);
+    expect(divergent).toEqual(["/ajuda", "/perfil", "/seguranca"]);
     for (const p of PAGE_MATRIX.filter((x) => !x.aligned)) expect(p.note, p.prefix).toBeTruthy();
   });
 });

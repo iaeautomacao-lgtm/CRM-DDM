@@ -304,6 +304,8 @@ export interface PageEntry {
   roles: readonly AccountRole[];
   permission: Permission | null;
   aligned: boolean;
+  /** Outras permissões que também abrem a tela (cargo personalizado): basta uma delas. */
+  anyOf?: readonly Permission[];
   note?: string;
 }
 
@@ -317,17 +319,19 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/relatorios/tabulacoes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios/agentes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios", roles: ["owner", "admin"], permission: "reports.view_all", aligned: true },
-  { prefix: "/canais", roles: ["owner"], permission: "channels.manage", aligned: false, note: "página só owner; a API aceita admin (G7)" },
-  { prefix: "/contacts", roles: ["owner"], permission: "contacts.view", aligned: false, note: "página só owner; contatos são lidos por todos (G7)" },
-  { prefix: "/pipelines", roles: ["owner"], permission: "pipelines.manage", aligned: false, note: "página só owner; RLS admin (G7)" },
+  { prefix: "/canais", roles: ["owner", "admin"], permission: "channels.manage", aligned: true, note: "decisão 13/10: admin vê Canais" },
+  { prefix: "/contacts", roles: ["owner", "admin"], permission: "contacts.import", aligned: true, note: "decisão 13/10: owner+admin; contacts.view é de todos e abriria a tela para quem não deve" },
+  { prefix: "/pipelines", roles: ["owner", "admin"], permission: "pipelines.manage", aligned: true, note: "decisão 13/10: admin vê Funis" },
+  { prefix: "/lead-extractor", roles: ["owner", "admin"], permission: "settings.account", aligned: true, note: "decisão 13/10: admin+; sem permissão própria no catálogo" },
+  { prefix: "/historico", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.view", aligned: true, note: "decisão 13/10: quem atende conversas" },
   { prefix: "/flows", roles: ["owner", "admin"], permission: "flows.edit", aligned: true },
   { prefix: "/automations", roles: ["owner", "admin", "supervisor", "agent"], permission: "automations.view", aligned: true, note: "decisão 9 (13/10): o visualizador não vê" },
   { prefix: "/disparador", roles: ["owner", "admin"], permission: "campaigns.manage", aligned: true },
   { prefix: "/regua", roles: ["owner", "admin", "supervisor"], permission: "billing.view", aligned: true },
-  { prefix: "/ajuda", roles: ["owner"], permission: null, aligned: false, note: "sem capacidade correspondente" },
-  { prefix: "/settings", roles: ["owner", "admin"], permission: "settings.account", aligned: true },
+  { prefix: "/ajuda", roles: ["owner", "admin"], permission: null, aligned: false, note: "sem capacidade correspondente; owner+admin (decisão 13/10)" },
+  { prefix: "/settings", roles: ["owner", "admin", "supervisor"], permission: "ai.agents.view", anyOf: ["ai.tools.view", "settings.account"], aligned: true, note: "decisão 13/10: o supervisor abre; as abas filtram por permissão" },
   { prefix: "/equipes", roles: ["owner", "admin"], permission: "teams.manage", aligned: true, note: "a tela é só leitura para admin; a API deixa gerir (G6)" },
-  { prefix: "/perfil", roles: ["owner", "admin"], permission: null, aligned: false, note: "comentário diz 'todos'; allowlist é owner/admin" },
+  { prefix: "/perfil", roles: ["owner", "admin", "supervisor", "agent", "viewer"], permission: null, aligned: false, note: "todos os papéis (decisão 13/10): cada um edita o próprio perfil" },
   { prefix: "/seguranca", roles: ["owner", "admin", "supervisor", "agent", "viewer"], permission: null, aligned: false, note: "todos os papéis" },
   { prefix: "/templates", roles: ["owner", "admin"], permission: "templates.manage", aligned: true },
   { prefix: "/tabulacoes", roles: ["owner", "admin"], permission: "tags.manage", aligned: true },

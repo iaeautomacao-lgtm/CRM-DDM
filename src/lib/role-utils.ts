@@ -11,47 +11,24 @@ import type { AccountRole } from "@/lib/auth/roles";
 // isRouteGated is true for every nav path and that fallback never
 // actually applies today.
 //
-// Per-role reach, owner aside (owner always passes in canAccessRoute
-// before this table is even consulted):
-//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
-//            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
-//            /flows, /disparador
-//   (owner/admin/supervisor também → /inteligencia, o DDM Intelligence)
-//   supervisor → /dashboard, /monitoramento, /inbox e os relatórios de
-//            Atendimentos/Conversas/Agentes (dados só das suas equipes —
-//            RLS da migration 140 e RPCs escopadas na 143)
-//   agent  → /inbox
-//   viewer → /dashboard
-// /templates, /tabulacoes, /usuarios are TemplateManager/
-// FieldsAndTagsPanel/MembersTab moved out of /settings onto their own
-// routes (settings-sections.ts no longer registers those sections) —
-// owner/admin only, same reach as /settings itself already had.
-// /perfil (ProfileForm/SecurityPanel, same components /settings
-// renders) is owner/admin only — agents get an inline "Trocar senha"
-// dialog straight from the sidebar footer instead (no route needed);
-// viewer currently has no self-service password change path at all
-// as a result of this narrowing (flagged, not something this change
-// added a replacement for).
-// /flows and /disparador opened to admin (decisão de 02/10/2026): o
-// admin abre o fluxo e a campanha a partir do inbox (card "Fluxo" e
-// faixa "Campanha"). As APIs dessas páginas já são escopadas por conta
-// via RLS, então nenhuma rota de API precisou mudar.
-// Routes no role above claims (/canais, /contacts, /pipelines,
-// /ajuda) are owner-only. Adding a new nav
-// route = one new ROUTE_ALLOWLIST entry, or isRouteGated silently
-// stops covering it.
-//
-// /pipelines was pulled from the sidebar's navItems only — it stays in
-// ROUTE_ALLOWLIST as owner-only, so a direct URL visit still redirects
-// non-owners same as before; this is purely a nav-visibility change,
-// not a permission change.
-//
-// /settings was owner-only until admin was added here to match
-// several settings panels' own internal gating (TeamsPanel,
-// api-keys-settings, members-tab all already wrap their write
-// actions in <RequireRole min="admin">) — those checks were
-// unreachable dead code for admins as long as the page itself
-// redirected them to /unauthorized before ever rendering.
+// Alcance por papel, proprietário à parte (ele sempre passa em
+// canAccessRoute antes de a tabela ser consultada). Decisões do dono de 13/10/2026:
+//   admin      → tudo de /settings, /equipes, /usuarios, /flows, /disparador,
+//                /templates, /tabulacoes, /relatorios, /canais, /contacts,
+//                /pipelines, /ajuda, /lead-extractor, /perfil, /historico
+//   supervisor → /dashboard, /monitoramento, /inbox, /historico, /inteligencia,
+//                /regua, /settings (as abas filtram: Agentes e Ferramentas só
+//                leitura) e os relatórios de Atendimentos/Conversas/Tabulações/
+//                Agentes (dados só das suas equipes — RLS da 140 e RPCs da 143)
+//   agent      → /inbox, /historico, /automations, /respostas-rapidas
+//   viewer     → /dashboard
+//   todos      → /perfil (Perfil, Segurança e Aparência) e /seguranca
+// /canais, /contacts, /pipelines, /ajuda e /lead-extractor: proprietário e admin
+// (as APIs e o RLS dessas telas já aceitam o admin). /historico: quem atende
+// conversas. Para cargo personalizado, "pages" em /api/me/permissions sai da
+// permissão de cada tela (PAGE_MATRIX), não deste papel de compatibilidade.
+// Rota nova de menu = uma entrada nova em ROUTE_ALLOWLIST (e em PAGE_MATRIX); sem
+// entrada, isRouteGated deixa de cobri-la.
 // ============================================================
 
 /** Alias of AccountRole — kept separate so route-gating call sites
@@ -76,21 +53,24 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/relatorios/agentes": ["owner", "admin", "supervisor"],
   "/relatorios": ["owner", "admin"],
 
-  // Owner-only — no other role's route list above claims these.
-  "/canais": ["owner"],
-  "/contacts": ["owner"],
-  "/pipelines": ["owner"],
+  // Telas de gestão: proprietário e admin.
+  "/canais": ["owner", "admin"],
+  "/contacts": ["owner", "admin"],
+  "/pipelines": ["owner", "admin"],
+  "/lead-extractor": ["owner", "admin"],
+  // Histórico de conversas encerradas: quem atende conversas (o RLS escopa o que cada um lê).
+  "/historico": ["owner", "admin", "supervisor", "agent"],
   "/flows": ["owner", "admin"],
   // Decisão do dono (13/10, item 9): o visualizador NÃO vê /automations (o mesmo conjunto de automations.view).
   "/automations": ["owner", "admin", "supervisor", "agent"],
   "/disparador": ["owner", "admin"],
   // Régua de cobrança (PRD 17): ver = billing.view (supervisor+); editar = billing.manage (admin+, conferido na tela e nas rotas).
   "/regua": ["owner", "admin", "supervisor"],
-  "/ajuda": ["owner"],
+  "/ajuda": ["owner", "admin"],
 
-  "/settings": ["owner", "admin"],
+  "/settings": ["owner", "admin", "supervisor"],
   "/equipes": ["owner", "admin"],
-  "/perfil": ["owner", "admin"],
+  "/perfil": ["owner", "admin", "supervisor", "agent", "viewer"],
   "/seguranca": ["owner", "admin", "supervisor", "agent", "viewer"],
   "/templates": ["owner", "admin"],
   "/tabulacoes": ["owner", "admin"],

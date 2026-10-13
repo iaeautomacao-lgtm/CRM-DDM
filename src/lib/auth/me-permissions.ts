@@ -7,6 +7,7 @@
 // ============================================================
 
 import { ROUTE_ALLOWLIST, canAccessRoute } from "../role-utils";
+import { PAGE_MATRIX } from "./permissions-matrix";
 import { PERMISSION_CATALOG, PERMISSIONS, can, isGrantableToCustomRole, type Permission } from "./permissions";
 import { ACCOUNT_ROLES, type AccountRole } from "./roles";
 
@@ -88,12 +89,17 @@ export function buildMePermissions(ctx: MePermissionsInput): MePermissions {
       reports: scopeOf(has, "reports.view_all", "reports.view_team", "none"),
       intelligence: scopeOf(has, "intelligence.scope_account", "intelligence.use", "none"),
     },
-    // Páginas com gate que o papel acessa hoje (ROUTE_ALLOWLIST); o front deixa de duplicar a tabela.
-    // /flows também abre para quem só vê execuções (flows.view_runs, papel personalizado): o
-    // editor abre em modo leitura (decisão do dono 13/10, item 11); as APIs seguem por permissão.
-    pages: Object.keys(ROUTE_ALLOWLIST).filter(
-      (prefix) => canAccessRoute(ctx.role, prefix) || (prefix === "/flows" && has("flows.view_runs")),
-    ),
+    // Páginas com gate que o usuário abre. Papel de sistema: o ROUTE_ALLOWLIST. Cargo personalizado (ou papel
+    // de sistema com permissões ajustadas): a permissão de cada tela (PAGE_MATRIX); tela sem permissão própria
+    // (/ajuda, /perfil, /seguranca) segue o papel. /flows também abre para quem só vê execuções
+    // (flows.view_runs): o editor abre em modo leitura (decisão do dono 13/10, item 11).
+    pages: Object.keys(ROUTE_ALLOWLIST).filter((prefix) => {
+      if (prefix === "/flows" && has("flows.view_runs")) return true;
+      if (ctx.role === "owner" || !(ctx.customRole || ctx.roleCustomized)) return canAccessRoute(ctx.role, prefix);
+      const entry = PAGE_MATRIX.find((p) => p.prefix === prefix);
+      if (!entry?.permission) return canAccessRoute(ctx.role, prefix);
+      return has(entry.permission) || (entry.anyOf ?? []).some(has);
+    }),
     status: "active",
   };
 }

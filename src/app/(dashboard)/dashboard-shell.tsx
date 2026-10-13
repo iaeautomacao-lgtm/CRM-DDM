@@ -49,7 +49,9 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 
     // Páginas liberadas pelo servidor (GET /api/me/permissions, campo pages).
     if (!permissions.canOpen(pathname)) {
-      const fallback = getDefaultRoute(accountRole);
+      // Cargo personalizado pode não abrir a tela inicial do papel de compatibilidade: cai no perfil (todos abrem).
+      const home = getDefaultRoute(accountRole);
+      const fallback = permissions.canOpen(home) ? home : "/perfil";
       if (pathname !== fallback) {
         // Explica o redirecionamento — o id fixo deduplica o toast caso
         // o efeito rode de novo antes da navegação concluir. /dashboard é
