@@ -46,7 +46,7 @@ import { format, formatDistanceStrict } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -58,13 +58,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Sheet,
   SheetContent,
@@ -773,43 +775,37 @@ export default function FlowRunsPage() {
       />
 
       {/* Bulk delete confirmation */}
-      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
               Excluir {selected.size} {selected.size === 1 ? "execução" : "execuções"}
-            </DialogTitle>
-            <DialogDescription>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               Tem certeza que deseja excluir{" "}
               <span className="font-medium text-foreground">
                 {selected.size} {selected.size === 1 ? "execução" : "execuções"}
               </span>
               ? Os logs de eventos dessas execuções também serão excluídos. Esta
               ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setBulkDeleteOpen(false)}
-              disabled={deleting}
-            >
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleBulkDelete} disabled={deleting}>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: "destructive" })} onClick={() => void handleBulkDelete()} disabled={deleting}>
               {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
               Excluir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* "Excluir todas" confirmation */}
-      <Dialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Excluir todas as execuções listadas</DialogTitle>
-            <DialogDescription>
+      <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir todas as execuções listadas</AlertDialogTitle>
+            <AlertDialogDescription>
               Tem certeza que deseja excluir{" "}
               <span className="font-medium text-foreground">
                 {runs.length} {runs.length === 1 ? "execução" : "execuções"}
@@ -819,23 +815,17 @@ export default function FlowRunsPage() {
                 : "listadas"}
               ? Os logs de eventos dessas execuções também serão excluídos. Esta
               ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteAllOpen(false)}
-              disabled={deleting}
-            >
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteAll} disabled={deleting}>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: "destructive" })} onClick={() => void handleDeleteAll()} disabled={deleting}>
               {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
               Excluir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageBody>
   );
 }
