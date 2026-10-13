@@ -198,10 +198,11 @@ export const openApiSpec = {
       get: {
         tags: ['Conversas'], operationId: 'listPublicConversations',
         summary: 'Listar conversas da conta (metadados)',
-        description: 'Requer conversations:read. Inclui contato, operador, status, equipe e estado operacional da IA. Não inclui mensagens; use /{id}/messages. Período from/to filtra data de CRIAÇÃO em calendário de Brasília. Resultado ordenado do mais recente para o mais antigo com cursor.',
+        description: 'Requer conversations:read. Inclui contato, operador, status, equipe e estado operacional da IA. Não inclui mensagens; use /{id}/messages. Período from/to filtra date_field (created_at por padrão; last_message_at ou closed_at) em calendário de Brasília. Resultado ordenado do mais recente para o mais antigo com cursor.',
         parameters: [
           conversationCursorParam, { ...conversationLimitParam, schema: { type: 'integer', minimum: 1, maximum: 100 } },
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['all','active','attending','waiting','open','pending','closed'] } },
+          { name: 'date_field', in: 'query', schema: { type: 'string', enum: ['created_at','last_message_at','closed_at'], default: 'created_at' } },
           { name: 'from', in: 'query', schema: { type: 'string', format: 'date' } },
           { name: 'to', in: 'query', schema: { type: 'string', format: 'date' } },
           { name: 'team_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
@@ -268,6 +269,7 @@ export const openApiSpec = {
           schema: { type: 'object', required: ['from','to'],
             properties: {
               from: { type: 'string', format: 'date' }, to: { type: 'string', format: 'date' },
+              date_field: { type: 'string', enum: ['created_at','last_message_at','closed_at'], default: 'created_at' },
               status: { type: 'string' }, team_id: { type: 'string', format: 'uuid' },
               agent_id: { type: 'string', format: 'uuid' }, contact_id: { type: 'string', format: 'uuid' },
               channel: { type: 'string' }, q: { type: 'string', maxLength: 80 },
