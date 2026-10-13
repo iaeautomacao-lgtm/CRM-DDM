@@ -5,7 +5,7 @@
 // Configurações → Integrações → Ferramentas e pela aba Ferramentas do editor do agente ("Criar ferramenta").
 // Credenciais nunca aparecem: só marcadores {{cred.NOME}}.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2, Play } from 'lucide-react';
 
@@ -25,6 +25,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DetailDrawer } from '@/components/ddm/list-with-drawer';
 import { AiToolEditor } from '@/components/flows/forms/ai-tool-editor';
 import type { AiAgentTool } from '@/lib/flows/types';
+import { extractCredRefs, missingCredNames, toolHttpTexts } from '@/lib/secrets/cred-refs';
+import { MissingCredentialNotice } from './missing-credential-notice';
 
 export interface ToolItem {
   id: string;
@@ -76,6 +78,24 @@ export function ToolDialog({
   const [displayName, setDisplayName] = useState(item?.display_name ?? '');
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'definition' | 'test'>('definition');
+  // Credenciais da conta (só nomes/máscara). null = ainda não sei (sem permissão ou falha): não acusa falta.
+  const [secretNames, setSecretNames] = useState<Array<{ name: string; kind: 'variable' | 'credential' }> | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/settings/secrets', { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => ({}))) as { secrets?: Array<{ name: string; kind: 'variable' | 'credential' }> };
+        if (alive && Array.isArray(data.secrets)) setSecretNames(data.secrets.map((s) => ({ name: s.name, kind: s.kind })));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const missingCreds = secretNames ? missingCredNames(extractCredRefs(toolHttpTexts(tool.http)), secretNames) : [];
 
   async function save() {
     setSaving(true);
@@ -163,6 +183,10 @@ export function ToolDialog({
             <Input id="tool-display" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Buscar CPF" maxLength={80} disabled={saving} />
           </div>
           <AiToolEditor tool={tool} onChange={setTool} showTimeout lockName={!isNew} />
+          <MissingCredentialNotice
+            names={missingCreds}
+            onCreated={(saved) => setSecretNames((prev) => [...(prev ?? []), { name: saved.name, kind: saved.kind }])}
+          />
         </div>
       )}
     </DetailDrawer>
