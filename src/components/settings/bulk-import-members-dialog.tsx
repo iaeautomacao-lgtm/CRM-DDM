@@ -41,6 +41,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { RoleSelect } from '@/components/usuarios/role-select';
+import { useRoles } from '@/hooks/use-roles';
+import { usePermissions } from '@/hooks/use-permission';
+import { assignableRoles, myLevel, roleErrorMessage } from '@/lib/roles/editor';
 import { StatusChip } from '@/components/ddm/status-chip';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import type { AccountRole } from '@/lib/auth/roles';
@@ -144,7 +148,7 @@ function getField(
 
 function roleBadgeLabel(role: string): string {
   const key = ROLE_ALIASES[role.trim().toLowerCase()];
-  return key ? ROLE_META[key].label : 'Papel inválido';
+  return key ? ROLE_META[key].label : 'Cargo inválido';
 }
 
 interface BulkImportMembersDialogProps {
@@ -170,9 +174,16 @@ export function BulkImportMembersDialog({
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<BulkImportResult | null>(null);
   const [tried, setTried] = useState(false);
+  // Cargo padrão do arquivo (só cargos abaixo de quem importa).
+  const { roles, loading: rolesLoading } = useRoles(open);
+  const { me } = usePermissions();
+  const options = assignableRoles(roles, myLevel(me));
+  const [defaultRoleId, setDefaultRoleId] = useState<string | null>(null);
+  const defaultRole = options.find((r) => r.id === defaultRoleId) ?? null;
 
   function reset() {
     setTried(false);
+    setDefaultRoleId(null);
     setFile(null);
     setRows([]);
     setInternalDuplicateCount(0);
@@ -240,7 +251,7 @@ export function BulkImportMembersDialog({
       .map((row) => ({
         name: getField(row, 'nome', 'name') || '',
         email: getField(row, 'email', 'e-mail') || '',
-        role: getField(row, 'role', 'papel', 'função', 'funcao') || 'agent',
+        role: getField(row, 'role', 'papel', 'cargo', 'função', 'funcao') || '',
       }))
       .filter((row) => row.name || row.email);
 
@@ -283,13 +294,17 @@ export function BulkImportMembersDialog({
       const res = await fetch('/api/account/members/bulk-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ members: rows, password }),
+        body: JSON.stringify({
+          members: rows.map((r) => ({ name: r.name, email: r.email, ...(r.role ? { role: r.role } : defaultRoleId ? {} : { role: 'agent' }) })),
+          ...(defaultRoleId ? { role_id: defaultRoleId } : {}),
+          password,
+        }),
       });
 
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(payload.error || 'Falha ao importar usuários');
+        toast.error(roleErrorMessage(payload, payload.error || 'Falha ao importar usuários'));
         return;
       }
 
@@ -384,6 +399,26 @@ export function BulkImportMembersDialog({
           />
 
           <div className="space-y-2">
+            <Label htmlFor="bulk-import-role">Cargo padrão (opcional)</Label>
+            <RoleSelect
+              id="bulk-import-role"
+              value={defaultRoleId}
+              roles={options}
+              onChange={(r) => setDefaultRoleId(r.id)}
+              disabled={rolesLoading}
+              placeholder="Usar o cargo da coluna role (padrão: Operador)"
+            />
+            {defaultRoleId && (
+              <button type="button" onClick={() => setDefaultRoleId(null)} className="text-xs text-primary underline underline-offset-2">
+                Limpar cargo padrão
+              </button>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Vale para as linhas sem a coluna role. Só aparecem cargos abaixo do seu; uma linha com a coluna role preenchida vence.
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="bulk-import-password">Senha padrão</Label>
             <div className="relative">
               <Input
@@ -425,7 +460,7 @@ export function BulkImportMembersDialog({
                   <tr>
                     <Th>Nome</Th>
                     <Th>E-mail</Th>
-                    <Th>Papel</Th>
+                    <Th>Cargo</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -442,7 +477,7 @@ export function BulkImportMembersDialog({
                           )}
                         </span>
                       </Td>
-                      <Td className="text-foreground-2">{roleBadgeLabel(row.role)}</Td>
+                      <Td className="text-foreground-2">{row.role ? roleBadgeLabel(row.role) : defaultRole?.name ?? 'Operador'}</Td>
                     </Tr>
                   ))}
                 </tbody>

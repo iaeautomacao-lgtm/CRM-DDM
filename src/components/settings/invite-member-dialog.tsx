@@ -10,7 +10,7 @@
 // state for members created here.
 // ============================================================
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Loader2, UserPlus } from 'lucide-react';
 
@@ -25,15 +25,10 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import type { AccountRole } from '@/lib/auth/roles';
-import { ROLE_META } from './role-meta';
+import { RoleSelect } from '@/components/usuarios/role-select';
+import { useRoles } from '@/hooks/use-roles';
+import { usePermissions } from '@/hooks/use-permission';
+import { assignableRoles, myLevel, roleErrorMessage } from '@/lib/roles/editor';
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -41,13 +36,6 @@ interface InviteMemberDialogProps {
   /** Called after a successful create so the parent re-fetches the roster. */
   onCreated: () => void;
 }
-
-// Order matches the requested UX: Operador, Supervisor, Administrador,
-// Visualizador. 'owner' is included for label parity with the rest of
-// the settings UI, but the server rejects it — the account can only
-// ever have one owner, reassigned via Transfer Ownership, never
-// created here.
-const INVITE_ROLES: AccountRole[] = ['agent', 'supervisor', 'admin', 'owner', 'viewer'];
 
 const MIN_PASSWORD_LENGTH = 6;
 
@@ -58,7 +46,15 @@ export function InviteMemberDialog({
 }: InviteMemberDialogProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<AccountRole>('agent');
+  const [roleId, setRoleId] = useState<string | null>(null);
+  // Só cargos abaixo de quem convida (assignable, vindo do servidor).
+  const { roles, loading: rolesLoading } = useRoles(open);
+  const { me } = usePermissions();
+  const options = assignableRoles(roles, myLevel(me));
+  const chosen = options.find((r) => r.id === roleId) ?? null;
+  useEffect(() => {
+    if (roleId === null && options.length > 0) setRoleId((options.find((r) => r.kind === 'system' && r.key === 'agent') ?? options[0]).id);
+  }, [roleId, options]);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -66,7 +62,7 @@ export function InviteMemberDialog({
   function reset() {
     setName('');
     setEmail('');
-    setRole('agent');
+    setRoleId(null);
     setPassword('');
     setShowPassword(false);
     setSubmitting(false);
@@ -78,6 +74,10 @@ export function InviteMemberDialog({
 
     if (!trimmedName) {
       toast.error('Informe o nome do membro');
+      return;
+    }
+    if (!chosen) {
+      toast.error('Escolha o cargo do membro');
       return;
     }
     if (!trimmedEmail) {
@@ -95,7 +95,7 @@ export function InviteMemberDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          members: [{ name: trimmedName, email: trimmedEmail, role }],
+          members: [{ name: trimmedName, email: trimmedEmail, role: chosen?.key, role_id: chosen?.id }],
           password,
         }),
       });
@@ -103,7 +103,7 @@ export function InviteMemberDialog({
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(payload.error || 'Falha ao convidar membro');
+        toast.error(roleErrorMessage(payload, payload.error || 'Falha ao convidar membro'));
         return;
       }
 
@@ -175,26 +175,8 @@ export function InviteMemberDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="invite-member-role" className="text-muted-foreground">Papel</Label>
-            <Select
-              value={role}
-              onValueChange={(v) => v && setRole(v as AccountRole)}
-            >
-              <SelectTrigger id="invite-member-role" className="w-full bg-muted border-border text-foreground">
-                <SelectValue>
-                  {(value: AccountRole | null) =>
-                    value ? ROLE_META[value].label : ''
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {INVITE_ROLES.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {ROLE_META[r].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="invite-member-role" className="text-muted-foreground">Cargo</Label>
+            <RoleSelect id="invite-member-role" value={roleId} roles={options} onChange={(r) => setRoleId(r.id)} disabled={rolesLoading} />
           </div>
 
           <div className="space-y-2">
