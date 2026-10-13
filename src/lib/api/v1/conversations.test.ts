@@ -48,7 +48,7 @@ function fakeDb(tables: Record<string, any[]>): SupabaseClient {
           return this;
         },
         then(resolve: any, reject?: any) {
-          let rows = [...(tables[table] ?? [])].filter(r => checks.every(f => f(r)));
+          const rows = [...(tables[table] ?? [])].filter(r => checks.every(f => f(r)));
           rows.sort((x, y) => {
             for (const [key, asc] of orders) {
               const cmp = String(x[key] ?? '').localeCompare(String(y[key] ?? ''));
