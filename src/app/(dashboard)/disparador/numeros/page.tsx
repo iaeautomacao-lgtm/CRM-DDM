@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Can } from "@/components/auth/can";
-import { AlertTriangle, PauseCircle, RefreshCw } from "lucide-react";
+import { PauseCircle, RefreshCw } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
-import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { formatInt, NUMBER_STATUS_LABELS } from "@/lib/disparador/monitor-format";
 import type { MonitorNumberRow, MonitorSnapshot } from "@/lib/disparador/monitor-snapshot";
 import type { LimitsOverview, NumberLimits } from "@/lib/disparador/limits";
@@ -150,10 +150,15 @@ export default function NumerosPage() {
       )}
 
       {error && (
-        <div role="alert" className="flex items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px] text-foreground">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
-          {error}
-        </div>
+        <ErrorState
+          className="min-h-0 py-4"
+          title="Não foi possível carregar os números"
+          hint={error}
+          onRetry={() => {
+            void loadLive();
+            void loadConfig();
+          }}
+        />
       )}
 
       <TableCard
