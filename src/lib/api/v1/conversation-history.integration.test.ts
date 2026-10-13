@@ -24,7 +24,7 @@ function fakeDb(tables:Record<string,Row[]>) {
    const orders:Array<{key:string,ascending:boolean}>=[];
    let max=999999;
    const run=()=>{
-     let data=[...(tables[table]??[])].filter(row=>filters.every(f=>f(row)));
+     const data=[...(tables[table]??[])].filter(row=>filters.every(f=>f(row)));
      data.sort((a,b)=>{
        for(const order of orders) {
          const x=String(a[order.key]??''),y=String(b[order.key]??'');
