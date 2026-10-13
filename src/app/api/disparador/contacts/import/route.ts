@@ -1,3 +1,4 @@
+import { decodeTextBytes } from "@/lib/text/decode-text";
 import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
@@ -164,8 +165,8 @@ export async function POST(request: Request) {
         .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v == null ? "" : String(v)])));
     } else if (filename.endsWith(".csv") || filename.endsWith(".txt")) {
       const buffer = Buffer.from(await file!.arrayBuffer());
-      // Decode content removing BOM (\uFEFF)
-      let content = buffer.toString("utf-8").replace(/^\uFEFF/, "");
+      // Codificação detectada (BOM, UTF-8 estrito, senão Windows-1252 do Excel brasileiro); o BOM sai do texto.
+      let content = decodeTextBytes(buffer).text;
 
       // Handle Excel "sep=;" or "sep=," delimiter declarer
       let delimiter: string | undefined;

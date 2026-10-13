@@ -1,5 +1,6 @@
 "use client";
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -310,7 +311,7 @@ export default function FlowsPage() {
 
     setImporting(true);
     try {
-      const text = await file.text();
+      const text = await readTextFile(file);
       let json: unknown;
       try {
         json = JSON.parse(text);
