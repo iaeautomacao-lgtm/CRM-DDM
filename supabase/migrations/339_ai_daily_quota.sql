@@ -51,6 +51,18 @@ ALTER TABLE wacrm.ai_daily_quota_usage ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON wacrm.ai_daily_quota_config, wacrm.ai_daily_quota_usage FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.ai_daily_quota_config, wacrm.ai_daily_quota_usage TO service_role;
 
+-- 2FA (migration 310): se já aplicada, cobre as tabelas aqui (idempotente); se não, a 310 cobre depois.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'wacrm' AND p.proname = 'apply_mfa_policy'
+  ) THEN
+    PERFORM wacrm.apply_mfa_policy('wacrm.ai_daily_quota_config'::regclass);
+    PERFORM wacrm.apply_mfa_policy('wacrm.ai_daily_quota_usage'::regclass);
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION wacrm.consume_ai_quota(p_account uuid, p_kind text, p_default_limit integer)
 RETURNS jsonb
 LANGUAGE plpgsql
