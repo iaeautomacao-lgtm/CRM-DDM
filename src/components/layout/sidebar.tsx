@@ -94,16 +94,17 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const rail = collapsed && isDesktop;
 
   // Itens que o servidor libera (GET /api/me/permissions, campo pages).
-  const { canOpen } = usePermissions();
+  const { canOpen, can } = usePermissions();
   const visibleNavItems = navItems
     .filter((item) => canOpen(item.href.split("?")[0]))
-    .filter((item) => item.href !== "/settings?tab=ai" || accountRole !== "admin");
+    // Agentes de IA: quem não vê agentes não vê o item (a aba de Configurações exige ai.agents.view).
+    .filter((item) => item.href !== "/settings?tab=agents" || can("ai.agents.view"));
 
   const visibleBottomNavItems = bottomNavItems.filter((item) => canOpen(item.href.split("?")[0]));
 
-  const isAiTab = pathname === "/settings" && searchParams.get("tab") === "ai";
-  const activeNavHref = isAiTab
-    ? "/settings?tab=ai"
+  const isAgentsTab = pathname === "/settings" && searchParams.get("tab") === "agents";
+  const activeNavHref = isAgentsTab
+    ? "/settings?tab=agents"
     : longestMatchingHref(
         pathname,
         visibleNavItems
@@ -358,7 +359,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               {visibleBottomNavItems.map((item) => {
                 const active =
                   item.href === "/settings"
-                    ? matchesPrefix(pathname, item.href) && !isAiTab
+                    ? matchesPrefix(pathname, item.href) && !isAgentsTab
                     : matchesPrefix(pathname, item.href);
                 return (
                   <li key={item.href}>

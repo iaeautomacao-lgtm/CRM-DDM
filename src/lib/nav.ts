@@ -61,7 +61,7 @@ export const navItems: NavItem[] = [
   { href: "/regua", label: "Régua de cobrança", icon: CalendarClock, group: "campaigns" },
 
   { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation", beta: true },
-  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot, group: "automation" },
+  { href: "/settings?tab=agents", label: "Agentes de IA", icon: Bot, group: "automation" },
 
   { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "intelligence", beta: true },
   { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "intelligence" },
