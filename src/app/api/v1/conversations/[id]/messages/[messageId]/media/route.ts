@@ -2,11 +2,8 @@ import { requireApiKey } from '@/lib/auth/api-context';
 import { ok, notFound, toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
 import { getConversation, uuidParam } from '@/lib/api/v1/conversation-history';
 import { chatMediaPath } from '@/lib/storage/chat-media';
+import { isOwnedChatMediaPath } from '@/lib/api/v1/conversation-media';
 
-export function isOwnedChatMediaPath(path:string,accountId:string):boolean {
- return (path.startsWith('account-'+accountId+'/') || /^meta\/[^/]+$/.test(path)) &&
-   !path.split('/').some(p=>p==='..'||p==='.'||!p||p.includes('\\'));
-}
 export async function GET(request:Request,{params}:{params:Promise<{id:string;messageId:string}>}) {
  const logCtx:ApiCallLogContext={method:'GET',route:'/api/v1/conversations/[id]/messages/[messageId]/media',startedAt:Date.now()};
  try {
