@@ -90,6 +90,8 @@ const nextConfig: NextConfig = {
   // Each service owns its dependencies; parent lockfiles must not change resolution.
   turbopack: { root: __dirname },
   deploymentId: resolveDeploymentId(),
+  // Não anuncia o framework (X-Powered-By: Next.js) a quem sonda o servidor (revisão de segurança 13/10, item 14).
+  poweredByHeader: false,
   // O middleware cobre /api/* e guarda o corpo em memória até este limite
   // (padrão 10 MB; acima disso o corpo chega truncado e formData() falha).
   // O import do assistente já vai em blocos pequenos; isto cobre o upload do
