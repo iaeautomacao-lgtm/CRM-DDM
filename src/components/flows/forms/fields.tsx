@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { NODE_META, type BuilderNode, nodeLabel, summarizeNode } from "../shared";
+import { NODE_META, nodeColors, type BuilderNode, nodeLabel, summarizeNode } from "../shared";
 
 export function TextRow({
   label,
@@ -144,7 +144,7 @@ function NodeKeyLabel({ node }: { node: BuilderNode }) {
   const summary = label ? null : summarizeNode(node);
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      <Icon className={cn("h-3 w-3 shrink-0", NODE_META[node.node_type].color)} />
+      <Icon className="h-3 w-3 shrink-0" style={{ color: nodeColors(node.node_type).solid }} />
       <span className="truncate">{label ?? node.node_key}</span>
       {label ? (
         <span className="text-muted-foreground shrink-0 font-mono text-[10px]">{node.node_key}</span>
