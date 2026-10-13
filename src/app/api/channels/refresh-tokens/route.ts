@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { trackCron } from "@/lib/ops/cron-heartbeat"
 import { NextResponse } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
@@ -38,7 +39,7 @@ async function handler(request: Request) {
     .lte('token_expires_at', limit)
     .order('token_expires_at', { ascending: true })
     .limit(BATCH)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return internalErrorResponse("refresh-tokens", error)
 
   let refreshed = 0
   let failed = 0

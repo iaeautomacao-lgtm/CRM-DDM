@@ -1,3 +1,4 @@
+import { internalErrorResponse } from "@/lib/api/internal-error";
 import { NextResponse, after } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -194,6 +195,6 @@ export async function POST(
     return NextResponse.json({ success: true, enqueued: result.enqueued });
   } catch (err: any) {
     console.error("[Campaign Start] Failed to schedule queue:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return internalErrorResponse("campaign-start", err);
   }
 }

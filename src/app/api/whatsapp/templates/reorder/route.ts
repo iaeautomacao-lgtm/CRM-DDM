@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 
@@ -142,10 +143,7 @@ export async function POST(request: Request) {
 
     const failed = results.filter((r) => r.error)
     if (failed.length > 0) {
-      return NextResponse.json(
-        { error: failed.map((f) => f.error?.message).join('; ') },
-        { status: 500 },
-      )
+      return internalErrorResponse('templates-reorder', failed[0].error)
     }
 
     return NextResponse.json({ ok: true })

@@ -219,9 +219,11 @@ export async function POST(request: Request) {
           });
 
         if (createErr || !createdUser?.user) {
+          if (createErr) console.error("[bulk-invite] createUser falhou:", createErr.status ?? "", createErr.code ?? "");
           errors.push({
             email: row.email,
-            reason: createErr?.message || "Falha ao criar usuário",
+            // Mensagem do GoTrue não vai ao navegador: só o caso útil (e-mail já cadastrado) tem texto próprio; o resto fica no log.
+            reason: /already|registered|exists/i.test(createErr?.message ?? "") ? "E-mail já cadastrado." : "Falha ao criar usuário.",
           });
           continue;
         }

@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -162,10 +163,7 @@ export async function POST(request: Request) {
     .select()
     .single()
   if (flowErr || !flow) {
-    return NextResponse.json(
-      { error: flowErr?.message ?? 'Falha ao criar o fluxo' },
-      { status: 500 },
-    )
+    return internalErrorResponse("flows-import", flowErr)
   }
 
   if (nodes.length > 0) {
@@ -184,7 +182,7 @@ export async function POST(request: Request) {
       // half-populated draft behind — mirrors the template clone path
       // in POST /api/flows.
       await admin.from('flows').delete().eq('id', flow.id)
-      return NextResponse.json({ error: nodesErr.message }, { status: 400 })
+      return internalErrorResponse('flows-import', nodesErr, { status: 400 })
     }
   }
 

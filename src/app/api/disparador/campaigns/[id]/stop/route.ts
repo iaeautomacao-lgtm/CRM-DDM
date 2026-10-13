@@ -1,3 +1,4 @@
+import { internalErrorResponse } from "@/lib/api/internal-error";
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -98,6 +99,6 @@ export async function POST(
     });
   } catch (err: any) {
     console.error("[Campaign Stop/Pause] Failed:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return internalErrorResponse("campaign-stop", err);
   }
 }

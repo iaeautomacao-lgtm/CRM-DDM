@@ -15,6 +15,7 @@
 // load-bearing, not defensive fluff.
 // ============================================================
 
+import { internalErrorResponse } from "@/lib/api/internal-error";
 import { NextResponse } from "next/server";
 
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
@@ -98,10 +99,7 @@ export async function POST(
 
     if (updateErr) {
       console.error("[reset-password] updateUserById error:", updateErr);
-      return NextResponse.json(
-        { error: updateErr.message || "Falha ao redefinir a senha" },
-        { status: 500 },
-      );
+      return internalErrorResponse("reset-password", updateErr, { message: "Falha ao redefinir a senha." });
     }
 
     // 20.8: quem redefiniu a senha de quem (sem a senha). Nunca derruba a resposta.

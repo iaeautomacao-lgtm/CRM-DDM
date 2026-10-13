@@ -1,3 +1,4 @@
+import { internalErrorResponse } from "@/lib/api/internal-error";
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { registerAuditActor } from '@/lib/audit/context'
 import { NextResponse } from 'next/server'
@@ -678,7 +679,6 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: 'Failed to insert message',
-            details: msgInsertError.message,
           },
           { status: 500 }
         )
@@ -915,6 +915,6 @@ export async function POST(request: Request) {
     })
   } catch (err: any) {
     console.error('[waha/webhook] handler crashed:', err)
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 })
+    return internalErrorResponse('waha-webhook', err)
   }
 }
