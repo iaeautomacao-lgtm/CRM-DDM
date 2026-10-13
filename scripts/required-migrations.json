@@ -328,6 +328,10 @@
       "kind": "registry"
     },
     {
+      "version": "306_profiles_email_hidden",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },

@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role",
+          "id, full_name, avatar_url, role, beta_features, account_id, account_role",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -177,6 +177,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (requestId !== fetchProfileCallsRef.current) return;
+      const sessionEmail = (await supabase.auth.getSession()).data.session?.user?.email ?? "";
       if (requestId !== fetchProfileCallsRef.current) return;
       if (data) {
         // Load the account with a plain lookup by id instead of an
@@ -228,7 +230,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile({
           id: data.id,
           full_name: data.full_name,
-          email: data.email,
+          // profiles.email é escondido de quem não tem members.view_emails (migration 306): o e-mail da própria pessoa vem da sessão.
+          email: sessionEmail,
           avatar_url: data.avatar_url,
           role: data.role,
           // `beta_features` is `NOT NULL DEFAULT ARRAY[]` in the DB, but
