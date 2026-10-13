@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildContentSecurityPolicy, CSP_REPORT_PATH, originOf, SCALAR_CDN } from "./csp";
+import { buildContentSecurityPolicy, CSP_REPORT_PATH, originOf } from "./csp";
 
 const directive = (csp: string, name: string) =>
   csp
@@ -18,8 +18,8 @@ describe("buildContentSecurityPolicy (produção, passo 1)", () => {
     expect(csp).not.toMatch(/(?<!wasm-)unsafe-eval/);
   });
 
-  it("script-src: próprio, inline (passo 1), WebAssembly e só o Scalar fixado", () => {
-    expect(directive(csp, "script-src")).toEqual(["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", SCALAR_CDN]);
+  it("script-src: próprio, inline (passo 1) e WebAssembly; nenhum CDN", () => {
+    expect(directive(csp, "script-src")).toEqual(["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"]);
   });
 
   it("conexões do navegador: o próprio servidor e o Supabase (REST e realtime); nada de Meta/OpenAI/WAHA", () => {
@@ -77,11 +77,10 @@ describe("originOf", () => {
 });
 
 describe("coerência com o resto do código", () => {
-  it("a versão do Scalar do CSP é a mesma do componente da documentação", () => {
+  it("a documentação da API não carrega script de CDN (o CSP não libera nenhum)", () => {
     const src = readFileSync(resolve(process.cwd(), "src/components/docs/api-reference.tsx"), "utf8");
-    const version = /SCALAR_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(src)?.[1];
-    expect(version).toBeTruthy();
-    expect(SCALAR_CDN).toBe(`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${version}/`);
+    expect(src).not.toMatch(/cdn\.jsdelivr\.net|unpkg\.com|@scalar\//);
+    expect(buildContentSecurityPolicy()).not.toContain("jsdelivr");
   });
 
   it("o next.config.ts usa o construtor (sem unsafe-eval fixo no cabeçalho)", () => {
