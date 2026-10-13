@@ -1,5 +1,6 @@
+import { apiFetch } from "@/lib/api-fetch";
 import { createClient } from "@/lib/supabase/client";
-import { chatMediaReference } from './chat-media';
+import { checkUploadRequest, type MediaPurpose } from "./media-validation";
 
 /**
  * Shared media-upload helper for Supabase Storage buckets that use the
@@ -63,60 +64,54 @@ export function buildMediaPath(
 }
 
 export interface UploadAccountMediaResult {
-  /** Public URL Meta can fetch at send time. */
+  /** Referência a gravar/usar: `/api/chat-media/...` (chat-media) ou URL pública (flow-media). */
   publicUrl: string;
-  /** Storage object path (account-scoped). */
+  /** Caminho do objeto no bucket (dentro da pasta da conta). */
   path: string;
 }
 
+async function readError(res: Response, fallback: string): Promise<string> {
+  const payload = (await res.json().catch(() => ({}))) as { error?: unknown };
+  return typeof payload.error === "string" && payload.error ? payload.error : fallback;
+}
+
 /**
- * Upload a file to an account-scoped Storage bucket and return its public
- * URL. Throws with a user-facing message on auth / account-resolution /
- * upload failure — callers surface it via a toast.
- *
- * Size validation is the caller's responsibility (limits can differ per
- * feature); `MEDIA_MAX_BYTES` is exported for the common case.
+ * Envia um arquivo ao Storage por URL assinada emitida pelo SERVIDOR e devolve a referência a usar. Fluxo:
+ *   1. POST /api/media/upload-url — o servidor confere permissão da origem, tipo e tamanho por tipo e devolve um caminho
+ *      dentro da pasta da conta + token de upload;
+ *   2. o navegador sobe o arquivo com o token (a sessão do usuário não escreve mais no bucket);
+ *   3. POST /api/media/confirm — o servidor revalida o objeto gravado (MIME, tamanho e magic bytes); fora do permitido,
+ *      apaga e recusa.
+ * Lança com mensagem pronta para o usuário (os chamadores mostram em toast). `purpose` define bucket e permissão.
  */
-export async function uploadAccountMedia(
-  bucket: string,
-  file: File,
-): Promise<UploadAccountMediaResult> {
-  const supabase = createClient();
+export async function uploadAccountMedia(purpose: MediaPurpose, file: File): Promise<UploadAccountMediaResult> {
+  // Mesma checagem do servidor, antes de gastar uma ida e volta.
+  const pre = checkUploadRequest({ mime: file.type, size: file.size });
+  if (!pre.ok) throw new Error(pre.error);
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) {
-    throw new Error("Entre na sua conta para enviar um anexo.");
-  }
-
-  // Resolve account_id so the path is account-scoped (matches the
-  // bucket's RLS write policy from migration 020/023). User-scoped
-  // paths would be rejected.
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("account_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (profileErr || !profile?.account_id) {
-    throw new Error("Não foi possível carregar sua conta.");
-  }
-
-  const path = buildMediaPath(profile.account_id as string, file.name);
-  const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type,
+  const headers = { "Content-Type": "application/json" };
+  const urlRes = await apiFetch("/api/media/upload-url", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose, name: file.name, mime_type: pre.mime, size: file.size }),
   });
-  if (upErr) throw new Error(upErr.message);
+  if (!urlRes.ok) throw new Error(await readError(urlRes, "Não foi possível enviar o anexo."));
+  const target = (await urlRes.json()) as { bucket: string; path: string; upload_token: string };
 
-  if (bucket === 'chat-media') return { publicUrl: chatMediaReference(path), path };
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(bucket).getPublicUrl(path);
+  const supabase = createClient();
+  const { error: upErr } = await supabase.storage
+    .from(target.bucket)
+    .uploadToSignedUrl(target.path, target.upload_token, file, { contentType: pre.mime });
+  if (upErr) throw new Error("Não foi possível enviar o anexo.");
 
-  return { publicUrl, path };
+  const confirmRes = await apiFetch("/api/media/confirm", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose, path: target.path }),
+  });
+  if (!confirmRes.ok) throw new Error(await readError(confirmRes, "Não foi possível verificar o anexo."));
+  const confirmed = (await confirmRes.json()) as { path: string; url: string };
+  return { publicUrl: confirmed.url, path: confirmed.path };
 }
 
 /**

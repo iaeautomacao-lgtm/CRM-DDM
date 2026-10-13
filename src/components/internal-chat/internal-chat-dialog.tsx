@@ -569,7 +569,7 @@ export function InternalChatDialog({
     }
     setUploading(true);
     try {
-      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      const { publicUrl, path } = await uploadAccountMedia("internal_chat", file);
       if (stagedMedia) {
         deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch(() => {});
       }
@@ -596,7 +596,7 @@ export function InternalChatDialog({
     }
     setUploading(true);
     try {
-      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      const { publicUrl, path } = await uploadAccountMedia("internal_chat", file);
       setStagedMedia({ kind: "audio", mediaUrl: publicUrl, mediaType: mimeType, path, filename: file.name });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha no upload do áudio");

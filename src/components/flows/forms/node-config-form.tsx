@@ -2080,7 +2080,6 @@ const MEDIA_ACCEPT: Record<NonNullable<SendMediaCfg["media_type"]>, string> = {
     "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain",
 };
 
-const FLOW_MEDIA_BUCKET = "flow-media";
 
 function SendMediaForm({
   cfg,
@@ -2114,7 +2113,7 @@ function SendMediaForm({
       try {
         // Account-scoped upload (path `account-<id>/...`) — see
         // uploadAccountMedia + migration 020's flow-media RLS policy.
-        const { publicUrl } = await uploadAccountMedia(FLOW_MEDIA_BUCKET, file);
+        const { publicUrl } = await uploadAccountMedia("flow", file);
         // Patch all fields in one call so the form doesn't re-render
         // with a half-uploaded state.
         onUpdateConfig({

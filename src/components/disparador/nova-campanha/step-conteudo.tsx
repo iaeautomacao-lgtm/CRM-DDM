@@ -533,7 +533,7 @@ function WahaMessages({
   const upload = async (i: number, file: File, kind: "imagem" | "audio") => {
     const id = toast.loading(kind === "imagem" ? "Enviando imagem…" : "Enviando áudio…");
     try {
-      const res = await uploadAccountMedia("chat-media", file);
+      const res = await uploadAccountMedia("campaign", file);
       patch(i, { url: res.publicUrl });
       toast.success("Arquivo enviado.", { id });
     } catch (err) {
