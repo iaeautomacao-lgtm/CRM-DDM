@@ -221,9 +221,9 @@ export function SettingsOverview({
     {
       kind: 'link',
       key: 'fields',
-      href: '/tabulacoes',
+      href: '/contacts?tab=tags',
       icon: Tags,
-      label: 'Tabulações',
+      label: 'Tags e campos',
       loading: countsLoading,
       subtitle:
         counts?.tags == null && counts?.customFields == null
