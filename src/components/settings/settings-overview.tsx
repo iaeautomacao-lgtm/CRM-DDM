@@ -322,7 +322,7 @@ export function SettingsOverview({
             </>
           );
           const className = cn(
-            'group flex items-start gap-3.5 rounded-xl border border-border bg-card p-4 text-left transition-colors',
+            'group flex items-start gap-3.5 rounded-card border border-border bg-card p-4 text-left transition-colors',
             'hover:border-primary-soft-2 hover:bg-card-2',
           );
           if (tile.kind === 'link') {

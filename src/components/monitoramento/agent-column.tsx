@@ -104,7 +104,7 @@ export function AgentColumn({
         {conversations.length === 0 ? (
           <EmptyState
             icon={UserCheck}
-            title="Nenhum contato em atendimento com este agente"
+            title="Nenhum contato em atendimento com este atendente"
             className="h-full"
           />
         ) : (

@@ -293,7 +293,7 @@ export function ContactCampaignsList({ contactId }: { contactId: string }) {
   }
   if (items === null) return <ListSkeleton />;
   if (items.length === 0) {
-    return <Empty title="Nenhuma campanha" hint="Envios do Disparador para este contato aparecem aqui." />;
+    return <Empty title="Nenhuma campanha" hint="Envios de campanhas para este contato aparecem aqui." />;
   }
 
   return (

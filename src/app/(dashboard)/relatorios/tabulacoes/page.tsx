@@ -115,7 +115,7 @@ export default function TabulacoesPage() {
       } catch (err) {
         console.error('[tabulacoes] filtros:', err);
         if (!cancelled)
-          toast.error('Não foi possível carregar os filtros de equipe/agente.');
+          toast.error('Não foi possível carregar os filtros de equipe/atendente.');
       } finally {
         if (!cancelled) {
           setDraft(filters);
@@ -189,7 +189,7 @@ export default function TabulacoesPage() {
   return (
     <div className="space-y-4">
       <PageHeader>Conversas encerradas no período, por tabulação e origem.</PageHeader>
-      <div className="border-border bg-card space-y-3 rounded-xl border p-4">
+      <div className="border-border bg-card space-y-3 rounded-card border p-4">
         <PeriodFilter
           value={draft}
           onChange={(range) =>
@@ -223,14 +223,14 @@ export default function TabulacoesPage() {
             </Select>
           </div>
           <div className="space-y-1">
-            <span className="text-muted-foreground text-xs">Agente</span>
+            <span className="text-muted-foreground text-xs">Atendente</span>
             <Select
               value={draft.agentId}
               onValueChange={(value) =>
                 setDraft((previous) => ({ ...previous, agentId: value ?? ALL }))
               }
             >
-              <SelectTrigger className="w-48" aria-label="Agente">
+              <SelectTrigger className="w-48" aria-label="Atendente">
                 <SelectValue>
                   {draft.agentId === ALL
                     ? 'Todos'
@@ -311,7 +311,7 @@ export default function TabulacoesPage() {
           <p className="text-muted-foreground text-xs">
             Aceite = aceitas ÷ (aceitas + trocadas pelo humano). Sugestões
             registradas incluem IA, fluxo e regras. Origens legadas não
-            informadas entram no total, sem atribuição de origem. Equipe/agente
+            informadas entram no total, sem atribuição de origem. Equipe/atendente
             refletem a atribuição atual.
           </p>
           {summary.total === 0 ? (

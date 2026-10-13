@@ -32,6 +32,7 @@ import {
   Bot,
   Search,
 } from "lucide-react";
+import { EmptyState } from "@/components/ddm/states";
 import { NODE_META, type NodeType } from "@/components/flows/shared";
 import {
   describeEvent,
@@ -719,16 +720,15 @@ export default function FlowRunsPage() {
           onRetry={() => setReloadKey((k) => k + 1)}
         />
       ) : runs.length === 0 ? (
-        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
-          <p className="text-[13.5px] font-semibold text-foreground">
-            {hasActiveFilters ? "Nada encontrado" : "Nenhuma execução ainda"}
-          </p>
-          <p className="text-[12.5px] text-muted-foreground">
-            {hasActiveFilters
+        <EmptyState
+          icon={Search}
+          title={hasActiveFilters ? "Nada encontrado" : "Nenhuma execução ainda"}
+          hint={
+            hasActiveFilters
               ? "Nenhuma execução corresponde aos filtros aplicados."
-              : "Dispare o fluxo a partir de um número do WhatsApp para vê-lo aparecer aqui."}
-          </p>
-        </div>
+              : "Dispare o fluxo a partir de um número do WhatsApp para vê-lo aparecer aqui."
+          }
+        />
       ) : (
         <div className="ddm-stagger relative flex flex-col gap-2">
           {loading && (

@@ -243,7 +243,7 @@ export function ContactForm({
       <DialogContent className="flex max-h-[85vh] flex-col bg-popover border-border text-popover-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">
-            {isEdit ? 'Editar Contato' : 'Adicionar Contato'}
+            {isEdit ? 'Editar contato' : 'Adicionar contato'}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
             {isEdit

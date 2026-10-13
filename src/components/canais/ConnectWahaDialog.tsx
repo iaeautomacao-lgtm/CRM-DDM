@@ -171,7 +171,7 @@ export function ConnectWahaDialog({
 
         {!showPairing ? (
           <div className="space-y-3">
-            <div className="flex items-center justify-center rounded-xl border border-border bg-muted/30 p-4">
+            <div className="flex items-center justify-center rounded-card border border-border bg-muted/30 p-4">
               {status === "WORKING" ? (
                 <p className="text-sm font-medium text-success">Conectado!</p>
               ) : (

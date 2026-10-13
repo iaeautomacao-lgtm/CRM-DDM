@@ -29,7 +29,7 @@ export default function HelpPage() {
     { id: "ai", label: "Agente de IA (Robô)", icon: Bot },
     { id: "campaigns", label: "Campanhas e Ligações", icon: Megaphone },
     { id: "pipeline", label: "Funis de Vendas (CRM)", icon: GitBranch },
-    { id: "faq", label: "Perguntas Frequentes", icon: HelpCircle },
+    { id: "faq", label: "Perguntas frequentes", icon: HelpCircle },
   ] as const;
 
   // Navegação por setas entre abas (padrão WAI-ARIA tabs, ativação automática).
@@ -107,7 +107,7 @@ export default function HelpPage() {
             </div>
 
             <div className="grid md:grid-cols-3 gap-4">
-              <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
+              <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
                 <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary font-bold flex items-center justify-center text-xs">1</div>
                 <h4 className="text-xs font-bold text-foreground">Acesse as Conexões</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -115,7 +115,7 @@ export default function HelpPage() {
                 </p>
               </div>
 
-              <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
+              <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
                 <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary font-bold flex items-center justify-center text-xs">2</div>
                 <h4 className="text-xs font-bold text-foreground">Gere o QR Code</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -123,16 +123,16 @@ export default function HelpPage() {
                 </p>
               </div>
 
-              <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
+              <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
                 <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary font-bold flex items-center justify-center text-xs">3</div>
                 <h4 className="text-xs font-bold text-foreground">Escaneie com o Celular</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  No celular, abra o WhatsApp, vá em <strong>Aparelhos Conectados</strong> &gt; <strong>Conectar Aparelho</strong> e aponte para o QR Code da tela.
+                  No celular, abra o WhatsApp, vá em <strong>Aparelhos Conectados</strong> &gt; <strong>Conectar um aparelho</strong> e aponte para o QR Code da tela.
                 </p>
               </div>
             </div>
 
-            <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex gap-3 items-start">
+            <div className="bg-primary/5 border border-primary/20 rounded-card p-4 flex gap-3 items-start">
               <Lightbulb className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
               <div className="space-y-1">
                 <h5 className="text-xs font-bold text-primary">Importante:</h5>
@@ -170,7 +170,7 @@ export default function HelpPage() {
               <div className="flex gap-4 items-start border-b border-border pb-4">
                 <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0" aria-hidden="true"><FolderOpen className="size-4" /></div>
                 <div className="space-y-1 flex-1">
-                  <h4 className="text-xs font-bold text-foreground">2. Base de Conhecimento (RAG)</h4>
+                  <h4 className="text-xs font-bold text-foreground">2. Base de conhecimento (RAG)</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     A IA não sabe os preços ou detalhes dos seus produtos/serviços até você ensiná-la. Crie um arquivo no Bloco de Notas (<code>.txt</code>) ou <code>.pdf</code> listando tudo sobre sua empresa (FAQ, preços, links) e faça o upload. A IA consultará esse arquivo antes de cada resposta.
                   </p>
@@ -195,7 +195,7 @@ export default function HelpPage() {
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-                <Megaphone className="h-5 w-5 text-primary" aria-hidden /> Disparador de Campanhas e Ligações Automatizadas
+                <Megaphone className="h-5 w-5 text-primary" aria-hidden /> Campanhas e ligações automatizadas
               </h3>
               <p className="text-xs text-muted-foreground">
                 Como enviar mensagens em massa de texto, imagens, áudios ou realizar chamadas de voz reais.
@@ -203,12 +203,12 @@ export default function HelpPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="bg-muted/30 border border-border rounded-xl p-4 space-y-3">
+              <div className="bg-muted/30 border border-border rounded-card p-4 space-y-3">
                 <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
                   <span className="rounded-md bg-primary-soft p-1 text-primary-text" aria-hidden="true"><Phone className="size-3.5" /></span> Como configurar Ligações Automáticas:
                 </h4>
                 <ol className="list-decimal list-inside text-xs leading-relaxed text-muted-foreground space-y-1.5 pl-2">
-                  <li>No menu <strong>Disparador</strong>, clique em <strong>Nova Campanha</strong>.</li>
+                  <li>No menu <strong>Campanhas</strong>, clique em <strong>Nova campanha</strong>.</li>
                   <li>No criador de etapas, escolha o tipo <strong>Ligação</strong>.</li>
                   <li>Faça o upload do seu áudio pré-gravado (WAV ou MP3). Recomendamos áudios mono e curtos para simular uma ligação real.</li>
                   <li>Configure os filtros e ative a campanha.</li>
@@ -216,7 +216,7 @@ export default function HelpPage() {
                 </ol>
               </div>
 
-              <div className="bg-muted/30 border border-border rounded-xl p-4 space-y-3">
+              <div className="bg-muted/30 border border-border rounded-card p-4 space-y-3">
                 <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
                   <span className="rounded-md bg-primary-soft p-1 text-primary-text" aria-hidden="true"><Mic className="size-3.5" /></span> Diferença entre Áudio Chat e Ligação:
                 </h4>
@@ -249,23 +249,23 @@ export default function HelpPage() {
 
             <div className="space-y-4">
               <div className="grid md:grid-cols-2 gap-4">
-                <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
+                <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
                   <h4 className="text-xs font-bold text-foreground">Geração Automática de Negócios</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     Sempre que um novo número de WhatsApp entra em contato com sua empresa, o CRM cria <strong>automaticamente</strong> um card de negócio na primeira coluna do seu Funil de Vendas (Kanban), com o valor inicial de R$ 0.
                   </p>
                 </div>
 
-                <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
-                  <h4 className="text-xs font-bold text-foreground">Sincronização de Nomes Inteligente</h4>
+                <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
+                  <h4 className="text-xs font-bold text-foreground">Sincronização inteligente de nomes</h4>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     Ao criar o negócio, o título pode ser o número de telefone temporariamente. No instante em que o WhatsApp do cliente nos envia o nome real do perfil dele, o CRM <strong>atualiza automaticamente</strong> o card do Kanban com o nome correto.
                   </p>
                 </div>
               </div>
 
-              <div className="bg-muted/40 border border-border rounded-xl p-4 space-y-2">
-                <h4 className="text-xs font-bold text-foreground">Edição Rápida</h4>
+              <div className="bg-muted/40 border border-border rounded-card p-4 space-y-2">
+                <h4 className="text-xs font-bold text-foreground">Edição rápida</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Se quiser alterar manualmente o nome de um cliente, abra a conversa dele no menu <strong>Conversas</strong>, clique sobre o nome na barra lateral direita, digite o novo nome e clique em <strong>Salvar</strong>. Isso alterará o nome dele em todo o sistema (chat, contatos e Kanban).
                 </p>
@@ -279,7 +279,7 @@ export default function HelpPage() {
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-                <HelpCircle className="h-5 w-5 text-primary" aria-hidden /> Perguntas Frequentes & Solução de Problemas
+                <HelpCircle className="h-5 w-5 text-primary" aria-hidden /> Perguntas frequentes e solução de problemas
               </h3>
               <p className="text-xs text-muted-foreground">
                 Respostas rápidas para as dúvidas mais comuns.
@@ -287,24 +287,24 @@ export default function HelpPage() {
             </div>
 
             <div className="space-y-3.5">
-              <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
+              <div className="border border-border rounded-card p-4 bg-muted/20 space-y-1.5">
                 <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> A Inteligência Artificial parou de responder, o que fazer?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Verifique se o interruptor <strong>&quot;Ativo&quot;</strong> na página do Agente de IA está ligado. Também confirme se o seu WhatsApp está conectado com o ícone verde de sucesso no menu superior. Se a conexão cair, a IA não consegue responder.
                 </p>
               </div>
 
-              <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
+              <div className="border border-border rounded-card p-4 bg-muted/20 space-y-1.5">
                 <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> O robô de IA atende todos os contatos que entram no WhatsApp?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Sim. Quando ativo, ele assume o atendimento. Caso um atendente humano envie uma mensagem manual no chat pelo CRM, o robô é pausado automaticamente para aquele cliente para evitar conflito com o vendedor humano.
                 </p>
               </div>
 
-              <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
+              <div className="border border-border rounded-card p-4 bg-muted/20 space-y-1.5">
                 <h4 className="text-xs font-bold text-foreground"><HelpCircle className="mr-1 inline size-3.5 align-[-2px] text-primary" aria-hidden="true" /> Posso usar mais de uma Base de Conhecimento na IA?</h4>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Sim! Você pode carregar múltiplos arquivos TXT ou PDF na seção <strong>Base de Conhecimento</strong> do Agente. O robô irá ler e combinar os dados de todos eles para responder aos clientes.
+                  Sim! Você pode carregar múltiplos arquivos TXT ou PDF na seção <strong>Base de conhecimento</strong> do agente. O robô irá ler e combinar os dados de todos eles para responder aos clientes.
                 </p>
               </div>
             </div>

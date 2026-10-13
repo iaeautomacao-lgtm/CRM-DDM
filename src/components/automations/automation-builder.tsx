@@ -754,7 +754,7 @@ function LinesCard({ value, onChange }: { value: string[]; onChange: (ids: strin
     onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
 
   return (
-    <div className="mt-3 w-full max-w-md rounded-xl border border-border bg-card p-3 text-xs">
+    <div className="mt-3 w-full max-w-md rounded-card border border-border bg-card p-3 text-xs">
       <div className="mb-2 flex items-center justify-between">
         <span className="font-semibold text-foreground">Linhas</span>
         <span className="text-muted-foreground">

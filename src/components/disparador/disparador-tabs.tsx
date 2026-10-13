@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 // APIs) já é só de owner/admin.
 export const DISPARADOR_TABS = [
   { href: "/disparador/campanhas", label: "Campanhas", icon: Megaphone },
-  { href: "/disparador/monitor", label: "Monitor", icon: Activity },
+  { href: "/disparador/monitor", label: "Monitor de envios", icon: Activity },
   { href: "/disparador/numeros", label: "Números", icon: Phone },
   { href: "/disparador/controles", label: "Controles", icon: SlidersHorizontal },
   { href: "/disparador/desempenho", label: "Desempenho", icon: Gauge },
@@ -44,7 +44,7 @@ export function DisparadorTabs() {
   return (
     <nav
       ref={navRef}
-      aria-label="Seções do Disparador"
+      aria-label="Seções de campanhas"
       style={
         moreRight
           ? { maskImage: "linear-gradient(to right, black calc(100% - 32px), transparent)" }

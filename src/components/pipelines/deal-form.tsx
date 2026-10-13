@@ -265,7 +265,7 @@ export function DealForm({
         <div className="flex h-full flex-col">
           <SheetHeader className="border-b border-border/50 p-4">
             <SheetTitle className="text-popover-foreground">
-              {readOnly ? "Negócio" : deal ? "Editar Negócio" : "Novo Negócio"}
+              {readOnly ? "Negócio" : deal ? "Editar negócio" : "Novo negócio"}
             </SheetTitle>
           </SheetHeader>
 
@@ -342,7 +342,7 @@ export function DealForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="deal-close" className="text-muted-foreground">Data de Fechamento Prevista</Label>
+              <Label htmlFor="deal-close" className="text-muted-foreground">Data de fechamento prevista</Label>
               <Input
                 id="deal-close"
                 type="date"
@@ -464,7 +464,7 @@ export function DealForm({
                 disabled={saving || !title.trim() || !contactId || !stageId}
                 className="flex-1 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
               >
-                {saving ? "Salvando..." : deal ? "Salvar Alterações" : "Criar Negócio"}
+                {saving ? "Salvando..." : deal ? "Salvar alterações" : "Criar negócio"}
               </Button>
               )}
             </div>
@@ -478,7 +478,7 @@ export function DealForm({
                   className="mt-3 flex min-h-6 w-full items-center justify-center gap-1 rounded text-xs text-danger outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
                 >
                   <Trash2 className="h-3 w-3" />
-                  {deleting ? "Excluindo..." : "Excluir Negócio"}
+                  {deleting ? "Excluindo..." : "Excluir negócio"}
                 </button>
                 <AlertDialog
                   open={confirmDelete}

@@ -181,12 +181,12 @@ function Kpi({ label, value, hint, onClick }: { label: string; value: string; hi
       type="button"
       onClick={onClick}
       title="Ver as conversas"
-      className="rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+      className="rounded-card border border-border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
     >
       {body}
     </button>
   ) : (
-    <div className="rounded-xl border border-border bg-card p-3">{body}</div>
+    <div className="rounded-card border border-border bg-card p-3">{body}</div>
   );
 }
 
@@ -213,7 +213,7 @@ function SlaTable({
   onOpen: (metric: DrilldownMetric, key: string, label: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
       <p className="border-b border-border px-3 py-2 text-xs font-semibold text-foreground">{title}</p>
       <table className="w-full text-xs">
         <thead className="text-muted-foreground">

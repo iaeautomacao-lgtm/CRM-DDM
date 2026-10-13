@@ -108,7 +108,7 @@ export function TeamColumn({
 
       <div className="border-b border-border px-3 pt-3 pb-1.5">
         <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-          Agentes {agents.length > 0 ? `(${agents.length})` : ""}
+          Atendentes {agents.length > 0 ? `(${agents.length})` : ""}
         </h3>
       </div>
       <div
@@ -120,7 +120,7 @@ export function TeamColumn({
       >
         {agents.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            {canDrag ? "Arraste um agente aqui." : "Nenhum agente nesta equipe."}
+            {canDrag ? "Arraste um atendente aqui." : "Nenhum atendente nesta equipe."}
           </p>
         ) : (
           agents.map((agent) => (
