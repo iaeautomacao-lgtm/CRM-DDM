@@ -39,10 +39,10 @@ export function MetricCard({
   return (
     <Link
       href={href}
-      className="group flex flex-col gap-3.5 rounded-[10px] border border-border bg-card px-[18px] py-4 text-left transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-[0_4px_14px_rgba(0,0,0,.12)] focus-visible:outline-2 focus-visible:outline-ring"
+      className="group flex flex-col gap-3.5 rounded-card bg-card p-5 text-left shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-px hover:shadow-md focus-visible:outline-2 focus-visible:outline-ring dark:border dark:border-border"
     >
       <span className="flex w-full items-center justify-between gap-2">
-        <span className="text-[12.5px] font-medium text-foreground-2">{title}</span>
+        <span className="text-[13px] font-medium text-muted-foreground">{title}</span>
         <ChevronRight
           className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5"
           aria-hidden="true"
@@ -55,7 +55,7 @@ export function MetricCard({
           <>
             <CountUp
               value={value}
-              className="text-[30px] font-semibold leading-none tracking-[-0.03em] text-foreground"
+              className="font-heading text-[28px] font-bold leading-none tracking-[-0.02em] text-foreground"
             />
             <span className={cn('inline-flex items-center gap-[3px] text-xs font-semibold tabular-nums', toneClass)}>
               <Arrow className="size-3" aria-hidden="true" />
