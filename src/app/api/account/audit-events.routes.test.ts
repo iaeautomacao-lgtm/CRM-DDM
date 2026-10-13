@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   requirePermission: vi.fn(),
   logAuditEvent: vi.fn(async () => {}),
   updateUserById: vi.fn(async () => ({ error: null as { message: string } | null })),
+  rpc: vi.fn<(name: string, args: unknown) => Promise<{ data: unknown; error: { message: string } | null }>>(async () => ({ data: 3, error: null })),
   profileRow: { id: "p-7", account_id: "acc-1", full_name: "Maria" } as { id: string; account_id: string; full_name: string } | null,
   insertRow: { id: "key-1", name: "Integração", scopes: ["messages:send"], user_id: null } as Record<string, unknown>,
   revokeRow: { id: "key-1", name: "Integração", scopes: ["messages:send"], user_id: null } as Record<string, unknown> | null,
@@ -24,6 +25,7 @@ vi.mock("@/lib/account/admin-client", () => ({
   supabaseAdmin: () => ({
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: mocks.profileRow, error: null }) }) }) }),
     auth: { admin: { updateUserById: mocks.updateUserById } },
+    rpc: (name: string, args: unknown) => mocks.rpc(name, args),
   }),
 }));
 vi.mock("@/lib/flows/admin-client", () => ({ supabaseAdmin: () => ({}) }));
@@ -54,6 +56,7 @@ const del = () => new Request("http://x/api", { method: "DELETE" });
 beforeEach(() => {
   mocks.logAuditEvent.mockClear();
   mocks.updateUserById.mockClear();
+  mocks.rpc.mockClear();
   mocks.profileRow = { id: "p-7", account_id: "acc-1", full_name: "Maria" };
   mocks.insertRow = { id: "key-1", name: "Integração", scopes: ["messages:send"], user_id: null };
   mocks.revokeRow = { id: "key-1", name: "Integração", scopes: ["messages:send"], user_id: null };
@@ -65,8 +68,10 @@ describe("POST members/[userId]/reset-password", () => {
     mocks.requirePermission.mockResolvedValue(ctx("owner"));
     const res = await reset.POST(post({ password: "senha-secreta-123" }), { params: Promise.resolve({ userId: "user-7" }) });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true });
+    expect(await res.json()).toEqual({ success: true, sessions_revoked: 3 });
     expect(mocks.updateUserById).toHaveBeenCalledWith("user-7", { password: "senha-secreta-123" });
+    // revisão de segurança 13/10: TODAS as sessões do membro caem (p_keep null)
+    expect(mocks.rpc).toHaveBeenCalledWith("revoke_other_user_sessions", { p_user: "user-7", p_keep: null });
     expect(mocks.logAuditEvent).toHaveBeenCalledTimes(1);
     const event = (mocks.logAuditEvent.mock.calls[0] as unknown[])[0];
     expect(event).toMatchObject({
@@ -87,6 +92,18 @@ describe("POST members/[userId]/reset-password", () => {
     const res = await reset.POST(post({ password: "senha-secreta-123" }), { params: Promise.resolve({ userId: "user-7" }) });
     expect(res.status).toBe(500);
     expect(mocks.logAuditEvent).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled(); // senha não mudou: sessões intactas
+    expect(JSON.stringify(await res.json())).not.toContain("boom"); // erro do Supabase Auth só no log
+  });
+
+  it("falha ao encerrar as sessões não desfaz a troca: 200 com sessions_revoked null e o evento gravado", async () => {
+    mocks.requirePermission.mockResolvedValue(ctx("owner"));
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: "timeout" } });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await reset.POST(post({ password: "senha-secreta-123" }), { params: Promise.resolve({ userId: "user-7" }) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true, sessions_revoked: null });
+    expect(mocks.logAuditEvent).toHaveBeenCalledTimes(1);
   });
 
   it("membro de outra conta: 404 e nenhum evento", async () => {
