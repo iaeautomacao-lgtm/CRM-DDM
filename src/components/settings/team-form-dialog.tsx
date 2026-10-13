@@ -346,7 +346,7 @@ export function TeamFormDialog({
               lista do Inbox. Paleta fechada — o banco só aceita estas. */}
           <div className="space-y-2">
             <Label id="team-color-label">
-              Cor <span className="text-xs text-muted-foreground">(marca as conversas no Inbox)</span>
+              Cor <span className="text-xs text-muted-foreground">(marca as conversas na tela Conversas)</span>
             </Label>
             <div role="radiogroup" aria-labelledby="team-color-label" className="flex flex-wrap items-center gap-2">
               <button
