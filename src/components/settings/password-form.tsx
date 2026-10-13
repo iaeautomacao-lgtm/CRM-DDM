@@ -36,6 +36,8 @@ export function PasswordForm() {
 
   const tooShortError = confirmError !== null && next.length < MIN_PASSWORD;
   const mismatchError = confirmError !== null && !tooShortError;
+  // Confirmação validada ao digitar (antes de enviar).
+  const liveMismatch = confirm.length > 0 && next !== confirm && confirmError === null;
 
   // Um único botão por campo, todos controlam a mesma visibilidade.
   const toggleVisibility = (
@@ -188,14 +190,19 @@ export function PasswordForm() {
                   }}
                   autoComplete="new-password"
                   minLength={MIN_PASSWORD}
-                  aria-invalid={mismatchError ? true : undefined}
-                  aria-describedby={mismatchError ? 'password-form-error' : undefined}
-                  className={`pr-9${mismatchError ? ' border-danger' : ''}`}
+                  aria-invalid={mismatchError || liveMismatch ? true : undefined}
+                  aria-describedby={mismatchError ? 'password-form-error' : liveMismatch ? 'confirm-password-live-error' : undefined}
+                  className={`pr-9${mismatchError || liveMismatch ? ' border-danger' : ''}`}
                   disabled={saving}
                   required
                 />
                 {toggleVisibility}
               </div>
+              {liveMismatch && (
+                <p id="confirm-password-live-error" role="alert" className="text-xs text-danger">
+                  A confirmação não coincide com a nova senha.
+                </p>
+              )}
             </div>
           </div>
 
