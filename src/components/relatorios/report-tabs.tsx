@@ -7,12 +7,15 @@ import { usePermissions } from "@/hooks/use-permission";
 import { reportNavItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
+/** Relatório que virou outra tela (Conversas → Histórico): a rota antiga só redireciona e a aba não aparece. */
+const MOVED_REPORTS: readonly string[] = ["/relatorios/conversas"];
+
 export function ReportTabs() {
   const pathname = usePathname();
   const { canOpen } = usePermissions();
 
   // Abas que o servidor libera (GET /api/me/permissions, campo pages).
-  const visible = reportNavItems.filter((item) => canOpen(item.href));
+  const visible = reportNavItems.filter((item) => !MOVED_REPORTS.includes(item.href) && canOpen(item.href));
 
   if (visible.length === 0) return null;
 

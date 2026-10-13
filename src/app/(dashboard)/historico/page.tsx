@@ -1,14 +1,16 @@
 "use client";
 
 // ============================================================
-// /historico — conversas encerradas (visual do protótipo DDM).
-// Lista paginada de `conversations` com status 'closed' (período e busca
-// por contato) e gaveta com o resumo + a linha do tempo completa do
-// contato (ContactTimeline), que era a função original desta tela.
+// /historico — conversas da conta (visual do protótipo DDM); absorveu o relatório Conversas.
+// Lista paginada de `conversations` (padrão: encerradas) com filtros de situação (encerradas, em andamento,
+// todas), período (rápido ou personalizado), busca por contato e tabulação, e gaveta com o resumo + a linha do
+// tempo completa do contato (ContactTimeline). ?status=todos|abertas|encerradas define a situação inicial.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, History, Search } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Download, FileSpreadsheet, History, Search } from "lucide-react";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/client";
@@ -28,18 +30,41 @@ import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { EmptyState, ErrorState } from "@/components/ddm/states";
 import { ContactTimeline } from "@/components/contact-timeline/ContactTimeline";
 import { formatDuration, type HistoryPeriod } from "@/lib/historico/format";
-import { loadClosedConversations, type ClosedConversation } from "@/lib/historico/queries";
+import { exportWithHistory } from "@/lib/relatorios/export-with-history";
+import {
+  buildReportRpcParams,
+  REPORT_EXPORT_COLUMNS,
+  toReportExportRows,
+  type ReportRawRow,
+} from "@/lib/historico/report-export";
+import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
+import { loadClosedConversations, type ClosedConversation, type HistoryStatus } from "@/lib/historico/queries";
 import type { AccountMember, Team } from "@/types";
 import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL_TABS = "__all__";
+
+type PeriodChoice = HistoryPeriod | "custom";
 
 const PERIOD_OPTIONS = [
   { value: "hoje", label: "Hoje" },
   { value: "7d", label: "7 dias" },
   { value: "30d", label: "30 dias" },
   { value: "todas", label: "Todas" },
+  { value: "custom", label: "Personalizado" },
 ] as const;
+
+const STATUS_OPTIONS = [
+  { value: "closed", label: "Encerradas" },
+  { value: "open", label: "Em andamento" },
+  { value: "all", label: "Todas" },
+] as const;
+
+function statusFromParam(raw: string | null): HistoryStatus {
+  if (raw === "todos") return "all";
+  if (raw === "abertas") return "open";
+  return "closed";
+}
 
 function contactLabel(c: ClosedConversation["contact"]) {
   return c?.name?.trim() || c?.phone || "Contato sem nome";
@@ -54,9 +79,14 @@ function fmtDate(iso: string | null) {
   return iso ? format(new Date(iso), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "—";
 }
 
-export default function HistoricoPage() {
+function HistoricoContent() {
   const { accountId } = useAuth();
-  const [period, setPeriod] = useState<HistoryPeriod>("7d");
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<HistoryStatus>(() => statusFromParam(searchParams.get("status")));
+  // "todas as conversas" abre sem recorte curto de 7 dias; encerradas mantêm o padrão antigo.
+  const [period, setPeriod] = useState<PeriodChoice>(() => (statusFromParam(searchParams.get("status")) === "closed" ? "7d" : "30d"));
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<ClosedConversation[]>([]);
@@ -74,7 +104,11 @@ export default function HistoricoPage() {
   const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
   const [tabulacao, setTabulacao] = useState<string>(ALL_TABS);
   const [exportOpen, setExportOpen] = useState(false);
-  const canExport = usePermissions().can("exports.manage");
+  const perms = usePermissions();
+  const canExport = perms.can("exports.manage");
+  // Planilha xlsx/csv das conversas filtradas (veio do relatório Conversas; reports.export, o servidor revalida).
+  const canReportExport = perms.can("reports.export");
+  const [reportExporting, setReportExporting] = useState<"xlsx" | "csv" | null>(null);
 
   // Apoios (atendentes, equipes, tabulações) que falharam ao carregar: aviso discreto em vez de só console.
   const [supportFailed, setSupportFailed] = useState<string[]>([]);
@@ -158,7 +192,9 @@ export default function HistoricoPage() {
       try {
         const res = await loadClosedConversations(createClient(), {
           accountId,
-          period,
+          period: period === "custom" ? "todas" : period,
+          range: period === "custom" ? { from: rangeFrom, to: rangeTo } : null,
+          status,
           search,
           page: nextPage,
           tabulacao: tabulacao === ALL_TABS ? null : tabulacao,
@@ -178,12 +214,43 @@ export default function HistoricoPage() {
         }
       }
     },
-    [accountId, period, search, tabulacao],
+    [accountId, period, rangeFrom, rangeTo, status, search, tabulacao],
   );
 
   useEffect(() => {
     void fetchPage(0, false);
   }, [fetchPage]);
+
+  async function exportReport(kind: "xlsx" | "csv") {
+    if (!accountId) return;
+    setReportExporting(kind);
+    try {
+      const { dateFrom, dateTo, rpc } = buildReportRpcParams({
+        accountId,
+        status,
+        period,
+        range: period === "custom" ? { from: rangeFrom, to: rangeTo } : null,
+        search,
+      });
+      // Todas as linhas do recorte, sem paginação (como no relatório).
+      const { data, error: rpcError } = await createClient().rpc("get_conversations_report", rpc);
+      if (rpcError) throw rpcError;
+      await exportWithHistory({
+        data: toReportExportRows((data ?? []) as ReportRawRow[]),
+        columns: [...REPORT_EXPORT_COLUMNS],
+        exportType: "conversas",
+        description: `Conversas - ${format(new Date(startOfDayIso(dateFrom)), "dd/MM/yyyy")} a ${format(new Date(startOfDayIso(dateTo)), "dd/MM/yyyy")}`,
+        periodFrom: new Date(startOfDayIso(dateFrom)),
+        periodTo: new Date(endOfDayIso(dateTo)),
+        format: kind,
+      });
+    } catch (err) {
+      console.error("[historico] export failed:", err);
+      toast.error("Falha ao exportar as conversas. Tente novamente.");
+    } finally {
+      setReportExporting(null);
+    }
+  }
 
   const agentName = useMemo(() => {
     const map = new Map(members.map((m) => [m.user_id, m.full_name || m.email || "Sem nome"]));
@@ -196,15 +263,41 @@ export default function HistoricoPage() {
 
   return (
     <PageBody>
-      <PageHeader>Conversas encerradas.</PageHeader>
+      <PageHeader>Conversas da conta, encerradas e em andamento, por período.</PageHeader>
 
       <PageToolbar
         actions={
-          canExport ? (
-            <Button variant="outline" onClick={() => setExportOpen(true)}>
-              <Download className="size-3.5" />
-              Exportar
-            </Button>
+          canExport || canReportExport ? (
+            <>
+              {canReportExport && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={reportExporting !== null || tabulacao !== ALL_TABS}
+                    title={tabulacao !== ALL_TABS ? "A planilha não filtra por tabulação: use Exportar." : undefined}
+                    onClick={() => void exportReport("xlsx")}
+                  >
+                    <FileSpreadsheet className="size-3.5" />
+                    {reportExporting === "xlsx" ? "Gerando…" : "Planilha (xlsx)"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={reportExporting !== null || tabulacao !== ALL_TABS}
+                    title={tabulacao !== ALL_TABS ? "A planilha não filtra por tabulação: use Exportar." : undefined}
+                    onClick={() => void exportReport("csv")}
+                  >
+                    <Download className="size-3.5" />
+                    {reportExporting === "csv" ? "Gerando…" : "CSV"}
+                  </Button>
+                </>
+              )}
+              {canExport && (
+                <Button variant="outline" onClick={() => setExportOpen(true)}>
+                  <Download className="size-3.5" />
+                  Exportar
+                </Button>
+              )}
+            </>
           ) : undefined
         }
       >
@@ -219,13 +312,41 @@ export default function HistoricoPage() {
             className="h-[34px] pl-9"
           />
         </label>
-        <Segmented<HistoryPeriod>
-          ariaLabel="Período de encerramento"
+        <Segmented<HistoryStatus>
+          ariaLabel="Situação da conversa"
+          options={STATUS_OPTIONS}
+          value={status}
+          onChange={setStatus}
+          size="lg"
+        />
+        <Segmented<PeriodChoice>
+          ariaLabel={status === "closed" ? "Período de encerramento" : "Período de início"}
           options={PERIOD_OPTIONS}
           value={period}
           onChange={setPeriod}
           size="lg"
         />
+        {period === "custom" && (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={rangeFrom}
+              max={rangeTo || undefined}
+              onChange={(e) => setRangeFrom(e.target.value)}
+              aria-label="Data inicial"
+              className="h-[34px] w-[9.5rem]"
+            />
+            <span className="text-xs text-muted-foreground">até</span>
+            <Input
+              type="date"
+              value={rangeTo}
+              min={rangeFrom || undefined}
+              onChange={(e) => setRangeTo(e.target.value)}
+              aria-label="Data final"
+              className="h-[34px] w-[9.5rem]"
+            />
+          </div>
+        )}
         <Select value={tabulacao} onValueChange={(v) => v && setTabulacao(v)}>
           <SelectTrigger aria-label="Filtrar por tabulação" className="h-[34px] w-full sm:w-56">
             <SelectValue>
@@ -261,11 +382,12 @@ export default function HistoricoPage() {
           onRetry={() => void fetchPage(0, false)}
         />
       ) : (
-        <TableCard label="Conversas encerradas">
+        <TableCard label="Conversas">
           <DenseTable minWidth={880} aria-busy={loading || undefined}>
             <thead>
               <tr>
                 <Th>Contato</Th>
+                <Th>Situação</Th>
                 <Th>Canal</Th>
                 <Th>Tabulação</Th>
                 <Th>Atendente</Th>
@@ -278,7 +400,7 @@ export default function HistoricoPage() {
               {loading &&
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 7 }).map((__, j) => (
+                    {Array.from({ length: 8 }).map((__, j) => (
                       <Td key={j}>
                         <Skeleton className="h-3 w-24" />
                       </Td>
@@ -308,6 +430,11 @@ export default function HistoricoPage() {
                         <CellMain title={contactLabel(c.contact)} sub={c.contact?.name ? c.contact.phone : undefined} />
                       </button>
                     </Td>
+                    <Td>
+                      <StatusChip tone={c.status === "closed" ? "mute" : "brand"} dot={false}>
+                        {c.status === "closed" ? "Encerrada" : "Em andamento"}
+                      </StatusChip>
+                    </Td>
                     <Td>{channelLabel(c)}</Td>
                     <Td>
                       {c.outcome_tag ? (
@@ -319,7 +446,7 @@ export default function HistoricoPage() {
                     <Td>{agentName(c.assigned_agent_id)}</Td>
                     <Td>{teamName(c.team_id)}</Td>
                     <Td align="right">{formatDuration(c.created_at, c.closed_at) ?? "—"}</Td>
-                    <Td className="whitespace-nowrap tabular-nums">{fmtDate(c.closed_at ?? c.updated_at)}</Td>
+                    <Td className="whitespace-nowrap tabular-nums">{fmtDate(c.closed_at)}</Td>
                   </Tr>
                 ))}
             </tbody>
@@ -328,7 +455,7 @@ export default function HistoricoPage() {
             <EmptyState
               icon={History}
               title="Nada encontrado"
-              hint="Ajuste a busca ou o período."
+              hint="Ajuste a busca, a situação ou o período."
               className="m-4 min-h-32"
             />
           )}
@@ -356,7 +483,13 @@ export default function HistoricoPage() {
         open={!!selected}
         onOpenChange={(o) => !o && setSelected(null)}
         title={selected ? contactLabel(selected.contact) : ""}
-        description={selected ? `Encerrada em ${fmtDate(selected.closed_at ?? selected.updated_at)}` : undefined}
+        description={
+          selected
+            ? selected.status === "closed"
+              ? `Encerrada em ${fmtDate(selected.closed_at ?? selected.updated_at)}`
+              : `Em andamento · iniciada em ${fmtDate(selected.created_at)}`
+            : undefined
+        }
         size="xl"
       >
         {selected && (
@@ -388,5 +521,13 @@ export default function HistoricoPage() {
         )}
       </DetailDrawer>
     </PageBody>
+  );
+}
+
+export default function HistoricoPage() {
+  return (
+    <Suspense fallback={null}>
+      <HistoricoContent />
+    </Suspense>
   );
 }
