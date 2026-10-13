@@ -60,11 +60,15 @@ export function encodeCursor(parts: string[]): string {
   return Buffer.from(JSON.stringify(parts)).toString('base64url');
 }
 
+const CURSOR_PART =
+  /^(?:[A-Za-z0-9_-]{1,64}|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)?)$/
+
 export function decodeCursor(raw: string | null, arity: number): string[] | null {
   if (raw === null || raw === '') return null;
   try {
     const v = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (Array.isArray(v) && v.length === arity && v.every((x) => typeof x === 'string' && x.length > 0 && x.length < 80)) return v;
+    // Cada parte entra no filtro .or() do keyset: só token simples (campo, UUID, id) ou timestamp ISO — nada com vírgula, parêntese, aspas, ponto ou barra.
+    if (Array.isArray(v) && v.length === arity && v.every((x) => typeof x === 'string' && x.length < 80 && CURSOR_PART.test(x))) return v;
   } catch {
     /* cai no erro abaixo */
   }

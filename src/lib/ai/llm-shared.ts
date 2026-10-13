@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import { gatedFetch } from "@/lib/ai/llm-gate";

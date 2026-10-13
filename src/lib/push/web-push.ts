@@ -1,5 +1,6 @@
 // Web Push (RFC 8030) com VAPID (RFC 8292) e criptografia de conteúdo aes128gcm (RFC 8291), só com node:crypto — sem dependência
 // nova (nada de `web-push` na auditoria de pacotes). Só servidor.
+import "server-only";
 import { createECDH, createCipheriv, createPrivateKey, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
 
 const b64u = (b: Buffer | Uint8Array) => Buffer.from(b).toString("base64url");

@@ -1,3 +1,4 @@
+import "server-only";
 import { createHmac } from 'node:crypto';
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret';
 

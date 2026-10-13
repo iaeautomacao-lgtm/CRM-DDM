@@ -1,6 +1,7 @@
 // Processamento de UMA mensagem recebida da Meta (contato → conversa → insert → fluxo/IA/automações).
 // Extraído de api/whatsapp/webhook/route.ts SEM mudar regra: serve ao caminho inline (WHATSAPP_MESSAGE_INBOX=off/shadow)
 // e ao drenador do inbox durável (message-inbox.ts, migration 201). Mensagem já gravada (23505) = idempotente.
+import "server-only";
 import { chatMediaReference } from '@/lib/storage/chat-media'
 import { auditFetch } from '@/lib/audit/context'
 import { createClient } from '@supabase/supabase-js'

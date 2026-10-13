@@ -4,6 +4,7 @@
 //
 // O receptor recalcula o HMAC sobre o corpo BRUTO recebido, compara em tempo constante e rejeita |agora − t| > 5 min (anti-replay).
 // `verifyWebhookSignature` é o mesmo algoritmo que a documentação mostra ao integrador (e que o teste usa).
+import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
