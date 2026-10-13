@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { suggestOutcomeTag } from "@/lib/ai/tabulacao-suggest";
+import { consumeAiQuota } from "@/lib/ai/daily-quota";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,6 +26,10 @@ export async function GET(
     if (!UUID_RE.test(conversationId)) {
       return NextResponse.json({ error: "Conversa inválida" }, { status: 400 });
     }
+
+    // Cota diária da conta (migration 339): estourou ⇒ sem sugestão (nunca bloqueia o fechamento), sem chamar a IA.
+    const quota = await consumeAiQuota(supabaseAdmin(), accountId, "tag_suggest");
+    if (!quota.allowed) return NextResponse.json({ suggestion: null, quota_exceeded: true });
 
     const result = await suggestOutcomeTag({
       userDb: supabase,

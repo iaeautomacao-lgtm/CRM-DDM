@@ -402,10 +402,6 @@
       "kind": "registry"
     },
     {
-      "version": "329_revoke_anon_wacrm",
-      "kind": "registry"
-    },
-    {
       "version": "330_api_v1_conversation_extract",
       "kind": "registry"
     },
@@ -445,27 +441,11 @@
       "kind": "registry"
     },
     {
-      "version": "338_dispatch_waha_rate",
+      "version": "339_ai_daily_quota",
       "kind": "registry"
     },
     {
       "version": "345_contacts_write_rls_has_perm",
-      "kind": "registry"
-    },
-    {
-      "version": "346_api_keys_ai_config_select_has_perm",
-      "kind": "registry"
-    },
-    {
-      "version": "347_conversations_messages_write_rls",
-      "kind": "registry"
-    },
-    {
-      "version": "348_deals_pipelines_write_rls_has_perm",
-      "kind": "registry"
-    },
-    {
-      "version": "349_flows_disparador_write_rls",
       "kind": "registry"
     }
   ]
