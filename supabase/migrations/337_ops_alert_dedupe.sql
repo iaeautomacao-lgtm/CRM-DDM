@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS wacrm.alert_dedupe (
 CREATE INDEX IF NOT EXISTS idx_alert_dedupe_created ON wacrm.alert_dedupe (created_at);
 
 ALTER TABLE wacrm.alert_dedupe ENABLE ROW LEVEL SECURITY;
+
+-- 2FA (migration 310): na rodada de deploy esta migration roda ANTES da 310, que então cobre a tabela.
+-- Se a 310 já estiver aplicada (rodada fora de ordem), aplica a policy aqui (idempotente).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'wacrm' AND p.proname = 'apply_mfa_policy'
+  ) THEN
+    PERFORM wacrm.apply_mfa_policy('wacrm.alert_dedupe'::regclass);
+  END IF;
+END $$;
 REVOKE ALL ON wacrm.alert_dedupe FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.alert_dedupe TO service_role;
 

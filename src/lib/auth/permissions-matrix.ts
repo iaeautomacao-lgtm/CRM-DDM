@@ -321,6 +321,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/contacts", roles: ["owner"], permission: "contacts.view", aligned: false, note: "página só owner; contatos são lidos por todos (G7)" },
   { prefix: "/pipelines", roles: ["owner"], permission: "pipelines.manage", aligned: false, note: "página só owner; RLS admin (G7)" },
   { prefix: "/flows", roles: ["owner", "admin"], permission: "flows.edit", aligned: true },
+  { prefix: "/automations", roles: ["owner", "admin", "supervisor", "agent"], permission: "automations.view", aligned: true, note: "decisão 9 (13/10): o visualizador não vê" },
   { prefix: "/disparador", roles: ["owner", "admin"], permission: "campaigns.manage", aligned: true },
   { prefix: "/regua", roles: ["owner", "admin", "supervisor"], permission: "billing.view", aligned: true },
   { prefix: "/ajuda", roles: ["owner"], permission: null, aligned: false, note: "sem capacidade correspondente" },

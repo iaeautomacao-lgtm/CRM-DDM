@@ -103,6 +103,10 @@ describe('migrations 312/313 — papel personalizado', { timeout: 120_000 }, () 
     for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql', '304_view_permission_keys.sql']) {
       await db.exec(migration(f))
     }
+    // A 340 (arquivamento de funil) cria pipelines.delete (ownerOnly, não concedível); aqui só a linha do catálogo, igual à da 340.
+    await db.exec(`INSERT INTO wacrm.permission_catalog (key, label, description, group_name, scope, owner_only, grantable, depends_on, sort)
+      VALUES ('pipelines.delete', 'Excluir funil em definitivo', 'Apagar um funil com etapas e negócios, sem volta (arquivar é o caminho normal).', 'Funis', 'n/a', true, false, ARRAY['pipelines.manage']::text[], 680)
+      ON CONFLICT (key) DO NOTHING`)
     await db.exec(migration('312_custom_role_validation.sql'))
     await db.exec(migration('313_custom_roles.sql'))
     await db.exec(migration('312_custom_role_validation.sql')) // idempotentes
