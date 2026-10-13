@@ -18,6 +18,7 @@ export interface DocRequest {
 export interface Snippets {
   curl: string;
   js: string;
+  python: string;
   n8n: string;
 }
 
@@ -88,6 +89,42 @@ export function toFetch(baseUrl: string, req: DocRequest): string {
   ].join('\n');
 }
 
+/** Literal Python (True/False/None) de um valor JSON. */
+function pyLiteral(value: unknown, indent = 0): string {
+  const pad = '    '.repeat(indent + 1);
+  const end = '    '.repeat(indent);
+  if (value === null || value === undefined) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    return `[\n${value.map((v) => `${pad}${pyLiteral(v, indent + 1)},`).join('\n')}\n${end}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return '{}';
+  return `{\n${entries.map(([k, v]) => `${pad}${JSON.stringify(k)}: ${pyLiteral(v, indent + 1)},`).join('\n')}\n${end}}`;
+}
+
+export function toPython(baseUrl: string, req: DocRequest): string {
+  const args = [`    ${JSON.stringify(fullUrl(baseUrl, req, false))},`, `    headers=${pyLiteral(req.headers, 1).trimStart()},`];
+  if (Object.keys(req.query).length > 0) args.push(`    params=${pyLiteral(req.query, 1).trimStart()},`);
+  if (req.body !== undefined) args.push(`    json=${pyLiteral(req.body, 1).trimStart()},`);
+  return [
+    'import requests',
+    '',
+    `resposta = requests.${req.method.toLowerCase()}(`,
+    ...args,
+    '    timeout=30,',
+    ')',
+    'dados = resposta.json()',
+    'if not resposta.ok:',
+    '    # Ramifique pelo código (estável), não pela mensagem.',
+    "    raise RuntimeError(f\"{resposta.status_code} {dados['error']['code']}: {dados['error']['message']}\")",
+    "print(dados['data'])",
+  ].join('\n');
+}
+
 /** Nó "HTTP Request" do n8n em JSON — dá para colar direto na tela do fluxo (Ctrl+V). */
 export function toN8n(baseUrl: string, req: DocRequest, nodeName = 'Chamar API do CRM'): string {
   const parameters: Json = {
@@ -114,7 +151,7 @@ export function toN8n(baseUrl: string, req: DocRequest, nodeName = 'Chamar API d
 }
 
 export function buildSnippets(baseUrl: string, req: DocRequest, nodeName?: string): Snippets {
-  return { curl: toCurl(baseUrl, req), js: toFetch(baseUrl, req), n8n: toN8n(baseUrl, req, nodeName) };
+  return { curl: toCurl(baseUrl, req), js: toFetch(baseUrl, req), python: toPython(baseUrl, req), n8n: toN8n(baseUrl, req, nodeName) };
 }
 
 export const DEFAULT_DOCS_BASE_URL = 'https://SEU-CRM.exemplo.com.br';
