@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { auditFetch, registerAuditActor } from '@/lib/audit/context'
 import { aalFromAccessToken, isMfaRequired, MFA_REQUIRED_CODE } from '@/lib/auth/mfa'
+import { sessionCookieOptions } from '@/lib/supabase/cookie-options'
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -11,6 +12,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: sessionCookieOptions(),
       db: {
         schema: 'wacrm',
       },
