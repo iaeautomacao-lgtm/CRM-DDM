@@ -191,7 +191,12 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({ success: true, enqueued: result.enqueued });
+    // skipped_known_invalid: números que a Meta já recusou como inválidos em campanha anterior e foram ignorados (omitido quando 0).
+    return NextResponse.json({
+      success: true,
+      enqueued: result.enqueued,
+      ...(result.skippedKnownInvalid ? { skipped_known_invalid: result.skippedKnownInvalid } : {}),
+    });
   } catch (err: any) {
     console.error("[Campaign Start] Failed to schedule queue:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -20,6 +20,7 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import { readCappedBody } from '@/lib/security/webhook-body'
 import { shouldReportLegacyWahaSecret } from '@/lib/whatsapp/waha-webhook-auth'
 import { phoneVariants } from '@/lib/disparador/phone-key'
@@ -45,12 +46,15 @@ export async function POST(request: Request) {
   let channelId: string | null = null
   if (channelParam !== null) {
     if (!isWahaChannelId(channelParam) || !matchesWahaChannelSecret(channelParam, suppliedSecret)) {
+      // id do canal só se for um id válido (nunca ecoa entrada arbitrária no log)
+      logWebhookRejection('webhook_waha', 'invalid_channel_secret', { channel: isWahaChannelId(channelParam) ? channelParam : null })
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     channelId = channelParam
   } else if (!matchesLegacyWahaSecret(suppliedSecret)) {
     // Sessões antigas (sem ?channel=, segredo global) só passam durante a
     // transição, com WAHA_WEBHOOK_ACCEPT_LEGACY_SECRET=true.
+    logWebhookRejection('webhook_waha', 'invalid_legacy_secret')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   try {
