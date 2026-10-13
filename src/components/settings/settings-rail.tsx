@@ -84,11 +84,11 @@ export function SettingsRail({
                   onClick={() => onSelect(s)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium whitespace-nowrap transition-colors',
+                    'flex shrink-0 items-center gap-3 rounded-field px-3.5 py-2.5 text-left text-sm font-medium whitespace-nowrap transition-colors duration-150 ease-out',
                     'lg:w-full',
                     isActive
-                      ? 'bg-primary-soft text-primary'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                      ? 'bg-primary-solid font-semibold text-white shadow-sm'
+                      : 'text-foreground-2 hover:bg-surface-hover hover:text-foreground',
                   )}
                 >
                   <Icon className="size-4 shrink-0" />
@@ -97,7 +97,7 @@ export function SettingsRail({
                     <span
                       className={cn(
                         'hidden items-center gap-1.5 text-xs lg:inline-flex',
-                        isActive ? 'text-primary' : 'text-muted-foreground',
+                        isActive ? 'text-white' : 'text-muted-foreground',
                       )}
                     >
                       {hints[s]}
