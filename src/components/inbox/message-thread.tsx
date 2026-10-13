@@ -1353,6 +1353,7 @@ export function MessageThread({
   const assignLabel = assignedAgentId
     ? (currentAssignee?.full_name ?? "Atribuído")
     : "Atribuir";
+  const humanControlText = assignedAgentId ? "Atendimento humano — IA pausada" : null;
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -1436,6 +1437,7 @@ export function MessageThread({
           </div>
         </div>
 
+        {humanControlText && <span className="text-xs text-amber-600" title="Atribuição humana impede respostas automáticas">{humanControlText}</span>}
         <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
           {/* Visíveis: Status, Atribuir, Transferir, painel do contato.
               Atualizar, Ligar e Excluir ficam em "Mais ações". */}
