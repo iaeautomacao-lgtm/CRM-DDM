@@ -102,7 +102,7 @@ export function decodeCursor(value: string): PagePosition {
     const obj: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
     if (!obj || typeof obj !== 'object') throw new Error('object required');
     const { at, id } = obj as Record<string, unknown>;
-    if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(at) ||
+    if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(at) ||
         !Number.isFinite(Date.parse(at)) || typeof id !== 'string' || !UUID_RE.test(id)) {
       throw new Error('bad cursor fields');
     }
