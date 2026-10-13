@@ -345,6 +345,38 @@ export function ApiGuide({ examples }: { examples: GuideExamples }) {
         <CodeTabs snippets={snippets.relatorio} title="Relatório de operação" />
       </Section>
 
+
+      {/* Histórico completo: integrações externas podem analisar todos os turnos, não apenas a última mensagem. */}
+      <Section
+        id="conversas"
+        title="Histórico completo de conversas"
+        intro={
+          <>
+            Rotas de leitura de mensagens e arquivos do CRM (escopo <C>conversations:read</C>).
+            As exportações exigem também a permissão específica <C>conversations:export</C>.
+          </>
+        }
+      >
+        <Table
+          head={['Rota', 'Finalidade']}
+          rows={[
+            [<C key="1">GET /conversations</C>, 'Lista conversas com filtros por data, operador, equipe e status.'],
+            [<C key="2">GET /conversations/{'{id}'}/messages</C>, 'Todo o histórico de mensagens, em ordem cronológica, página a página.'],
+            [<C key="3">POST /conversations/messages/batch</C>, 'Até 20 conversas com cursores independentes e no máximo 100 mensagens por conversa.'],
+            [<C key="4">GET /conversations/{'{id}'}/messages/{'{messageId}'}/media</C>, 'URL privada de mídia do chat, assinada por 60 segundos.'],
+            [<C key="5">POST /conversations/exports</C>, 'Solicita job de exportação completa em NDJSON.gz.'],
+            [<C key="6">GET /conversations/exports/{'{id}'}</C>, 'Mostra progresso e partes concluídas da exportação.'],
+            [<C key="7">GET /conversations/exports/{'{id}'}/parts/{'{partId}'}/download</C>, 'Retorna URL temporária para baixar cada parte privada.'],
+          ]}
+        />
+        <ul className="max-w-[68ch] list-disc space-y-1.5 pl-5 text-sm text-foreground/90">
+          <li>Use <C>next_cursor</C> até ficar <C>null</C> para ler a conversa inteira, desde a primeira mensagem.</li>
+          <li>Na consulta em lote, acompanhe o cursor de cada conversa separadamente. Mensagens de IA, operadores e clientes vêm identificadas por <C>sender_type</C>.</li>
+          <li>Exportação usa processamento em cron e armazenamento privado por sete dias. Siga <C>next_part_no</C> para listar todas as partes.</li>
+          <li>Uma chave com permissão de leitura integral poderá acessar dados pessoais. Conceda-a somente à integração autorizada do Planejamento.</li>
+        </ul>
+      </Section>
+
       {/* 6 ─ Erros */}
       <Section
         id="erros"
