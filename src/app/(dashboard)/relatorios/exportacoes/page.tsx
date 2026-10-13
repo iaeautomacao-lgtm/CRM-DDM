@@ -58,7 +58,7 @@ import { PageHeader } from "@/components/ddm/page-header";
 const BUCKET = "relatorio-exports";
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  completed: { label: "Concluído", className: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300" },
+  completed: { label: "Concluído", className: "bg-success-soft text-success" },
 };
 
 interface RawExportRow {

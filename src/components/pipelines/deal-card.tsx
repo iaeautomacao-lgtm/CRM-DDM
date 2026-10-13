@@ -62,7 +62,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay, canDrag = true }: Dea
       <span
         aria-hidden
         className="absolute inset-y-0 left-0 w-[3px] rounded-l-lg"
-        style={{ backgroundColor: stage?.color ?? "#94a3b8" }}
+        style={{ backgroundColor: stage?.color ?? "var(--muted-foreground)" }}
       />
 
       <span className="flex items-start gap-2">

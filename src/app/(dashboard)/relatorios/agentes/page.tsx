@@ -276,7 +276,7 @@ export default function AgentesPage() {
                           {row.loggedOutAt ? (
                             format(new Date(row.loggedOutAt), "dd/MM/yyyy HH:mm:ss")
                           ) : (
-                            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">Ativo</Badge>
+                            <Badge className="bg-success-soft text-success">Ativo</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
