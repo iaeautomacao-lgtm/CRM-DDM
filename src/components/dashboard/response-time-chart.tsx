@@ -96,7 +96,7 @@ function Body({ data, meta }: { data: ResponseTimeSummary; meta: number }) {
             >
               <span
                 className={cn(
-                  'w-full max-w-[26px] origin-bottom animate-ddm-col rounded-t-[3px] transition-[height] duration-300',
+                  'w-full max-w-[26px] origin-bottom animate-ddm-col rounded-t-[5px] transition-[height] duration-300',
                   v == null ? 'bg-surface-3' : over ? 'bg-danger' : 'bg-muted-foreground',
                 )}
                 style={{ height: v == null ? '3px' : `${(v / scaleMax) * 100}%` }}

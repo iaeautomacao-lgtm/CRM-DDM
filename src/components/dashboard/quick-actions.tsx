@@ -19,7 +19,7 @@ export function QuickActions() {
         <Can key={action.href} permission={action.permission}>
           <Link
             href={action.href}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-border bg-card px-3 text-[12.5px] font-medium text-foreground transition-colors hover:border-border-strong hover:bg-surface-hover"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-card px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:border-border-strong hover:bg-surface-hover"
           >
             <Plus className="size-3.5" aria-hidden="true" />
             {action.label}
