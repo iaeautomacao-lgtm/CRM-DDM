@@ -21,6 +21,8 @@ describe("migration 327 — REVOKE nas funções de contador de broadcast", { ti
         BEGIN EXECUTE format('UPDATE broadcasts SET %I = GREATEST(0, %I + $1), updated_at = now() WHERE id = $2', col, col) USING delta, bid; END;
       $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
       CREATE FUNCTION public.recompute_broadcast_counts(bid uuid) RETURNS void AS $$ BEGIN NULL; END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+      CREATE FUNCTION wacrm.increment_unread_count(conversation_id uuid) RETURNS void AS $$ BEGIN NULL; END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+      GRANT EXECUTE ON FUNCTION wacrm.increment_unread_count(uuid) TO authenticated;
       CREATE FUNCTION public.agg_trigger() RETURNS trigger AS $$ BEGIN PERFORM _bcast_bump(NEW.broadcast_id, 'sent_count', 1); RETURN NEW; END; $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
       CREATE TRIGGER agg AFTER INSERT ON public.broadcast_recipients FOR EACH ROW EXECUTE FUNCTION public.agg_trigger();
       GRANT ALL ON public.broadcasts, public.broadcast_recipients TO authenticated;
@@ -44,6 +46,8 @@ describe("migration 327 — REVOKE nas funções de contador de broadcast", { ti
       expect(await canExec("anon", fn), fn).toBe(false);
       expect(await canExec("service_role", fn), fn).toBe(true);
     }
+    expect(await canExec("authenticated", "wacrm.increment_unread_count(uuid)")).toBe(false);
+    expect(await canExec("service_role", "wacrm.increment_unread_count(uuid)")).toBe(true);
     await db.exec(`SET ROLE authenticated`);
     await expect(db.query(`SELECT public._bcast_bump('00000000-0000-0000-0000-000000000001', 'sent_count', 5)`)).rejects.toThrow(/permission denied/i);
     await db.exec(`INSERT INTO public.broadcast_recipients (broadcast_id, status) VALUES ('00000000-0000-0000-0000-000000000001', 'sent')`);

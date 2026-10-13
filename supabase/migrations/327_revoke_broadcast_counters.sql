@@ -5,13 +5,15 @@
 -- qualquer usuário logado (ou anon) podia chamá-las pelo PostgREST (/rpc) e alterar os contadores de QUALQUER broadcast, sem checagem de conta.
 -- O único chamador legítimo é o trigger broadcast_recipient_aggregate_trigger, que também é SECURITY DEFINER (roda como dono) ⇒ não precisa de EXECUTE do chamador.
 -- O código (src/) não chama nenhuma das duas. Mantém EXECUTE só para service_role (manutenção manual: "SELECT recompute_broadcast_counts(...)" como postgres continua valendo).
+-- Também entram os contadores increment_* (unread, session_page, campaign_metric, flow/automation_execution): o banco VIVO (consultas do dono, 13/10) os mostra executáveis por
+-- authenticated; todos os chamadores em src/ usam service_role (webhooks, cron, engine, telemetria). Migrations antigas (012/170/183) já os fechavam; aqui garante no vivo.
 -- Procura a função por NOME em pg_proc (assinatura/schema podem variar no banco vivo); o que não existir é ignorado.
 --
--- PRÉ-CHECK:  SELECT n.nspname, p.proname, p.prosecdef, pg_get_function_identity_arguments(p.oid), p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts');
--- VERIFICAÇÃO: SELECT has_function_privilege('authenticated', p.oid, 'EXECUTE') FROM pg_proc p WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts');   -- tudo false
+-- PRÉ-CHECK:  SELECT n.nspname, p.proname, p.prosecdef, pg_get_function_identity_arguments(p.oid), p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts','increment_unread_count','increment_session_page_count','increment_campaign_metric','increment_flow_execution_count','increment_automation_execution_count');
+-- VERIFICAÇÃO: SELECT has_function_privilege('authenticated', p.oid, 'EXECUTE') FROM pg_proc p WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts','increment_unread_count','increment_session_page_count','increment_campaign_metric','increment_flow_execution_count','increment_automation_execution_count');   -- tudo false
 --              e inserir/atualizar um broadcast_recipient pelo app: os contadores do broadcast continuam subindo (o trigger é definer).
 -- ORDEM: antes ou depois do deploy (o app não usa estas funções). Idempotente.
--- ROLLBACK:   DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS sig FROM pg_proc p WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts') AND p.pronamespace = 'public'::regnamespace LOOP EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO PUBLIC', f.sig); END LOOP; END $$;
+-- ROLLBACK:   DO $$ DECLARE f record; BEGIN FOR f IN SELECT p.oid::regprocedure AS sig FROM pg_proc p WHERE p.proname IN ('_bcast_bump','recompute_broadcast_counts','increment_unread_count','increment_session_page_count','increment_campaign_metric','increment_flow_execution_count','increment_automation_execution_count') AND p.pronamespace = 'public'::regnamespace LOOP EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO PUBLIC', f.sig); END LOOP; END $$;
 --             DELETE FROM wacrm.schema_migrations WHERE version = '327_revoke_broadcast_counters';
 -- ============================================================
 
@@ -24,7 +26,7 @@ BEGIN
   FOR f IN
     SELECT p.oid::regprocedure AS sig
     FROM pg_proc p
-    WHERE p.proname IN ('_bcast_bump', 'recompute_broadcast_counts')
+    WHERE p.proname IN ('_bcast_bump', 'recompute_broadcast_counts', 'increment_unread_count', 'increment_session_page_count', 'increment_campaign_metric', 'increment_flow_execution_count', 'increment_automation_execution_count')
       AND p.pronamespace IN ('public'::regnamespace, 'wacrm'::regnamespace)
   LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated', f.sig);
