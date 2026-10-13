@@ -370,6 +370,14 @@
       "kind": "registry"
     },
     {
+      "version": "318_roles_by_level",
+      "kind": "registry"
+    },
+    {
+      "version": "319_invitation_role_id",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
       "kind": "registry"
     },

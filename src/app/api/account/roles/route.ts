@@ -1,10 +1,12 @@
 // ============================================================
-// /api/account/roles   (PRD 20 — papel personalizado, migrations 312/313)
+// /api/account/roles   (PRD 20 + TASK5 — cargos, migrations 312/313/318)
 //
-//   GET  — papéis de sistema + personalizados da organização, com permissões, membros e o limite.   members.view
-//   POST — cria um papel personalizado { name, description?, permissions[] }.                         roles.manage (só o proprietário)
+//   GET  — cargos de sistema + personalizados, com permissões efetivas, padrão, membros, limite e o que eu posso fazer
+//          (editable/assignable/deletable/customized/level).                                       members.view
+//   POST — cria um cargo personalizado { name, description?, permissions[] }.                         roles.manage (admin e acima)
 //
-// Erros: 400 {error, code:'invalid'|'invalid_permissions', errors?} · 403 · 409 {code:'name_taken'|'limit_reached'} · 503.
+// Erros: 400 {error, code:'invalid'|'invalid_permissions', errors?} · 403 {code:'forbidden'|'escalation'(+permissions)|'role_level'}
+//        · 409 {code:'name_taken'|'limit_reached'} · 503.
 // ============================================================
 import { NextResponse } from "next/server";
 
@@ -17,7 +19,7 @@ import { NO_STORE, roleRouteError } from "@/lib/roles/http";
 export async function GET() {
   try {
     const ctx = await requirePermission("members.view");
-    return NextResponse.json(await listRoles(supabaseAdmin(), ctx.accountId), { headers: NO_STORE });
+    return NextResponse.json(await listRoles(supabaseAdmin(), ctx.accountId, ctx), { headers: NO_STORE });
   } catch (err) {
     return roleRouteError(err);
   }

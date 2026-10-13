@@ -95,10 +95,11 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
   pg("account/transfer-ownership", "POST", "owner", "ownership.transfer"),
   pg("account/roles", "GET", "viewer", "members.view"), // papel personalizado (313)
-  pg("account/roles", "POST", "owner", "roles.manage"),
-  pg("account/roles/[roleId]", "PATCH", "owner", "roles.manage"),
-  pg("account/roles/[roleId]", "DELETE", "owner", "roles.manage"),
-  pg("account/members/[userId]/role", "PUT", "owner", "roles.manage"),
+  pg("account/roles", "POST", "admin", "roles.manage"),
+  pg("account/roles/[roleId]", "PATCH", "admin", "roles.manage"),
+  pg("account/roles/[roleId]", "DELETE", "admin", "roles.manage"),
+  pg("account/roles/[roleId]/reset", "POST", "admin", "roles.manage"), // cargos (318): restaurar padrão de cargo de sistema
+  pg("account/members/[userId]/role", "PUT", "admin", "roles.manage"),
   pg("account/teams/[teamId]/members", "GET", "viewer", "teams.view"),
   pg("account/teams/[teamId]/members", "POST", "admin", "teams.manage"),
   pg("account/teams/[teamId]/members", "DELETE", "admin", "teams.manage"),

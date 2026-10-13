@@ -19,7 +19,9 @@
 
 import { NextResponse } from "next/server";
 
+import { supabaseAdmin } from "@/lib/account/admin-client";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { isUuid } from "@/lib/auth/sessions";
 import {
   clampExpiryDays,
   generateInviteToken,
@@ -33,6 +35,8 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import { resolveInviteRole } from "@/lib/roles/invite-role";
+import { roleRouteError } from "@/lib/roles/http";
 
 // A base do link vem de src/lib/invitations/base-url.ts: só de configuração do servidor (URL do app ou
 // ALLOWED_INVITE_HOSTS) — nunca do cabeçalho Host da requisição nem de um domínio padrão. Sem nada configurado,
@@ -47,7 +51,7 @@ export async function GET() {
     const { data, error } = await ctx.supabase
       .from("account_invitations")
       .select(
-        "id, role, label, created_by_user_id, created_at, expires_at, accepted_at, accepted_by_user_id",
+        "id, role, role_id, label, created_by_user_id, created_at, expires_at, accepted_at, accepted_by_user_id",
       )
       .eq("account_id", ctx.accountId)
       .is("accepted_at", null)
@@ -83,11 +87,16 @@ export async function POST(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown; expiresInDays?: unknown; label?: unknown }
+      | { role?: unknown; role_id?: unknown; expiresInDays?: unknown; label?: unknown }
       | null;
 
-    const role = body?.role;
-    if (!isAccountRole(role) || role === "owner") {
+    // TASK5 (318/319): o cargo escolhido (role_id, de sistema ou personalizado desta organização) ou, no formato antigo,
+    // o papel de sistema em `role`. Sempre conferido pela regra "só abaixo de você" e sem escalada (o admin não convida
+    // admin). O `role` gravado é o compat efetivo do cargo.
+    if (body?.role_id !== undefined && body.role_id !== null && !isUuid(body.role_id)) {
+      return NextResponse.json({ error: "'role_id' inválido.", code: "invalid" }, { status: 400 });
+    }
+    if ((body?.role_id === undefined || body.role_id === null) && (!isAccountRole(body?.role) || body?.role === "owner")) {
       // The DB CHECK already rejects 'owner', but failing fast
       // here gives a clearer 400 than the eventual constraint
       // violation surfaced as a 500.
@@ -130,6 +139,13 @@ export async function POST(request: Request) {
       throw err;
     }
 
+    const { roleId, role } = await resolveInviteRole(supabaseAdmin(), {
+      accountId: ctx.accountId,
+      actorId: ctx.userId,
+      roleId: typeof body?.role_id === "string" ? body.role_id : null,
+      role: isAccountRole(body?.role) ? body.role : null,
+    });
+
     const { token, hash } = generateInviteToken();
 
     const { data, error } = await ctx.supabase
@@ -138,11 +154,12 @@ export async function POST(request: Request) {
         account_id: ctx.accountId,
         token_hash: hash,
         role,
+        role_id: roleId,
         created_by_user_id: ctx.userId,
         label,
         expires_at: expiresAt.toISOString(),
       })
-      .select("id, role, label, expires_at, created_at")
+      .select("id, role, role_id, label, expires_at, created_at")
       .single();
 
     if (error || !data) {
@@ -164,6 +181,6 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (err) {
-    return toErrorResponse(err);
+    return roleRouteError(err);
   }
 }

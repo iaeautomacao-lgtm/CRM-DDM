@@ -56,7 +56,7 @@ describe('parseRoleInput', () => {
     } catch (e) {
       const err = e as CustomRoleError
       expect(err).toMatchObject({ status: 400, code: 'invalid_permissions' })
-      expect(err.extra.errors?.map((x) => x.code).sort()).toEqual(['missing_dependency', 'not_grantable', 'owner_only', 'unknown_permission'])
+      expect(err.extra.errors?.map((x) => x.code).sort()).toEqual(['missing_dependency', 'not_grantable', 'not_grantable', 'unknown_permission'])
     }
   })
 
@@ -93,6 +93,7 @@ describe('RPCs: argumentos e erros do banco', () => {
     [{ code: '23505', message: 'Já existe' }, 409, 'name_taken'],
     [{ code: '54000', message: 'Limite' }, 409, 'limit_reached'],
     [{ code: '42883', message: 'function does not exist' }, 503, 'unavailable'],
+    [{ code: '42501', message: 'x', details: '{"code":"role_level"}' }, 403, 'role_level'],
     [{ code: 'XX000', message: 'boom' }, 500, 'internal'],
   ])('erro %o → %i %s', async (error, status, code) => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -124,7 +125,7 @@ describe('listRoles', () => {
       role_permissions: { data: [{ role_id: 'c-1', permission: 'reports.view_team' }, { role_id: 'c-1', permission: 'inbox.view' }, { role_id: 'c-2', permission: 'contacts.view' }] },
       profiles: { data: [{ user_id: 'u1', role_id: 'c-1' }, { user_id: 'u2', role_id: 'c-1' }, { user_id: 'u3', role_id: 's-agent' }, { user_id: 'u4', role_id: null }] },
     })
-    const out = await listRoles(f.db, 'acc')
+    const out = await listRoles(f.db, 'acc', { role: 'owner', permissions: SYSTEM_ROLE_PERMISSIONS.owner, roleId: 's-owner', roleLevel: 5 })
     expect(out.roles.map((r) => r.id)).toEqual(['s-owner', 's-agent', 'c-1', 'c-2'])
     expect(out.roles[1].permissions).toEqual([...SYSTEM_ROLE_PERMISSIONS.agent].sort())
     expect(out.roles[2]).toMatchObject({ kind: 'custom', compat_role: 'supervisor', permissions: ['inbox.view', 'reports.view_team'], member_count: 2, member_ids: ['u1', 'u2'] })
@@ -134,6 +135,37 @@ describe('listRoles', () => {
     expect(f.calls.find((c) => c.table === 'account_roles')!.ops).toContainEqual(['or', ['account_id.is.null,account_id.eq.acc']])
     expect(f.calls.find((c) => c.table === 'profiles')!.ops).toContainEqual(['eq', ['account_id', 'acc']])
   })
+
+  it('o que o ator pode fazer: admin edita/atribui só abaixo dele; ajuste da organização aparece como customized', async () => {
+    const rows = [
+      { id: 's-owner', account_id: null, key: 'owner', name: 'Proprietário', description: null, kind: 'system', rank: 5, compat_role: 'owner', created_at: null, updated_at: null },
+      { id: 's-admin', account_id: null, key: 'admin', name: 'Administrador', description: null, kind: 'system', rank: 4, compat_role: 'admin', created_at: null, updated_at: null },
+      { id: 's-sup', account_id: null, key: 'supervisor', name: 'Supervisor', description: null, kind: 'system', rank: 3, compat_role: 'supervisor', created_at: null, updated_at: null },
+      { id: 's-agent', account_id: null, key: 'agent', name: 'Operador', description: null, kind: 'system', rank: 2, compat_role: 'agent', created_at: null, updated_at: null },
+      { id: 'c-1', account_id: 'acc', key: 'custom_a', name: 'Quase admin', description: null, kind: 'custom', rank: 4, compat_role: 'admin', created_at: 't', updated_at: 't' },
+    ]
+    const f = fakeDb({
+      account_roles: { data: rows },
+      role_permissions: { data: [{ role_id: 'c-1', permission: 'campaigns.manage' }] },
+      account_role_overrides: { data: [{ role_id: 's-sup', permissions: ['inbox.view'] }] },
+      profiles: { data: [] },
+    })
+    const out = await listRoles(f.db, 'acc', { role: 'admin', permissions: SYSTEM_ROLE_PERMISSIONS.admin, roleId: 's-admin', roleLevel: 4 })
+    const by = Object.fromEntries(out.roles.map((r) => [r.id, r]))
+    expect(by['s-owner']).toMatchObject({ editable: false, assignable: false, level: 5 })
+    expect(by['s-admin']).toMatchObject({ editable: false, assignable: false, level: 4 }) // o próprio e do mesmo nível
+    expect(by['s-sup']).toMatchObject({ editable: true, assignable: true, deletable: false, customized: true, permissions: ['inbox.view'] })
+    expect(by['s-sup'].default_permissions).toEqual([...SYSTEM_ROLE_PERMISSIONS.supervisor].sort())
+    expect(by['s-agent']).toMatchObject({ editable: true, assignable: true, customized: false }) // atribuir: só a regra de nível
+    // o que o admin não tem fica travado no editor (ex.: inbox.receive_assignments, só do Operador)
+    expect(out.locked_permissions).toContain('inbox.receive_assignments')
+    expect(out.locked_permissions).not.toContain('inbox.view')
+    expect(by['c-1']).toMatchObject({ editable: true, assignable: true, deletable: true, level: 3.5, default_permissions: null })
+    // supervisor sem roles.manage nem members.invite: só lê
+    const sup = await listRoles(fakeDb({ account_roles: { data: rows }, role_permissions: { data: [] }, profiles: { data: [] } }).db, 'acc',
+      { role: 'supervisor', permissions: SYSTEM_ROLE_PERMISSIONS.supervisor, roleId: 's-sup', roleLevel: 3 })
+    expect(sup.roles.every((r) => !r.editable && !r.assignable)).toBe(true)
+  })
 })
 
 describe('memberHasCustomRole', () => {
@@ -141,5 +173,13 @@ describe('memberHasCustomRole', () => {
     expect(await memberHasCustomRole(fakeDb({ profiles: { data: [{ role_id: 'r' }] }, account_roles: { data: [{ kind: 'custom' }] } }).db, 'acc', 'u')).toBe(true)
     expect(await memberHasCustomRole(fakeDb({ profiles: { data: [{ role_id: 'r' }] }, account_roles: { data: [{ kind: 'system' }] } }).db, 'acc', 'u')).toBe(false)
     expect(await memberHasCustomRole(fakeDb({ profiles: { data: [] } }).db, 'acc', 'u')).toBe(false)
+  })
+})
+
+describe('escalada no banco', () => {
+  it('42501 com DETAIL escalation vira code escalation com a lista de permissões', async () => {
+    const f = fakeDb({}, { error: { code: '42501', message: 'Você não pode conceder permissões que não tem', details: '{"code":"escalation","permissions":["campaigns.manage"]}' } })
+    const err = (await createCustomRole(f.db, { accountId: 'acc', actorId: 'a', name: 'X', permissions: ['inbox.view'] }).catch((e: unknown) => e)) as CustomRoleError
+    expect(err).toMatchObject({ status: 403, code: 'escalation', extra: { permissions: ['campaigns.manage'] } })
   })
 })
