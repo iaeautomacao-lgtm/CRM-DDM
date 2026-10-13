@@ -16,12 +16,22 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `POST /api/v1/disparador/campaigns` | `campaigns:write` | Cria e enfileira campanha (até 20.000 contatos); idempotência opcional |
 | `GET /api/v1/disparador/campaigns/{id}` | `campaigns:read` ou `campaigns:write` | Status e métricas |
 | `GET /api/v1/reports/*` (`operations/current`, `operations/summary`, `teams`, `agents`, `tabulations`) | `reports:read` | Reporting API: métricas agregadas para BI (Power BI, Metabase, n8n). Detalhes em [`reporting-api.md`](./reporting-api.md) |
+| `GET /api/v1/conversations` e `/{id}` | `conversations:read` | Listagem paginada, metadados e operador |
+| `GET /api/v1/conversations/{id}/messages` | `conversations:read` | Transcrição INTEGRAL, paginada, desde a primeira mensagem |
+| `GET /api/v1/conversations/{id}/events` | `conversations:read` | Execuções de IA, transferências e alterações de status |
+| `POST /api/v1/conversations/messages/batch` | `conversations:read` | Transcrições de até 10 conversas por chamada, com cursores independentes |
+| `POST /api/v1/conversations/exports` | `conversations:export` | Exportação assíncrona privada em NDJSON |
+| `GET /api/v1/conversations/exports/{id}` | `conversations:export` | Status, link temporário do arquivo e cursor de continuação |
 
 - **Autenticação:** `Authorization: Bearer wacrm_live_…`. Crie a chave em **Configurações → API keys** (owner/admin); o valor aparece uma única vez e só o hash é guardado. A chave age apenas na conta onde foi criada.
 - **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `recipient_blocked`, `internal`…).
 - **Limite:** 120 requisições por minuto por chave (`429` com `Retry-After`). O limitador é em memória, por processo.
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
 - **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.
+
+## Consulta de conversas completas
+
+Consulte [docs/conversations-api.md](./conversations-api.md) para exemplos de páginas de mensagens, lote, eventos, permissões, exportação assíncrona, cron e migration 194. **O escopo reports:read continua apenas agregado e não dá acesso a históricos.** `conversations:read` devolve dados pessoais de clientes e requer chave protegida no backend; `conversations:export` é permissão separada para exportações.
 
 ## Campanha WAHA com imagem — Fase 1
 

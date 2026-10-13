@@ -83,6 +83,49 @@ const reportOk = (description: string, data: Json, example: Json) => ({
   },
 });
 
+
+const conversationParam = {
+  name: 'id', in: 'path', required: true,
+  description: 'UUID da conversa, limitado à conta da API key.',
+  schema: { type: 'string', format: 'uuid' },
+} as const;
+const exportIdParam = {
+  name: 'id', in: 'path', required: true,
+  description: 'UUID do job de exportação, pertencente à mesma conta e API key.',
+  schema: { type: 'string', format: 'uuid' },
+} as const;
+const conversationCursorParam = {
+  name: 'cursor', in: 'query', required: false,
+  description: 'Cursor opaco retornado pela página anterior; repetir até next_cursor ser null.',
+  schema: { type: 'string' },
+} as const;
+const conversationLimitParam = {
+  name: 'limit', in: 'query', required: false,
+  description: 'Itens por página, entre 1 e 200 (listagem: máximo 100).',
+  schema: { type: 'integer', minimum: 1, maximum: 200 },
+} as const;
+const conversationErrors = {
+  '400': { description: 'Filtro, UUID, cursor ou corpo inválido.', content: { 'application/json': { schema: ref('ErrorEnvelope') } } },
+  '401': resp('Unauthorized'),
+  '403': resp('Forbidden'),
+  '404': { description: 'Conversa ou exportação inexistente, ou fora do escopo da chave.', content: { 'application/json': { schema: ref('ErrorEnvelope') } } },
+  '409': { description: 'Já existem duas exportações em andamento para esta chave.', content: { 'application/json': { schema: ref('ErrorEnvelope') } } },
+  '413': { description: 'Corpo da requisição muito grande.', content: { 'application/json': { schema: ref('ErrorEnvelope') } } },
+  '429': resp('RateLimited'),
+  '500': resp('InternalError'),
+} as const;
+const conversationResponse = (description: string) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object', required: ['data'],
+        properties: { data: { type: 'object', additionalProperties: true } },
+      },
+    },
+  },
+});
+
 const periodExample = { from: '2026-10-01', to: '2026-10-07', timezone: 'America/Sao_Paulo' };
 const periodMetricsExample = {
   received: 1240,
@@ -120,6 +163,8 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+      '- `conversations:read` — listagem e históricos completos paginados, incluindo mensagens, mídia e eventos.',
+      '- `conversations:export` — exportação assíncrona de transcrições em bucket privado.',
       '- `GET /me` não exige escopo.',
       '',
       '## Envelope de resposta',
@@ -145,9 +190,107 @@ export const openApiSpec = {
     { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
+    { name: 'Conversas', description: 'Transcrições completas (conversations:read) e exportações (conversations:export).' },
   ],
   security: SECURITY,
   paths: {
+    '/conversations': {
+      get: {
+        tags: ['Conversas'], operationId: 'listPublicConversations',
+        summary: 'Listar conversas da conta (metadados)',
+        description: 'Requer conversations:read. Inclui contato, operador, status, equipe e estado operacional da IA. Não inclui mensagens; use /{id}/messages. Período from/to filtra date_field (created_at por padrão; last_message_at ou closed_at) em calendário de Brasília. Resultado ordenado do mais recente para o mais antigo com cursor.',
+        parameters: [
+          conversationCursorParam, { ...conversationLimitParam, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['all','active','attending','waiting','open','pending','closed'] } },
+          { name: 'date_field', in: 'query', schema: { type: 'string', enum: ['created_at','last_message_at','closed_at'], default: 'created_at' } },
+          { name: 'from', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'to', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'team_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'agent_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'contact_id', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'channel', in: 'query', schema: { type: 'string', enum: ['whatsapp','webchat','instagram','messenger','sms'] } },
+          { name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 } },
+        ],
+        responses: { '200': conversationResponse('Conversas e next_cursor (null quando terminou).'), ...conversationErrors },
+      },
+    },
+    '/conversations/{id}': {
+      get: {
+        tags: ['Conversas'], operationId: 'getPublicConversation',
+        summary: 'Consultar detalhes de uma conversa',
+        description: 'Requer conversations:read. Devolve metadados e informações do operador/contato, sem truncar as mensagens (elas ficam na rota própria).',
+        parameters: [conversationParam],
+        responses: { '200': conversationResponse('Detalhes da conversa.'), ...conversationErrors },
+      },
+    },
+    '/conversations/{id}/messages': {
+      get: {
+        tags: ['Conversas'], operationId: 'getPublicConversationMessages',
+        summary: 'Ler histórico COMPLETO de mensagens, paginado',
+        description: 'Requer conversations:read. Devolve texto INTEGRAL, remetente customer/agent/bot, horário, tipo, template, IDs, status, media_url e metadados. Ordem cronológica ASC. Ler sucessivamente next_cursor até null; limite máximo de 200 mensagens por página. Não limita artificialmente o histórico a mensagens recentes. Bytes das mídias não são retornados; URLs antigas do provedor podem estar expiradas.',
+        parameters: [conversationParam,conversationCursorParam,conversationLimitParam],
+        responses: { '200': conversationResponse('Página de mensagens completas e next_cursor.'), ...conversationErrors },
+      },
+    },
+    '/conversations/{id}/events': {
+      get: {
+        tags: ['Conversas'], operationId: 'getPublicConversationEvents',
+        summary: 'Eventos de fluxo, transferências e alterações de status',
+        description: 'Requer conversations:read. type=flow (padrão), assignment ou status. Cada categoria tem paginação própria. Payload bruto de ferramentas e campos sensíveis de auditoria não são expostos.',
+        parameters: [conversationParam,conversationCursorParam,conversationLimitParam,
+          { name: 'type', in: 'query', schema: { type: 'string', enum: ['flow','assignment','status'] } }],
+        responses: { '200': conversationResponse('Eventos sanitizados e next_cursor.'), ...conversationErrors },
+      },
+    },
+    '/conversations/messages/batch': {
+      post: {
+        tags: ['Conversas'], operationId: 'batchPublicConversationMessages',
+        summary: 'Ler mensagens de até 10 conversas por chamada',
+        description: 'Requer conversations:read. Forneça 1–10 conversation_ids distintos e limit_per_conversation de até 100. next_cursor é independente em cada conversa; envie cursors por UUID para recuperar as páginas seguintes. Se qualquer conversa estiver fora da conta da chave, retorna 404 sem dados parciais.',
+        requestBody: { required: true, content: { 'application/json': {
+          schema: { type: 'object', required: ['conversation_ids'], additionalProperties: false,
+            properties: {
+              conversation_ids: { type: 'array', minItems: 1, maxItems: 10,
+                items: { type: 'string', format: 'uuid' } },
+              limit_per_conversation: { type: 'integer', minimum: 1, maximum: 100, default: 100 },
+              cursors: { type: 'object', additionalProperties: { type: 'string' } },
+            },
+          },
+        } } },
+        responses: { '200': conversationResponse('Páginas de mensagens por conversa.'), ...conversationErrors },
+      },
+    },
+    '/conversations/exports': {
+      post: {
+        tags: ['Conversas'], operationId: 'createPublicConversationExport',
+        summary: 'Solicitar exportação assíncrona de históricos completos',
+        description: 'Requer conversations:export (NÃO basta reports:read/conversations:read). Exige from/to em Brasília. Até 500 conversas por job, 25 MB; exportação paginada por next_cursor quando houver mais. Inclui linhas NDJSON de conversa, mensagens integrais e eventos sanitizados. Arquivo privado, expira após 24h, download assinado por 10 minutos. É obrigatório instalar a migration 194 e agendar o cron.',
+        requestBody: { required: true, content: { 'application/json': {
+          schema: { type: 'object', required: ['from','to'],
+            properties: {
+              from: { type: 'string', format: 'date' }, to: { type: 'string', format: 'date' },
+              date_field: { type: 'string', enum: ['created_at','last_message_at','closed_at'], default: 'created_at' },
+              status: { type: 'string' }, team_id: { type: 'string', format: 'uuid' },
+              agent_id: { type: 'string', format: 'uuid' }, contact_id: { type: 'string', format: 'uuid' },
+              channel: { type: 'string' }, q: { type: 'string', maxLength: 80 },
+              cursor: { type: 'string' },
+              max_conversations: { type: 'integer', minimum: 1, maximum: 500, default: 200 },
+            },
+          },
+        } } },
+        responses: { '202': conversationResponse('Job enfileirado e status_url.'), ...conversationErrors },
+      },
+    },
+    '/conversations/exports/{id}': {
+      get: {
+        tags: ['Conversas'], operationId: 'getPublicConversationExport',
+        summary: 'Acompanhar exportação e obter download privado',
+        description: 'Requer conversations:export. O job só é acessível à API key criadora, mesmo dentro da mesma conta. Quando completed, retorna download_url assinado (10 minutos); após 24h não gera mais link. next_cursor permite criar o próximo job quando houver mais conversas.',
+        parameters: [exportIdParam],
+        responses: { '200': conversationResponse('Status, contagens, erro ou download_url temporário.'), ...conversationErrors },
+      },
+    },
+
     '/me': {
       get: {
         tags: ['Conta'],
@@ -804,6 +947,7 @@ export const openApiSpec = {
           'contacts:read',
           'contacts:write',
           'conversations:read',
+          'conversations:export',
           'campaigns:write',
           'campaigns:read',
           'reports:read',
