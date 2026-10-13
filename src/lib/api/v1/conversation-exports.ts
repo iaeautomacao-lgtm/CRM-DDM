@@ -27,7 +27,7 @@ export function parseExportRequest(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw badRequest('Expected JSON object');
   const body = input as Record<string, unknown>;
   const allowed = new Set([
-    'status','from','to','team_id','agent_id','contact_id','channel','q','cursor','max_conversations',
+    'status','date_field','from','to','team_id','agent_id','contact_id','channel','q','cursor','max_conversations',
   ]);
   if (Object.keys(body).some(k => !allowed.has(k))) throw badRequest('Unknown export filter');
   if (typeof body.from !== 'string' || typeof body.to !== 'string') {
@@ -38,7 +38,7 @@ export function parseExportRequest(input: unknown) {
     throw badRequest('max_conversations must be an integer between 1 and ' + EXPORT_MAX_CONVERSATIONS);
   }
   const params = new URLSearchParams();
-  for (const key of ['status','from','to','team_id','agent_id','contact_id','channel','q','cursor']) {
+  for (const key of ['status','date_field','from','to','team_id','agent_id','contact_id','channel','q','cursor']) {
     if (body[key] === undefined || body[key] === null || body[key] === '') continue;
     if (typeof body[key] !== 'string') throw badRequest('Invalid filter ' + key);
     params.set(key, body[key]);
