@@ -57,6 +57,8 @@ export function SocialChannelsSection({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<SocialChannel | null>(null);
+  // Linha com gravação em andamento: seletores e chave ficam bloqueados.
+  const [savingId, setSavingId] = useState<string | null>(null);
   // Conectar, ligar/desligar, fluxo, equipe, cliente e desconectar: channels.manage (o mesmo de /api/channels/*).
   const canManage = usePermission("channels.manage");
   // Variáveis que faltam no servidor por canal (GET /api/channels).
@@ -86,17 +88,26 @@ export function SocialChannelsSection({
   }, [load]);
 
   async function patch(id: string, body: Partial<SocialChannel>) {
-    const res = await apiFetch(`/api/channels/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(json.error ?? "Falha ao atualizar canal");
-      return;
+    if (savingId) return;
+    setSavingId(id);
+    try {
+      const res = await apiFetch(`/api/channels/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json.error ?? "Falha ao atualizar canal");
+        return;
+      }
+      setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, ...json.channel } : c)));
+      toast.success("Canal atualizado");
+    } catch {
+      toast.error("Falha ao atualizar canal");
+    } finally {
+      setSavingId(null);
     }
-    setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, ...json.channel } : c)));
   }
 
   async function remove(c: SocialChannel) {
@@ -114,11 +125,13 @@ export function SocialChannelsSection({
     options: Option[],
     onChange: (v: string | null) => void,
     label: string,
+    rowId: string,
   ) => (
     <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
-      disabled={!canManage}
+      disabled={!canManage || savingId === rowId}
+      aria-busy={savingId === rowId}
       aria-label={label}
       className="h-8 max-w-[180px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
     >
@@ -235,14 +248,14 @@ export function SocialChannelsSection({
                       </StatusChip>
                     )}
                   </Td>
-                  <Td className="hidden lg:table-cell">{select(c.flow_id, flows, (v) => patch(c.id, { flow_id: v }), `Fluxo — ${c.name}`)}</Td>
-                  <Td className="hidden xl:table-cell">{select(c.team_id, teams, (v) => patch(c.id, { team_id: v }), `Equipe — ${c.name}`)}</Td>
-                  <Td className="hidden lg:table-cell">{select(c.client_id, clients, (v) => patch(c.id, { client_id: v }), `Cliente — ${c.name}`)}</Td>
+                  <Td className="hidden lg:table-cell">{select(c.flow_id, flows, (v) => patch(c.id, { flow_id: v }), `Fluxo — ${c.name}`, c.id)}</Td>
+                  <Td className="hidden xl:table-cell">{select(c.team_id, teams, (v) => patch(c.id, { team_id: v }), `Equipe — ${c.name}`, c.id)}</Td>
+                  <Td className="hidden lg:table-cell">{select(c.client_id, clients, (v) => patch(c.id, { client_id: v }), `Cliente — ${c.name}`, c.id)}</Td>
                   <Td>
                     <Switch
                       checked={c.habilitado}
                       onCheckedChange={(checked) => patch(c.id, { habilitado: checked })}
-                      disabled={!canManage}
+                      disabled={!canManage || savingId === c.id}
                       aria-label={`Ativo — ${c.name}`}
                     />
                   </Td>

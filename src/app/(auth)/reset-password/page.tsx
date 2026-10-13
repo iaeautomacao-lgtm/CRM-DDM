@@ -17,13 +17,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Link2Off } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AUTH_INPUT_CLASS, AUTH_SUBMIT_CLASS, AuthNotice, AuthShell, BackToLogin } from "@/components/auth/auth-shell";
+import { AUTH_INPUT_CLASS, AUTH_SUBMIT_CLASS, AuthFieldError, AuthNotice, AuthShell, BackToLogin } from "@/components/auth/auth-shell";
 import Link from "next/link";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Erros por campo (senha curta / confirmação diferente); `error` fica só para falhas do servidor.
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const focusFirst = () => setTimeout(() => firstFieldRef.current?.focus(), 0);
   const [loading, setLoading] = useState(false);
@@ -62,19 +66,27 @@ export default function ResetPasswordPage() {
     };
   }, [supabase]);
 
+  // A tela troca de estado (verificando → formulário/link inválido): leva o foco ao novo título.
+  useEffect(() => {
+    if (status !== "checking") titleRef.current?.focus();
+  }, [status]);
+
+  const lengthMessage = (value: string) =>
+    value.length > 0 && value.length < MIN_PASSWORD_LENGTH ? PASSWORD_TOO_SHORT_MESSAGE : null;
+  const mismatchMessage = (pw: string, confirm: string) =>
+    confirm.length > 0 && pw !== confirm ? "As senhas não coincidem." : null;
+
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (password !== confirmPassword) {
-      setError("As senhas não coincidem.");
-      focusFirst();
-      return;
-    }
-
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(PASSWORD_TOO_SHORT_MESSAGE);
-      focusFirst();
+    // Erros nos próprios campos (também validados ao sair de cada um).
+    const pwErr = password.length < MIN_PASSWORD_LENGTH ? PASSWORD_TOO_SHORT_MESSAGE : null;
+    const confirmErr = password !== confirmPassword ? "As senhas não coincidem." : null;
+    setPasswordError(pwErr);
+    setConfirmError(confirmErr);
+    if (pwErr || confirmErr) {
+      document.getElementById(pwErr ? "password" : "confirmPassword")?.focus();
       return;
     }
 
@@ -119,7 +131,11 @@ export default function ResetPasswordPage() {
             <Link2Off className="size-5" aria-hidden="true" />
           </span>
         }
-        title={<span role="alert">Este link expirou ou já foi usado</span>}
+        title={
+          <span ref={titleRef} tabIndex={-1} role="alert" className="outline-none">
+            Este link expirou ou já foi usado
+          </span>
+        }
         description="Por segurança, cada link de redefinição vale uma vez e por pouco tempo. Peça um novo link para continuar."
         footer={<BackToLogin />}
       >
@@ -132,7 +148,11 @@ export default function ResetPasswordPage() {
 
   return (
     <AuthShell
-      title="Definir nova senha"
+      title={
+        <span ref={titleRef} tabIndex={-1} className="outline-none">
+          Definir nova senha
+        </span>
+      }
       description="Escolha uma nova senha forte para sua conta"
       notice={
         error ? (
@@ -156,10 +176,21 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
               placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (passwordError) setPasswordError(null);
+              }}
+              onBlur={() => {
+                setPasswordError(lengthMessage(password));
+                if (confirmPassword) setConfirmError(mismatchMessage(password, confirmPassword));
+              }}
               required
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? "reset-error password-hint" : "password-hint"}
+              aria-invalid={passwordError ? true : undefined}
+              aria-describedby={
+                [error ? "reset-error" : null, passwordError ? "password-error" : null, "password-hint"]
+                  .filter(Boolean)
+                  .join(" ")
+              }
               className={cn(AUTH_INPUT_CLASS, "pr-20")}
             />
             <button
@@ -176,6 +207,7 @@ export default function ResetPasswordPage() {
           <span id="password-hint" className="text-xs text-muted-foreground">
             Mínimo de {MIN_PASSWORD_LENGTH} caracteres.
           </span>
+          {passwordError && <AuthFieldError id="password-error">{passwordError}</AuthFieldError>}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -188,12 +220,17 @@ export default function ResetPasswordPage() {
             autoComplete="new-password"
             placeholder="Digite a nova senha novamente"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (confirmError) setConfirmError(null);
+            }}
+            onBlur={() => setConfirmError(mismatchMessage(password, confirmPassword))}
             required
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? "reset-error" : undefined}
+            aria-invalid={confirmError ? true : undefined}
+            aria-describedby={confirmError ? "confirm-error" : undefined}
             className={AUTH_INPUT_CLASS}
           />
+          {confirmError && <AuthFieldError id="confirm-error">{confirmError}</AuthFieldError>}
         </div>
 
         <Button type="submit" disabled={loading} className={cn(AUTH_SUBMIT_CLASS, "mt-1")}>
