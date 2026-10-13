@@ -57,7 +57,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Fluxos", group: "Automação", href: "/flows", keywords: "flow builder" },
   { label: "Automações", group: "Automação", href: "/automations", permission: "automations.view" },
   { label: "Agentes de IA", group: "Automação", href: "/settings?tab=agents", settingsSection: "agents" },
-  { label: "Agente de IA", group: "Automação", href: "/settings?tab=ai", settingsSection: "ai" },
+  { label: "Provedores de IA", group: "Configurações", href: "/settings?tab=ai", settingsSection: "ai", keywords: "openai chave modelo" },
 
   { label: "DDM Intelligence", group: "Inteligência", href: "/inteligencia", keywords: "assistente" },
   { label: "Chave pessoal do MCP", group: "Inteligência", href: "/inteligencia/chaves", permission: "intelligence.personal_key" },
