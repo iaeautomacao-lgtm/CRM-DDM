@@ -301,7 +301,7 @@ function FieldRow({
         disabled={busy}
         onClick={() => onDelete(field)}
         title="Excluir campo"
-        className="shrink-0 text-muted-foreground hover:text-red-400"
+        className="shrink-0 text-muted-foreground hover:text-danger"
       >
         {busy ? (
           <Loader2 className="size-4 animate-spin" />
