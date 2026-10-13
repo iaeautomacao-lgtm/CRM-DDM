@@ -120,3 +120,24 @@ export function flowsKeyEvent(input: FlowsKeyEventInput): AuditEventParams {
     metadata: { channel_id: input.channelId },
   }
 }
+
+export interface MfaChangedEventInput {
+  accountId: string
+  userId: string
+  factorId: string
+  enabled: boolean
+}
+
+/** mfa.enabled / mfa.disabled — o próprio usuário ativou ou removeu o 2FA (revisão de segurança 13/10). Nunca o segredo. */
+export function mfaChangedEvent(input: MfaChangedEventInput): AuditEventParams {
+  return {
+    accountId: input.accountId,
+    eventType: 'action',
+    resourceType: 'member',
+    resourceId: input.userId,
+    resourceLabel: 'Verificação em duas etapas',
+    action: input.enabled ? 'mfa.enabled' : 'mfa.disabled',
+    summary: input.enabled ? 'Verificação em duas etapas ativada' : 'Verificação em duas etapas desativada',
+    metadata: { user_id: input.userId, factor_id: input.factorId },
+  }
+}

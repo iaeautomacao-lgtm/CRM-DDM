@@ -121,10 +121,16 @@ describe('SW-5: teto de corpo e JSON inválido (depois da autenticação)', () =
 describe('SW-4: segredo global legado só com a flag e com alarme', () => {
   const legacy = () => new Request(URL_BASE, { method: 'POST', headers: { 'x-webhook-secret': 'test-secret' }, body: messageAny() })
 
-  it('flag desligada (padrão): 401, sem consultar o banco', async () => {
+  it('flag desligada (padrão): 401, sem consultar o banco; a recusa vai para system_logs (revisão de segurança 13/10)', async () => {
+    const { __resetWebhookRejectionLogForTests } = await import('@/lib/security/webhook-rejection-log')
+    __resetWebhookRejectionLogForTests()
     expect((await POST(legacy())).status).toBe(401)
     expect(mocks.admin).not.toHaveBeenCalled()
-    expect(mocks.writeLog).not.toHaveBeenCalled()
+    expect(mocks.writeLog).toHaveBeenCalledTimes(1)
+    expect(mocks.writeLog).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'webhook_waha', event: 'webhook_auth_rejected', payload: { reason: 'invalid_legacy_secret' } }),
+    )
+    expect(JSON.stringify(mocks.writeLog.mock.calls)).not.toContain('test-secret')
   })
 
   it('flag ligada: aceita, mas grava waha_legacy_secret_used (canal e sessão) — 1× por sessão a cada 10 min', async () => {

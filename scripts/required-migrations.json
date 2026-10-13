@@ -398,7 +398,7 @@
       "kind": "registry"
     },
     {
-      "version": "329_revoke_anon_wacrm",
+      "version": "328_trigger_functions_search_path",
       "kind": "registry"
     },
     {
@@ -428,7 +428,20 @@
       "kind": "registry"
     },
     {
+      "version": "335_contacts_phone_invalid",
+      "kind": "registry"
+    },
+    {
+      "version": "335b_contacts_phone_invalid_idx",
+      "kind": "index",
+      "index": "idx_contacts_phone_invalid"
+    },
+    {
       "version": "336_campaign_template_pause",
+      "kind": "registry"
+    },
+    {
+      "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
     }
   ]

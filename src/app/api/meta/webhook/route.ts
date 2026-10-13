@@ -3,6 +3,7 @@ import { registerAuditActor } from '@/lib/audit/context'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
+import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import { parseSocialWebhook } from '@/lib/channels/inbound'
 import { ingestSocialEvent } from '@/lib/channels/ingest'
 
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
     isWellFormedHubSignature(signature) &&
     candidates.some((candidate) => verifyMetaWebhookSignature(rawBody, signature, candidate))
   if (!authentic) {
+    logWebhookRejection('webhook_meta_social', isWellFormedHubSignature(signature) ? 'invalid_signature' : 'malformed_signature')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -64,6 +66,7 @@ export async function POST(request: Request) {
       ? process.env.INSTAGRAM_APP_SECRET ?? process.env.META_APP_SECRET
       : process.env.META_APP_SECRET
   if (!secret || !verifyMetaWebhookSignature(rawBody, signature, secret)) {
+    logWebhookRejection('webhook_meta_social', secret ? 'invalid_signature' : 'missing_secret', { channel: body.object ?? null })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
