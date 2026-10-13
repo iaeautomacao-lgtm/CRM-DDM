@@ -21,12 +21,24 @@
 --   SELECT archived_at FROM wacrm.pipelines LIMIT 1;
 --   SELECT version FROM wacrm.schema_migrations WHERE version = '340_pipeline_archive';
 -- ORDEM: antes ou depois do deploy (sem as RPCs o botão "Arquivar" do front falha; nada mais muda). Depois da 305. Idempotente.
--- ROLLBACK:
+-- ROLLBACK (executável: policies anteriores recriadas ANTES do DROP COLUMN, que as policies novas referenciam; trigger antes da função):
 --   BEGIN;
---   UPDATE wacrm.pipelines SET archived_at = NULL, archived_by = NULL;   -- (desarquiva tudo antes, senão negócios somem do RLS)
---   -- recriar deals_select / pipeline_stages_select da 305 e pipelines_delete da 017 (is_account_member(account_id, 'admin'))
---   DROP FUNCTION IF EXISTS wacrm.archive_pipeline(uuid), wacrm.restore_pipeline(uuid), wacrm.audit_pipeline_deleted();
+--   UPDATE wacrm.pipelines SET archived_at = NULL, archived_by = NULL;   -- desarquiva tudo antes, senão negócios somem do RLS
+--   DROP POLICY IF EXISTS deals_select ON wacrm.deals;
+--   CREATE POLICY deals_select ON wacrm.deals FOR SELECT USING (
+--     wacrm.is_account_member(account_id) AND (SELECT wacrm.has_perm('pipelines.view'))
+--   );
+--   DROP POLICY IF EXISTS pipeline_stages_select ON wacrm.pipeline_stages;
+--   CREATE POLICY pipeline_stages_select ON wacrm.pipeline_stages FOR SELECT USING (
+--     EXISTS (SELECT 1 FROM wacrm.pipelines p WHERE p.id = pipeline_stages.pipeline_id AND wacrm.is_account_member(p.account_id))
+--     AND (SELECT wacrm.has_perm('pipelines.view'))
+--   );
+--   DROP POLICY IF EXISTS pipelines_delete ON wacrm.pipelines;
+--   CREATE POLICY pipelines_delete ON wacrm.pipelines FOR DELETE USING (wacrm.is_account_member(account_id, 'admin'));
 --   DROP TRIGGER IF EXISTS trg_audit_pipeline_deleted ON wacrm.pipelines;
+--   DROP FUNCTION IF EXISTS wacrm.archive_pipeline(uuid);
+--   DROP FUNCTION IF EXISTS wacrm.restore_pipeline(uuid);
+--   DROP FUNCTION IF EXISTS wacrm.audit_pipeline_deleted();
 --   DELETE FROM wacrm.role_permissions WHERE permission = 'pipelines.delete';
 --   DELETE FROM wacrm.permission_catalog WHERE key = 'pipelines.delete';
 --   ALTER TABLE wacrm.pipelines DROP COLUMN IF EXISTS archived_at, DROP COLUMN IF EXISTS archived_by;

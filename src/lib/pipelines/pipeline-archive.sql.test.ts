@@ -138,3 +138,56 @@ describe("migration 340 — arquivamento de funil", { timeout: 120_000 }, () => 
     expect((await db.query(`SELECT 1 FROM wacrm.schema_migrations WHERE version = '340_pipeline_archive'`)).rows).toHaveLength(1);
   });
 });
+
+describe("migration 340 — rollback do cabeçalho", { timeout: 120_000 }, () => {
+  it("o bloco ROLLBACK do cabeçalho executa: some coluna/RPCs/trigger/permissão, policies anteriores voltam, registro sai", async () => {
+    const header = mig("340_pipeline_archive.sql").split("BEGIN;\n\nDO $$")[0];
+    const start = header.indexOf("-- ROLLBACK");
+    const block = header
+      .slice(start)
+      .split("\n")
+      .slice(1)
+      .map((l) => l.replace(/^--   ?/, ""))
+      .filter((l) => !/^=+$/.test(l.replace(/^-- /, "")) && !l.startsWith("--"))
+      .join("\n");
+    expect(block).toMatch(/^BEGIN;/);
+    expect(block.trim()).toMatch(/COMMIT;$/);
+
+    const d = new PGlite();
+    await d.exec(`
+      CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
+      CREATE SCHEMA wacrm; CREATE SCHEMA auth;
+      CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT NULL::uuid $$;
+      CREATE FUNCTION wacrm.current_account_id() RETURNS uuid LANGUAGE sql AS $$ SELECT NULL::uuid $$;
+      CREATE FUNCTION wacrm.is_account_member(p_account uuid, p_role text DEFAULT 'viewer') RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
+      CREATE FUNCTION wacrm.has_perm(p text) RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
+      CREATE FUNCTION wacrm.audit_write(uuid, text, text, uuid, text, text, text, jsonb, jsonb) RETURNS void LANGUAGE sql AS $$ SELECT $$;
+      CREATE TABLE wacrm.schema_migrations (version text PRIMARY KEY);
+      CREATE TABLE wacrm.permission_catalog (key text PRIMARY KEY, label text, description text, group_name text, scope text, owner_only boolean, grantable boolean, depends_on text[], sort int);
+      INSERT INTO wacrm.permission_catalog (key) VALUES ('pipelines.view'), ('pipelines.manage');
+      CREATE TABLE wacrm.account_roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid, key text);
+      CREATE TABLE wacrm.role_permissions (role_id uuid, permission text, PRIMARY KEY (role_id, permission));
+      INSERT INTO wacrm.account_roles (account_id, key) VALUES (NULL, 'owner');
+      CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, name text NOT NULL);
+      CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id) ON DELETE CASCADE, name text);
+      CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id) ON DELETE CASCADE);
+    `);
+    await d.exec(mig("340_pipeline_archive.sql"));
+    await d.exec(block);
+
+    const q = async (sql: string) => (await d.query<Record<string, unknown>>(sql)).rows;
+    expect(await q(`SELECT 1 FROM information_schema.columns WHERE table_schema='wacrm' AND table_name='pipelines' AND column_name IN ('archived_at','archived_by')`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname='wacrm' AND p.proname IN ('archive_pipeline','restore_pipeline','audit_pipeline_deleted')`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_pipeline_deleted'`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM wacrm.permission_catalog WHERE key = 'pipelines.delete'`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM wacrm.role_permissions WHERE permission = 'pipelines.delete'`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM wacrm.schema_migrations WHERE version = '340_pipeline_archive'`)).toHaveLength(0);
+    const pol = await q(`SELECT policyname, qual FROM pg_policies WHERE schemaname='wacrm' AND policyname IN ('deals_select','pipeline_stages_select','pipelines_delete') ORDER BY policyname`);
+    expect(pol).toHaveLength(3);
+    for (const p of pol) expect(String(p.qual)).not.toContain("archived_at");
+    expect(String(pol.find((p) => p.policyname === "pipelines_delete")!.qual)).toContain("admin");
+    // reaplicar depois do rollback continua funcionando
+    await d.exec(mig("340_pipeline_archive.sql"));
+    await d.close();
+  });
+});
