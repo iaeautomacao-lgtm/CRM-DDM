@@ -30,6 +30,19 @@ import type { ChannelConfig } from "./types";
 const POLL_MS = 5000;
 const QR_STATUSES = new Set(["SCAN_QR", "SCAN_QR_CODE", "STARTING"]);
 
+// Rótulo só de exibição; o valor lógico (status) não muda.
+const STATUS_LABELS: Record<string, string> = {
+  STARTING: "Iniciando a sessão…",
+  SCAN_QR: "Aguardando a leitura do QR code",
+  SCAN_QR_CODE: "Aguardando a leitura do QR code",
+  WORKING: "Conectado",
+  STOPPED: "Sessão parada",
+  FAILED: "Falha na sessão",
+};
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
 export function ConnectWahaDialog({
   config,
   open,
@@ -170,7 +183,7 @@ export function ConnectWahaDialog({
                 />
               )}
             </div>
-            <p role="status" aria-live="polite" className="text-center text-xs text-muted-foreground">Status: {status}</p>
+            <p role="status" aria-live="polite" className="text-center text-xs text-muted-foreground">Status: {statusLabel(status)}</p>
             <Button variant="outline" className="w-full" onClick={() => setShowPairing(true)}>
               <KeyRound className="size-4" />
               Usar código de pareamento

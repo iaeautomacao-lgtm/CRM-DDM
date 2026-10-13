@@ -39,7 +39,7 @@ import {
 
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AUTH_SUBMIT_CLASS, AuthShell } from '@/components/auth/auth-shell';
+import { AUTH_SUBMIT_CLASS, AuthNotice, AuthShell } from '@/components/auth/auth-shell';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -113,6 +113,9 @@ export default function JoinPage() {
   // step. Surface a blocking modal that walks them through it.
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  // Falhas ao aceitar / sair ficam visíveis na tela (aviso persistente), não só em toast.
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   // Extracted so the "Try again" button on the server_error card
   // can re-run the same logic without remounting the component.
@@ -171,6 +174,7 @@ export default function JoinPage() {
   const handleAccept = useCallback(async () => {
     if (!token) return;
     setAccepting(true);
+    setAcceptError(null);
     try {
       const res = await apiFetch(`/api/invitations/${encodeURIComponent(token)}/redeem`,
         { method: 'POST' },
@@ -189,7 +193,7 @@ export default function JoinPage() {
         if (res.status === 409) {
           setConflictMessage('Você já está em outra organização. Entre com outro e-mail para participar desta.');
         } else {
-          toast.error(redeemErrorMessage(res.status));
+          setAcceptError(redeemErrorMessage(res.status));
         }
         setAccepting(false);
         return;
@@ -200,13 +204,14 @@ export default function JoinPage() {
       window.location.href = '/dashboard';
     } catch (err) {
       console.error('[join] redeem error:', err);
-      toast.error('Não foi possível falar com o servidor.');
+      setAcceptError('Não foi possível falar com o servidor. Tente de novo em instantes.');
       setAccepting(false);
     }
   }, [token]);
 
   const handleSignOutAndRetry = useCallback(async () => {
     setSigningOut(true);
+    setSignOutError(null);
     try {
       await createClient().auth.signOut();
       // Hard reload so the new auth state propagates everywhere
@@ -215,7 +220,7 @@ export default function JoinPage() {
       window.location.reload();
     } catch (err) {
       console.error('[join] sign-out error:', err);
-      toast.error('Não foi possível sair. Atualize a página e tente de novo.');
+      setSignOutError('Não foi possível sair. Atualize a página e tente de novo.');
       setSigningOut(false);
     }
   }, []);
@@ -288,7 +293,12 @@ export default function JoinPage() {
   if (authedUserId) {
     return (
       <>
-        <AuthShell icon={inviteIcon} title={inviteTitle} description="Confira os dados e aceite para entrar na organização.">
+        <AuthShell
+          icon={inviteIcon}
+          title={inviteTitle}
+          description="Confira os dados e aceite para entrar na organização."
+          notice={acceptError ? <AuthNotice tone="bad">{acceptError}</AuthNotice> : undefined}
+        >
           {inviteDetails}
           <div className="flex flex-col gap-2.5">
             <Button onClick={handleAccept} disabled={accepting} className={AUTH_SUBMIT_CLASS}>
@@ -330,6 +340,7 @@ export default function JoinPage() {
               Para entrar em <span className="font-semibold text-foreground">{peek.account_name}</span>, saia e entre com outro
               e-mail. O link do convite continua valendo enquanto não expirar.
             </p>
+            {signOutError && <AuthNotice tone="bad">{signOutError}</AuthNotice>}
             <DialogFooter>
               <Button variant="outline" onClick={() => setConflictMessage(null)}>
                 Continuar conectado

@@ -87,9 +87,25 @@ export function EditChannelDialog({
   // Blank on submit means "keep the value already in the DB" (see
   // route.ts's POST handler).
   const [appSecret, setAppSecret] = useState("");
+  // Erros inline dos obrigatórios (sessão, URL, ID do número).
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  function clearFieldError(key: string) {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function focusField(id: string) {
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }
 
   useEffect(() => {
     if (!config) return;
+    setFieldErrors({});
     setFlowId(config.flow_id ?? NO_FLOW);
     setTeamId(config.team_id ?? NO_TEAM);
     setReceptivo(config.receptivo);
@@ -172,12 +188,12 @@ export function EditChannelDialog({
   async function handleSaveWaha() {
     if (!config) return;
     const session = normalizeSessionName(wahaSession);
-    if (!session) {
-      toast.error("Nome da sessão é obrigatório");
-      return;
-    }
-    if (!wahaUrl.trim()) {
-      toast.error("URL do WAHA é obrigatória");
+    const errs: Record<string, string> = {};
+    if (!session) errs.session = "Nome da sessão é obrigatório";
+    if (!wahaUrl.trim()) errs.url = "URL do WAHA é obrigatória";
+    setFieldErrors(errs);
+    if (errs.session || errs.url) {
+      focusField(errs.session ? "edit-waha-session" : "edit-waha-url");
       return;
     }
     setSaving(true);
@@ -208,9 +224,11 @@ export function EditChannelDialog({
   async function handleSaveMeta() {
     if (!config) return;
     if (!phoneNumberId.trim()) {
-      toast.error("Phone Number ID é obrigatório");
+      setFieldErrors({ phoneId: "Número de telefone ID é obrigatório" });
+      focusField("edit-meta-phone-id");
       return;
     }
+    setFieldErrors({});
     setSaving(true);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
@@ -257,18 +275,36 @@ export function EditChannelDialog({
               <Input
                 id="edit-waha-session"
                 value={wahaSession}
-                onChange={(e) => setWahaSession(e.target.value)}
+                onChange={(e) => {
+                  setWahaSession(e.target.value);
+                  clearFieldError("session");
+                }}
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.session ? true : undefined}
+                aria-describedby={fieldErrors.session ? "edit-waha-session-error" : undefined}
               />
+              {fieldErrors.session && (
+                <p id="edit-waha-session-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.session}</p>
+              )}
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-waha-url">URL do WAHA</Label>
               <Input
                 id="edit-waha-url"
                 value={wahaUrl}
-                onChange={(e) => setWahaUrl(e.target.value)}
+                onChange={(e) => {
+                  setWahaUrl(e.target.value);
+                  clearFieldError("url");
+                }}
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.url ? true : undefined}
+                aria-describedby={fieldErrors.url ? "edit-waha-url-error" : undefined}
               />
+              {fieldErrors.url && (
+                <p id="edit-waha-url-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.url}</p>
+              )}
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-waha-key">API Key</Label>
@@ -377,9 +413,18 @@ export function EditChannelDialog({
               <Input
                 id="edit-meta-phone-id"
                 value={phoneNumberId}
-                onChange={(e) => setPhoneNumberId(e.target.value)}
+                onChange={(e) => {
+                  setPhoneNumberId(e.target.value);
+                  clearFieldError("phoneId");
+                }}
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.phoneId ? true : undefined}
+                aria-describedby={fieldErrors.phoneId ? "edit-meta-phone-id-error" : undefined}
               />
+              {fieldErrors.phoneId && (
+                <p id="edit-meta-phone-id-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.phoneId}</p>
+              )}
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-meta-waba-id">WABA ID</Label>

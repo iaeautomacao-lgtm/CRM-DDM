@@ -4,7 +4,7 @@ import { Suspense, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { translateAuthError } from "@/lib/auth/auth-errors";
+import { INVALID_CREDENTIALS_MESSAGE, translateAuthError } from "@/lib/auth/auth-errors";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import { isPasswordResetSuccess } from "@/lib/auth/recovery-link";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,8 @@ function LoginPageInner() {
       ? "Não foi possível validar o link. Solicite um novo link de acesso ou recuperação."
       : null
   );
+  // Só erro de credencial marca os campos como inválidos (rede/limite/link não).
+  const credentialError = error === INVALID_CREDENTIALS_MESSAGE;
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
@@ -128,7 +130,7 @@ function LoginPageInner() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            aria-invalid={error ? true : undefined}
+            aria-invalid={credentialError ? true : undefined}
             aria-describedby={error ? "login-error" : undefined}
             className={AUTH_INPUT_CLASS}
           />
@@ -155,7 +157,7 @@ function LoginPageInner() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              aria-invalid={error ? true : undefined}
+              aria-invalid={credentialError ? true : undefined}
               aria-describedby={error ? "login-error" : undefined}
               className={cn(AUTH_INPUT_CLASS, "pr-20")}
             />

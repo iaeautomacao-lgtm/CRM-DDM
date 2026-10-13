@@ -123,6 +123,8 @@ export function NewChannelDialog({
   const [accessToken, setAccessToken] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [appSecretError, setAppSecretError] = useState<string | null>(null);
+  // Erros inline dos demais obrigatórios (sessão, URL, ID do número, token).
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [verifyToken, setVerifyToken] = useState(DEFAULT_VERIFY_TOKEN);
   // "Configurações avançadas" — App Secret + ID WABA start collapsed so
   // the main form only shows what's strictly needed to get going.
@@ -157,8 +159,22 @@ export function NewChannelDialog({
     setAccessToken("");
     setAppSecret("");
     setAppSecretError(null);
+    setFieldErrors({});
     setVerifyToken(DEFAULT_VERIFY_TOKEN);
     setAdvancedOpen(false);
+  }
+
+  function clearFieldError(key: string) {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function focusField(id: string) {
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
   }
 
   function handleOpenChange(next: boolean) {
@@ -173,12 +189,12 @@ export function NewChannelDialog({
 
   async function handleCreateWaha() {
     const session = normalizeSessionName(wahaSession);
-    if (!session) {
-      toast.error("Nome da sessão é obrigatório");
-      return;
-    }
-    if (!wahaUrl.trim()) {
-      toast.error("URL do WAHA é obrigatória");
+    const errs: Record<string, string> = {};
+    if (!session) errs.session = "Nome da sessão é obrigatório";
+    if (!wahaUrl.trim()) errs.url = "URL do WAHA é obrigatória";
+    setFieldErrors(errs);
+    if (errs.session || errs.url) {
+      focusField(errs.session ? "new-waha-session" : "new-waha-url");
       return;
     }
     setSaving(true);
@@ -209,24 +225,23 @@ export function NewChannelDialog({
   }
 
   async function handleCreateMeta() {
-    if (!phoneNumberId.trim()) {
-      toast.error("Phone Number ID é obrigatório");
-      return;
-    }
-    if (!accessToken.trim()) {
-      toast.error("Access Token é obrigatório");
-      return;
-    }
-    if (!appSecret.trim()) {
+    const errs: Record<string, string> = {};
+    if (!phoneNumberId.trim()) errs.phoneId = "Número de telefone ID é obrigatório";
+    if (!accessToken.trim()) errs.token = "Token de acesso é obrigatório";
+    setFieldErrors(errs);
+    const needsSecret = !appSecret.trim();
+    if (needsSecret) {
       // Lives inside "Configurações avançadas" — force it open so the
-      // error (and the field itself) is actually visible, not just a
-      // toast pointing at a collapsed section.
+      // error (and the field itself) is actually visible.
       setAdvancedOpen(true);
       setAppSecretError("App Secret é obrigatório");
-      toast.error("App Secret é obrigatório");
+    } else {
+      setAppSecretError(null);
+    }
+    if (errs.phoneId || errs.token || needsSecret) {
+      focusField(errs.phoneId ? "new-meta-phone-id" : errs.token ? "new-meta-token" : "new-meta-app-secret");
       return;
     }
-    setAppSecretError(null);
     setSaving(true);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
@@ -326,10 +341,19 @@ export function NewChannelDialog({
               <Input
                 id="new-waha-session"
                 value={wahaSession}
-                onChange={(e) => setWahaSession(e.target.value)}
+                onChange={(e) => {
+                  setWahaSession(e.target.value);
+                  clearFieldError("session");
+                }}
                 placeholder="ex.: sessaojoao"
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.session ? true : undefined}
+                aria-describedby={fieldErrors.session ? "new-waha-session-error" : undefined}
               />
+              {fieldErrors.session && (
+                <p id="new-waha-session-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.session}</p>
+              )}
               {wahaMode === "existing" && (
                 <p className="text-[10px] text-muted-foreground">
                   A sessão deve estar ativa (WORKING) no servidor WAHA.
@@ -347,10 +371,19 @@ export function NewChannelDialog({
               <Input
                 id="new-waha-url"
                 value={wahaUrl}
-                onChange={(e) => setWahaUrl(e.target.value)}
+                onChange={(e) => {
+                  setWahaUrl(e.target.value);
+                  clearFieldError("url");
+                }}
                 placeholder="https://waha.exemplo.com"
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.url ? true : undefined}
+                aria-describedby={fieldErrors.url ? "new-waha-url-error" : undefined}
               />
+              {fieldErrors.url && (
+                <p id="new-waha-url-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.url}</p>
+              )}
             </div>
             <div className="space-y-1">
               <FieldLabel
@@ -410,9 +443,18 @@ export function NewChannelDialog({
               <Input
                 id="new-meta-phone-id"
                 value={phoneNumberId}
-                onChange={(e) => setPhoneNumberId(e.target.value)}
+                onChange={(e) => {
+                  setPhoneNumberId(e.target.value);
+                  clearFieldError("phoneId");
+                }}
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.phoneId ? true : undefined}
+                aria-describedby={fieldErrors.phoneId ? "new-meta-phone-id-error" : undefined}
               />
+              {fieldErrors.phoneId && (
+                <p id="new-meta-phone-id-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.phoneId}</p>
+              )}
             </div>
             <div className="space-y-1">
               <FieldLabel
@@ -425,9 +467,18 @@ export function NewChannelDialog({
                 id="new-meta-token"
                 type="password"
                 value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
+                onChange={(e) => {
+                  setAccessToken(e.target.value);
+                  clearFieldError("token");
+                }}
                 disabled={saving}
+                aria-required
+                aria-invalid={fieldErrors.token ? true : undefined}
+                aria-describedby={fieldErrors.token ? "new-meta-token-error" : undefined}
               />
+              {fieldErrors.token && (
+                <p id="new-meta-token-error" role="alert" className="text-[11px] text-destructive">{fieldErrors.token}</p>
+              )}
             </div>
             <div className="space-y-1">
               <FieldLabel
@@ -495,10 +546,11 @@ export function NewChannelDialog({
                       if (appSecretError) setAppSecretError(null);
                     }}
                     aria-invalid={appSecretError !== null}
+                    aria-describedby={appSecretError ? "new-meta-app-secret-error" : undefined}
                     disabled={saving}
                   />
                   {appSecretError && (
-                    <p className="text-[11px] text-destructive">{appSecretError}</p>
+                    <p id="new-meta-app-secret-error" role="alert" className="text-[11px] text-destructive">{appSecretError}</p>
                   )}
                 </div>
               </div>
