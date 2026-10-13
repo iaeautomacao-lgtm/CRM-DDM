@@ -81,6 +81,15 @@
   --color-bubble-bot-border: var(--bubble-bot-border);
   --color-scrim: var(--scrim);
   --shadow-overlay: var(--shadow-overlay);
+  /* Design System DDM: elevação sm/md/lg + sombra laranja do botão principal
+   * (shadow-sm/md/lg/orange), campos com canto 12px (rounded-field) e cards
+   * com 20px (rounded-card). Botões e chips em pílula usam rounded-full. */
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+  --shadow-orange: 0 12px 30px rgba(255, 87, 6, 0.28);
+  --radius-field: 12px;
+  --radius-card: 20px;
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -144,7 +153,7 @@ html[data-mode="dark"] {
   --border: #262b31;
   --border-soft: #1e2227;
   --border-strong: #363c45;
-  --input: #363c45;
+  --input: #626c7b;
   --surface-3: #252a31;
   --surface-hover: #1e2227;
   --selected: #1f2329;
@@ -161,7 +170,11 @@ html[data-mode="dark"] {
   --bubble-in-border: #262b31;
   --bubble-bot: #181b1f;
   --bubble-bot-border: #2c3138;
-  --scrim: rgba(0, 0, 0, 0.45);
+  --scrim: rgba(0, 0, 0, 0.55);
+  /* Elevação do DS no escuro: mesmas camadas, sombra mais densa para aparecer no fundo escuro. */
+  --elev-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --elev-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
   --shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -177,53 +190,61 @@ html[data-mode="dark"] {
 }
 
 html[data-mode="light"] {
-  --background: #f5f5f3;
-  --foreground: #18191b;
-  --foreground-2: #4a4e55;
+  /* Design System DDM (13/10): tinta #1F1F1F, cinzas #939598/#BFBFC1/#E8E8EC,
+   * superfície alternativa #F4F4F6 e fundo creme #FAF7F4. Onde a cor do DS não
+   * passa AA como texto (cinza #939598 = 3:1, semânticas), o token de texto usa
+   * o tom mais próximo que passa 4,5:1 no branco e no creme; o DS fica nos
+   * fundos (soft) e ícones. Borda de campo: 3:1 (WCAG 1.4.11). */
+  --background: #faf7f4;
+  --foreground: #1f1f1f;
+  --foreground-2: #3d3d3d;
   --card: #ffffff;
-  --card-2: #f4f4f2;
-  --card-foreground: #18191b;
+  --card-2: #f4f4f6;
+  --card-foreground: #1f1f1f;
   --popover: #ffffff;
-  --popover-foreground: #18191b;
-  --secondary: #f4f4f2;
-  --secondary-foreground: #18191b;
-  --muted: #f4f4f2;
-  --muted-foreground: #686d75;
-  --accent: #f2f2ef;
-  --accent-foreground: #18191b;
-  --destructive: #c42b24;
-  --border: #e5e5e2;
-  --border-soft: #efefec;
-  --border-strong: #d2d2cd;
-  --input: #d2d2cd;
-  --surface-3: #e9e9e6;
-  --surface-hover: #f2f2ef;
-  --selected: #f6f1ee;
-  --success: #17804a;
-  --success-soft: #e7f5ec;
-  --warning: #9a5b00;
-  --warning-soft: #fdf4e3;
-  --warning-border: #f3d9a6;
-  --info: #2d5cc0;
-  --info-soft: #eaf0fc;
-  --danger-soft: #fcebea;
-  --neutral-soft: #efefec;
+  --popover-foreground: #1f1f1f;
+  --secondary: #f4f4f6;
+  --secondary-foreground: #1f1f1f;
+  --muted: #f4f4f6;
+  --muted-foreground: #6b6d71;
+  --accent: #f4f4f6;
+  --accent-foreground: #1f1f1f;
+  --destructive: #b02a24;
+  --border: #e8e8ec;
+  --border-soft: #f0f0f3;
+  --border-strong: #bfbfc1;
+  --input: #8a8c90;
+  --surface-3: #e8e8ec;
+  --surface-hover: #f4f4f6;
+  --selected: #fff3ec;
+  --success: #1a7443;
+  --success-soft: rgba(43, 174, 102, 0.12);
+  --warning: #8a6100;
+  --warning-soft: rgba(232, 161, 0, 0.14);
+  --warning-border: rgba(232, 161, 0, 0.28);
+  --info: #1860b5;
+  --info-soft: rgba(31, 122, 224, 0.12);
+  --danger-soft: rgba(216, 54, 47, 0.12);
+  --neutral-soft: #f4f4f6;
   --bubble-in: #ffffff;
-  --bubble-in-border: #e5e5e2;
-  --bubble-bot: #f4f4f2;
-  --bubble-bot-border: #e1e1dd;
-  --scrim: rgba(24, 25, 27, 0.25);
-  --shadow-overlay: 0 16px 40px rgba(20, 16, 12, 0.12), 0 1px 2px rgba(20, 16, 12, 0.06);
+  --bubble-in-border: #e8e8ec;
+  --bubble-bot: #f4f4f6;
+  --bubble-bot-border: #e8e8ec;
+  --scrim: rgba(20, 16, 12, 0.45);
+  --elev-sm: 0 1px 2px rgba(20, 16, 12, 0.06);
+  --elev-md: 0 8px 24px rgba(20, 16, 12, 0.08);
+  --elev-lg: 0 24px 60px rgba(20, 16, 12, 0.12);
+  --shadow-overlay: var(--elev-lg);
   --chart-2: oklch(0.6 0.1 260);
   --chart-3: oklch(0.7 0.06 260);
   --chart-4: oklch(0.8 0.04 260);
   --chart-5: oklch(0.87 0.03 260);
   --radius: 0.375rem;
-  --sidebar: #fafaf9;
-  --sidebar-foreground: #18191b;
-  --sidebar-accent: #f6f1ee;
-  --sidebar-accent-foreground: #18191b;
-  --sidebar-border: #e5e5e2;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1f1f1f;
+  --sidebar-accent: #fff3ec;
+  --sidebar-accent-foreground: #1f1f1f;
+  --sidebar-border: #e8e8ec;
   color-scheme: light;
 }
 
@@ -420,6 +441,8 @@ html[data-mode="light"][data-theme="ddm"] {
 
 @theme {
   --ease-ddm: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* ease-out do Tailwind passa a ser a curva do DS (durações 140/240/420ms). */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-ddm-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
 
   --animate-ddm-up: ddm-up 0.42s var(--ease-ddm) both;
