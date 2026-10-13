@@ -499,6 +499,10 @@
     {
       "version": "352_pipelines_delete_owner_only",
       "kind": "registry"
+    },
+    {
+      "version": "353_close_public_schema_legacy",
+      "kind": "registry"
     }
   ]
 }
