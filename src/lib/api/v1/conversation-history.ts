@@ -70,7 +70,7 @@ export async function listConversations(db: SupabaseClient, accountId: string, p
   if (snapshotAt) q=q.lte('created_at',snapshotAt);
   if (cursor) q=q.or(`created_at.gt.${cursor.at},and(created_at.eq.${cursor.at},id.gt.${cursor.id})`);
   const {data,error}=await q; if(error)throw error;
-  const records=(data??[]) as Array<{created_at:string;id:string}>;
+  const records=(data??[]) as Array<{created_at:string;id:string;[key:string]:unknown}>;
   const page=records.slice(0,limit);
   const last=page[page.length-1];
   return { items:page, next_cursor:records.length>limit&&last?cursorEncode(last.created_at,last.id):null };
@@ -85,7 +85,7 @@ async function loadVerifiedMessages(db: SupabaseClient, accountId: string, conve
     .order('created_at',{ascending:true}).order('id',{ascending:true}).limit(limit+1);
   if (cursor) q=q.or(`created_at.gt.${cursor.at},and(created_at.eq.${cursor.at},id.gt.${cursor.id})`);
   const {data,error}=await q;if(error)throw error;
-  const items=(data??[]) as Array<{created_at:string;id:string}>;
+  const items=(data??[]) as Array<{created_at:string;id:string;[key:string]:unknown}>;
   const page=items.slice(0,limit),last=page[page.length-1];
   const safeItems=page.map((message) => ({
     ...message,
