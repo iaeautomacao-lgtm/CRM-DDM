@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { listConversations, listMessages, cursorEncode } from './conversation-history';
 import { EXPORT_BUCKET, asParams, type ExportJob } from './conversation-exports';
 
-const MAX_CONVERSATION_PAGES=12;
+const MAX_CONVERSATION_PAGES=50;
 const MAX_MESSAGES_PER_PART=1500;
 const MAX_TIME_MS=19000;
 const MAX_PART_BYTES=40*1024*1024;
