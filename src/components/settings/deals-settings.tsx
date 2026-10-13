@@ -17,6 +17,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { SettingsPanelHead } from "./settings-panel-head";
 
 interface StageOption {
@@ -50,6 +51,7 @@ export function DealsSettings() {
   const [rules, setRules] = useState<AgingRule[]>([]);
   const [loadingRules, setLoadingRules] = useState(true);
   const [runningRules, setRunningRules] = useState(false);
+  const [deleteRuleId, setDeleteRuleId] = useState<string | null>(null);
 
   // Form states
   const [sourceStageId, setSourceStageId] = useState("");
@@ -393,7 +395,7 @@ export function DealsSettings() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => handleDeleteRule(rule.id)}
+                          onClick={() => setDeleteRuleId(rule.id)}
                           className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10 shrink-0"
                           title="Remover regra"
                         >
@@ -408,6 +410,19 @@ export function DealsSettings() {
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={deleteRuleId !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteRuleId(null);
+        }}
+        title="Excluir esta regra?"
+        description="A regra de automação deixa de valer e os negócios não serão mais movidos por ela. Esta ação não pode ser desfeita."
+        confirmLabel="Excluir regra"
+        onConfirm={async () => {
+          if (deleteRuleId) await handleDeleteRule(deleteRuleId);
+        }}
+      />
     </section>
   );
 }

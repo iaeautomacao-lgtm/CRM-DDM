@@ -14,14 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { cn } from '@/lib/utils';
 import type { Tag } from '@/types';
 
@@ -143,6 +136,7 @@ export function TagManager() {
     } catch (err) {
       console.error('Delete error:', err);
       toast.error('Não foi possível excluir a tag');
+      throw err; // mantém o diálogo aberto
     } finally {
       setDeleting(false);
     }
@@ -250,40 +244,15 @@ export function TagManager() {
       </CardContent>
 
       {/* Delete confirmation */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Excluir tag</DialogTitle>
-            <DialogDescription>
-              Excluir a tag &quot;{tagToDelete?.name}&quot;? Ela será removida
-              de todos os contatos e esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Excluindo...
-                </>
-              ) : (
-                'Excluir tag'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Excluir tag"
+        description={`Excluir a tag "${tagToDelete?.name ?? ''}"? Ela será removida de todos os contatos e esta ação não pode ser desfeita.`}
+        confirmLabel="Excluir tag"
+        busy={deleting}
+        onConfirm={handleDelete}
+      />
     </Card>
   );
 }

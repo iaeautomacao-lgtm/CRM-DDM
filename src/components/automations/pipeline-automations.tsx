@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import {
   Card,
   CardContent,
@@ -38,6 +39,7 @@ export function PipelineAutomations() {
   const [rules, setRules] = useState<AgingRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [deleteRuleId, setDeleteRuleId] = useState<string | null>(null);
 
   // Form states
   const [sourceStageId, setSourceStageId] = useState("");
@@ -300,7 +302,7 @@ export function PipelineAutomations() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => handleDeleteRule(rule.id)}
+                          onClick={() => setDeleteRuleId(rule.id)}
                           className="text-muted-foreground hover:text-danger hover:bg-danger-soft shrink-0"
                           aria-label="Excluir regra"
                         >
@@ -315,6 +317,19 @@ export function PipelineAutomations() {
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={deleteRuleId !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteRuleId(null);
+        }}
+        title="Excluir esta regra?"
+        description="A regra de transição deixa de valer e os negócios não serão mais movidos por ela. Esta ação não pode ser desfeita."
+        confirmLabel="Excluir regra"
+        onConfirm={async () => {
+          if (deleteRuleId) await handleDeleteRule(deleteRuleId);
+        }}
+      />
     </div>
   );
 }

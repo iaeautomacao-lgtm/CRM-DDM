@@ -37,6 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Can } from '@/components/auth/can';
@@ -99,6 +100,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -281,7 +283,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleRevoke(k)}
+                      onClick={() => setRevokeTarget(k)}
                       disabled={revoking === k.id}
                       aria-label={`Revogar chave ${k.name}`}
                       className="self-start border-destructive/40 text-destructive hover:bg-danger-soft hover:text-destructive sm:self-auto"
@@ -296,6 +298,19 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           })}
         </ListCard>
       )}
+
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setRevokeTarget(null);
+        }}
+        title={`Revogar a chave ${revokeTarget?.name ?? ''}?`}
+        description="Quem usa essa chave perde o acesso na hora. Esta ação não pode ser desfeita."
+        confirmLabel="Revogar"
+        onConfirm={async () => {
+          if (revokeTarget) await handleRevoke(revokeTarget);
+        }}
+      />
 
       <CreateKeyDialog
         personal={personal}
