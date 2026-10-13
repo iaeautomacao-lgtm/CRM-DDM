@@ -14,9 +14,12 @@
 --   5. Regras (no banco, além do servidor):
 --        gerir cargos = ter roles.manage (admin e acima);
 --        só cargos ABAIXO do seu nível, nunca o seu próprio cargo, nunca o proprietário;
---        SEM ESCALADA: ninguém concede permissão que não tem (o proprietário tem todas);
+--        SEM ESCALADA (decisão do dono 13/10): o editor só adiciona o que tem; as concedíveis que ele não tem ficam
+--        travadas no estado atual do cargo (não adiciona nem remove); o proprietário edita tudo. Atribuir/convidar
+--        segue só a regra de nível;
 --        ownerOnly e não concedíveis nunca entram (custom_role_permission_errors, 312); dependências validadas.
---      Erros 42501 trazem DETAIL jsonb: {"code":"role_level"} ou {"code":"escalation","permissions":[...]}.
+--      Erros 42501 trazem DETAIL jsonb: {"code":"role_level"}, {"code":"escalation","permissions":[...]} ou
+--      {"code":"locked","permissions":[...]}.
 --   6. RPCs novas (SECURITY DEFINER, search_path vazio, só service_role):
 --        set_system_role_permissions(conta, ator, cargo, permissões) e reset_system_role_permissions(conta, ator, cargo)
 --        role_assignable(conta, ator, cargo) → compat do cargo, ou erro (usada no convite, 319, e na atribuição).
@@ -45,7 +48,7 @@
 --   DROP FUNCTION IF EXISTS wacrm.set_system_role_permissions(uuid, uuid, uuid, text[]), wacrm.reset_system_role_permissions(uuid, uuid, uuid),
 --     wacrm.role_assignable(uuid, uuid, uuid), wacrm.role_manager(uuid, uuid), wacrm.role_level(uuid),
 --     wacrm.member_permissions(uuid), wacrm.role_permissions_in(uuid, uuid), wacrm.audit_role_overrides(),
---     wacrm.role_assert_no_escalation(text[], text[], boolean, numeric), wacrm.role_assert_manageable(uuid, numeric, uuid, uuid);
+--     wacrm.role_assert_no_escalation(text[], text[], boolean, text[]), wacrm.role_assert_manageable(uuid, numeric, uuid, uuid);
 --   DELETE FROM wacrm.role_permissions rp USING wacrm.account_roles r
 --    WHERE rp.role_id = r.id AND r.account_id IS NULL AND r.key = 'admin' AND rp.permission = 'roles.manage';
 --   UPDATE wacrm.permission_catalog SET owner_only = true, label = 'Gerir papéis personalizados',
@@ -200,9 +203,12 @@ BEGIN
 END;
 $$;
 
--- Sem escalada: tudo que se concede precisa estar no conjunto do ator OU no padrão de um cargo de sistema abaixo dele
--- (ex.: inbox.receive_assignments é só do Operador; o admin não a tem, mas gere o Operador). O proprietário concede tudo.
-CREATE OR REPLACE FUNCTION wacrm.role_assert_no_escalation(p_actor_perms text[], p_perms text[], p_is_owner boolean, p_actor_level numeric)
+-- Sem escalada (decisão do dono, 13/10): o editor só ADICIONA permissão que ele tem. As concedíveis que ele NÃO tem
+-- ficam travadas no estado atual do cargo (não pode adicionar nem remover) — assim o "receber atribuições" do Operador
+-- continua lá, e o admin não o concede a outro cargo. O proprietário edita tudo.
+--   p_current = conjunto atual do cargo (vazio na criação). Erros 42501 com DETAIL:
+--   {"code":"escalation","permissions":[...]} (adicionou o que não tem) | {"code":"locked","permissions":[...]} (removeu).
+CREATE OR REPLACE FUNCTION wacrm.role_assert_no_escalation(p_actor_perms text[], p_perms text[], p_is_owner boolean, p_current text[])
 RETURNS void
 LANGUAGE plpgsql
 STABLE
@@ -210,25 +216,35 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_missing text[];
+  v_req text[] := wacrm.expand_permissions(p_perms);
+  v_cur text[] := coalesce(p_current, '{}'::text[]);
+  v_actor text[] := coalesce(p_actor_perms, '{}'::text[]);
+  v_added text[];
+  v_removed text[];
 BEGIN
   IF p_is_owner THEN RETURN; END IF;
-  SELECT coalesce(array_agg(x ORDER BY x), '{}'::text[]) INTO v_missing
-    FROM unnest(wacrm.expand_permissions(p_perms)) AS x
-   WHERE NOT (x = ANY (coalesce(p_actor_perms, '{}'::text[])))
-     AND NOT EXISTS (
-       SELECT 1 FROM wacrm.role_permissions rp JOIN wacrm.account_roles r ON r.id = rp.role_id
-        WHERE r.account_id IS NULL AND r.rank < p_actor_level AND rp.permission = x
-     );
-  IF cardinality(v_missing) > 0 THEN
+  SELECT coalesce(array_agg(x ORDER BY x), '{}'::text[]) INTO v_added
+    FROM unnest(v_req) AS x
+   WHERE NOT (x = ANY (v_actor)) AND NOT (x = ANY (v_cur));
+  IF cardinality(v_added) > 0 THEN
     RAISE EXCEPTION 'Você não pode conceder permissões que não tem' USING ERRCODE = '42501',
-      DETAIL = jsonb_build_object('code', 'escalation', 'permissions', to_jsonb(v_missing))::text;
+      DETAIL = jsonb_build_object('code', 'escalation', 'permissions', to_jsonb(v_added))::text;
+  END IF;
+  -- Só as concedíveis: as não concedíveis do padrão (ex.: roles.manage do admin) são mantidas pelo servidor.
+  SELECT coalesce(array_agg(y ORDER BY y), '{}'::text[]) INTO v_removed
+    FROM unnest(v_cur) AS y
+    JOIN wacrm.permission_catalog c ON c.key = y AND c.grantable
+   WHERE NOT (y = ANY (v_req)) AND NOT (y = ANY (v_actor));
+  IF cardinality(v_removed) > 0 THEN
+    RAISE EXCEPTION 'Você não pode remover permissões que não tem' USING ERRCODE = '42501',
+      DETAIL = jsonb_build_object('code', 'locked', 'permissions', to_jsonb(v_removed))::text;
   END IF;
 END;
 $$;
 
--- Cargo que o ator pode atribuir/convidar: abaixo do nível dele, da organização (personalizado) e sem escalada. Devolve
--- o compat EFETIVO do cargo na organização. Serve a quem tem members.invite (não exige roles.manage).
+-- Cargo que o ator pode atribuir/convidar: abaixo do nível dele e da organização (personalizado). Atribuir não muda o
+-- conteúdo de cargo nenhum (o admin atribui o Operador, que tem "receber atribuições"). Devolve o compat EFETIVO do cargo
+-- na organização. Serve a quem tem members.invite (não exige roles.manage).
 CREATE OR REPLACE FUNCTION wacrm.role_assignable(p_account uuid, p_actor uuid, p_role uuid)
 RETURNS text
 LANGUAGE plpgsql
@@ -259,7 +275,6 @@ BEGIN
   IF wacrm.role_level(p_role) >= v_actor_level THEN
     RAISE EXCEPTION 'Esse cargo é do seu nível ou acima' USING ERRCODE = '42501', DETAIL = '{"code":"role_level"}';
   END IF;
-  PERFORM wacrm.role_assert_no_escalation(v_actor_perms, wacrm.role_permissions_in(p_role, p_account), v_is_owner, v_actor_level);
   SELECT coalesce(o.compat_role, v_role.compat_role) INTO v_compat
     FROM (SELECT 1) x LEFT JOIN wacrm.account_role_overrides o ON o.role_id = p_role AND o.account_id = p_account;
   RETURN v_compat;
@@ -318,7 +333,7 @@ BEGIN
   IF jsonb_array_length(v_errors) > 0 THEN
     RAISE EXCEPTION 'Permissões inválidas para este cargo' USING ERRCODE = '22023', DETAIL = v_errors::text;
   END IF;
-  PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner, m.level);
+  PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner, wacrm.role_permissions_in(p_role, p_account));
 
   -- O que não é concedível no padrão do cargo (ex.: roles.manage do admin) fica como está.
   SELECT coalesce(array_agg(rp.permission), '{}'::text[]) INTO v_keep
@@ -405,7 +420,7 @@ BEGIN
   IF jsonb_array_length(v_errors) > 0 THEN
     RAISE EXCEPTION 'Permissões inválidas para um papel personalizado' USING ERRCODE = '22023', DETAIL = v_errors::text;
   END IF;
-  PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner, m.level);
+  PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner, '{}'::text[]);
   v_perms := wacrm.expand_permissions(p_permissions);
   v_compat := wacrm.compat_role_for(v_perms);
   SELECT r.rank INTO v_rank FROM wacrm.account_roles r WHERE r.account_id IS NULL AND r.key = v_compat;
@@ -473,7 +488,8 @@ BEGIN
     IF jsonb_array_length(v_errors) > 0 THEN
       RAISE EXCEPTION 'Permissões inválidas para um papel personalizado' USING ERRCODE = '22023', DETAIL = v_errors::text;
     END IF;
-    PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner, m.level);
+    PERFORM wacrm.role_assert_no_escalation(m.perms, p_permissions, m.is_owner,
+      ARRAY(SELECT rp.permission FROM wacrm.role_permissions rp WHERE rp.role_id = p_role));
     v_perms := wacrm.expand_permissions(p_permissions);
 
     DELETE FROM wacrm.role_permissions rp WHERE rp.role_id = p_role AND NOT (rp.permission = ANY (v_perms));
@@ -679,7 +695,7 @@ CREATE TRIGGER trg_audit_role_overrides
 
 -- Grants.
 REVOKE ALL ON FUNCTION wacrm.role_permissions_in(uuid, uuid), wacrm.member_permissions(uuid), wacrm.role_level(uuid),
-  wacrm.role_manager(uuid, uuid), wacrm.role_assert_no_escalation(text[], text[], boolean, numeric), wacrm.role_assignable(uuid, uuid, uuid),
+  wacrm.role_manager(uuid, uuid), wacrm.role_assert_no_escalation(text[], text[], boolean, text[]), wacrm.role_assignable(uuid, uuid, uuid),
   wacrm.role_assert_manageable(uuid, numeric, uuid, uuid), wacrm.set_system_role_permissions(uuid, uuid, uuid, text[]),
   wacrm.reset_system_role_permissions(uuid, uuid, uuid), wacrm.create_custom_role(uuid, uuid, text, text, text[]),
   wacrm.update_custom_role(uuid, uuid, uuid, text, text, text[]), wacrm.delete_custom_role(uuid, uuid, uuid),

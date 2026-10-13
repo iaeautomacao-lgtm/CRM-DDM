@@ -156,7 +156,10 @@ describe('listRoles', () => {
     expect(by['s-admin']).toMatchObject({ editable: false, assignable: false, level: 4 }) // o próprio e do mesmo nível
     expect(by['s-sup']).toMatchObject({ editable: true, assignable: true, deletable: false, customized: true, permissions: ['inbox.view'] })
     expect(by['s-sup'].default_permissions).toEqual([...SYSTEM_ROLE_PERMISSIONS.supervisor].sort())
-    expect(by['s-agent']).toMatchObject({ editable: true, assignable: true, customized: false }) // receive_assignments é do padrão abaixo dele
+    expect(by['s-agent']).toMatchObject({ editable: true, assignable: true, customized: false }) // atribuir: só a regra de nível
+    // o que o admin não tem fica travado no editor (ex.: inbox.receive_assignments, só do Operador)
+    expect(out.locked_permissions).toContain('inbox.receive_assignments')
+    expect(out.locked_permissions).not.toContain('inbox.view')
     expect(by['c-1']).toMatchObject({ editable: true, assignable: true, deletable: true, level: 3.5, default_permissions: null })
     // supervisor sem roles.manage nem members.invite: só lê
     const sup = await listRoles(fakeDb({ account_roles: { data: rows }, role_permissions: { data: [] }, profiles: { data: [] } }).db, 'acc',

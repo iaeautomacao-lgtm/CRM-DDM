@@ -2,8 +2,9 @@ import "server-only";
 // PRD 20 + TASK5 — cargos (migrations 312/313/318/319). Servidor, service role, sempre escopado pela organização.
 //
 // Quem tem roles.manage (admin e acima) cria e edita personalizados, ajusta as permissões dos cargos de sistema ABAIXO do
-// seu nível por organização (com restaurar padrão) e atribui cargos. Sem escalada: ninguém concede o que não tem (exceto o
-// padrão dos cargos de sistema abaixo dele). O banco confere tudo de novo (318). O TS valida antes
+// seu nível por organização (com restaurar padrão) e atribui cargos. Sem escalada (decisão do dono 13/10): o editor só
+// adiciona o que tem; as permissões concedíveis que ele não tem ficam TRAVADAS no estado atual do cargo (não adiciona nem
+// remove). O banco confere tudo de novo (318). O TS valida antes
 // (validateCustomRolePermissions) para devolver 400 com a lista de erros sem ir ao banco; o banco é a fonte de verdade.
 // A auditoria vem das triggers da 248 (role.created/updated/deleted, role.permissions_changed, member.role_changed),
 // com o ator dos cabeçalhos x-audit-* do cliente admin.
@@ -13,8 +14,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { roleLevel } from "@/lib/auth/effective-permissions";
 import {
   MAX_CUSTOM_ROLES,
+  PERMISSIONS,
   SYSTEM_ROLE_PERMISSIONS,
   can,
+  isGrantableToCustomRole,
   validateCustomRolePermissions,
   type RolePermissionError,
 } from "@/lib/auth/permissions";
@@ -25,6 +28,7 @@ type Db = Pick<SupabaseClient, "rpc" | "from">;
 export type CustomRoleErrorCode =
   | "forbidden"
   | "escalation"
+  | "locked"
   | "role_level"
   | "not_found"
   | "invalid"
@@ -66,7 +70,7 @@ export interface RoleView {
   level: number;
   /** Posso ajustar as permissões (e, no personalizado, nome/descrição). */
   editable: boolean;
-  /** Posso convidar/atribuir este cargo. */
+  /** Posso convidar/atribuir este cargo (regra de nível). */
   assignable: boolean;
   /** Posso apagar (personalizado editável). */
   deletable: boolean;
@@ -87,6 +91,11 @@ export interface RoleActor {
 export interface RolesList {
   roles: RoleView[];
   limits: { max_custom_roles: number; custom_roles: number };
+  /**
+   * Permissões concedíveis que EU não tenho: no editor ficam desabilitadas e marcadas, no estado em que o cargo está
+   * (não posso adicionar nem remover). Vazio para o proprietário.
+   */
+  locked_permissions: string[];
 }
 
 const MISSING_FN = new Set(["42883", "PGRST202"]);
@@ -104,6 +113,11 @@ function mapRpcError(err: { code?: string; message?: string; details?: string | 
       }
       if (detail.code === "escalation") {
         return new CustomRoleError(message || "Você não pode conceder permissões que não tem.", 403, "escalation", {
+          permissions: detail.permissions ?? [],
+        });
+      }
+      if (detail.code === "locked") {
+        return new CustomRoleError(message || "Você não pode remover permissões que não tem.", 403, "locked", {
           permissions: detail.permissions ?? [],
         });
       }
@@ -322,16 +336,6 @@ interface RoleRow {
   updated_at: string | null;
 }
 
-/** O que o ator pode conceder: o que ele tem + o padrão dos cargos de sistema abaixo do nível dele (espelho da 318). */
-function grantableBy(actor: RoleActor, actorLevel: number): (p: string) => boolean {
-  if (actor.role === "owner") return () => true;
-  const below = new Set<string>();
-  for (const r of ACCOUNT_ROLES) {
-    if (ACCOUNT_ROLES.indexOf(r) + 1 < actorLevel) for (const p of SYSTEM_ROLE_PERMISSIONS[r]) below.add(p);
-  }
-  return (p) => actor.permissions.has(p) || below.has(p);
-}
-
 /** Cargos de sistema + personalizados da organização, com permissões efetivas, membros e o que o ator pode fazer. */
 export async function listRoles(db: Db, accountId: string, actor: RoleActor): Promise<RolesList> {
   const roles = await db
@@ -361,7 +365,6 @@ export async function listRoles(db: Db, accountId: string, actor: RoleActor): Pr
   const isOwner = actor.role === "owner";
   const canManage = isOwner || can(actor, "roles.manage");
   const canInvite = isOwner || can(actor, "members.invite") || canManage;
-  const grantable = grantableBy(actor, actorLevel);
 
   const members = new Map<string, string[]>();
   const profiles = await db.from("profiles").select("user_id, role_id").eq("account_id", accountId);
@@ -395,7 +398,7 @@ export async function listRoles(db: Db, accountId: string, actor: RoleActor): Pr
         customized: Boolean(override),
         level,
         editable,
-        assignable: canInvite && below && (isOwner || effective.every(grantable)),
+        assignable: canInvite && below,
         deletable: editable && !isSystem,
         member_count: members.get(r.id)?.length ?? 0,
         member_ids: members.get(r.id) ?? [],
@@ -407,5 +410,10 @@ export async function listRoles(db: Db, accountId: string, actor: RoleActor): Pr
       a.kind !== b.kind ? (a.kind === "system" ? -1 : 1) : a.kind === "system" ? b.rank - a.rank : a.name.localeCompare(b.name, "pt-BR"),
     );
 
-  return { roles: views, limits: { max_custom_roles: MAX_CUSTOM_ROLES, custom_roles: customIds.length } };
+  const lockedPermissions = isOwner ? [] : PERMISSIONS.filter((k) => isGrantableToCustomRole(k) && !actor.permissions.has(k));
+  return {
+    roles: views,
+    limits: { max_custom_roles: MAX_CUSTOM_ROLES, custom_roles: customIds.length },
+    locked_permissions: lockedPermissions,
+  };
 }

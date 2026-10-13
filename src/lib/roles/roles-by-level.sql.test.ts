@@ -214,9 +214,8 @@ describe('migrations 318/319 — cargos por nível e por organização', { timeo
       expect(detail(await fail(assign(ADMIN, AGENT, await sysRole('admin'))))).toEqual({ code: 'role_level' })
       expect(detail(await fail(assign(ADMIN, ADMIN, await sysRole('agent'))))).toEqual({ code: 'role_level' })
       expect(await assign(OWNER, ADMIN2, await sysRole('agent'))).toMatchObject({ compat_role: 'agent' })
-      // Operador tem inbox.receive_assignments, que o admin não tem: vale porque é do padrão de um cargo abaixo dele
+      // Atribuir segue só a regra de nível: o admin atribui o Operador (que tem inbox.receive_assignments, que o admin não tem)
       expect(await assign(ADMIN, SUP, await sysRole('agent'))).toMatchObject({ compat_role: 'agent' })
-      expect(await createCustom(ADMIN, 'Fila', ['inbox.view', 'inbox.receive_assignments'])).toMatchObject({ compat_role: 'agent' })
     })
 
     it('role_assignable: abaixo do nível, da organização e sem escalada', async () => {
@@ -259,5 +258,44 @@ describe('migrations 318/319 — cargos por nível e por organização', { timeo
       }
     }
     expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version IN ('318_roles_by_level', '319_invitation_role_id')`)).rows).toHaveLength(2)
+  })
+
+  describe('318 — permissões travadas (decisão do dono 13/10): o editor só adiciona o que tem; o que não tem fica como está', () => {
+    beforeAll(async () => {
+      await db.exec(`DELETE FROM wacrm.account_role_overrides; DELETE FROM wacrm.profiles; DELETE FROM wacrm.account_roles WHERE account_id IS NOT NULL;`)
+      await db.exec(`INSERT INTO wacrm.profiles (user_id, account_id, account_role) VALUES
+        ('${OWNER}', '${A}', 'owner'), ('${ADMIN}', '${A}', 'admin'), ('${AGENT}', '${A}', 'agent')`)
+    })
+    const AGENT_DEFAULT = [...SYSTEM_ROLE_PERMISSIONS.agent]
+  
+    it('admin ajusta o Operador mantendo receive_assignments (que ele não tem): ok', async () => {
+      expect(AGENT_DEFAULT).toContain('inbox.receive_assignments')
+      expect(await setSystem(ADMIN, 'agent', AGENT_DEFAULT.filter((p) => p !== 'calls.use'))).toMatchObject({ customized: true })
+      expect(await hasPerm(AGENT, 'inbox.receive_assignments')).toBe(true)
+    })
+  
+    it('admin NÃO remove a travada (locked) e NÃO a concede a outro cargo (escalation)', async () => {
+      const rm = await fail(setSystem(ADMIN, 'agent', AGENT_DEFAULT.filter((p) => p !== 'inbox.receive_assignments')))
+      expect(rm.code).toBe('42501')
+      expect(detail(rm)).toEqual({ code: 'locked', permissions: ['inbox.receive_assignments'] })
+      expect(detail(await fail(setSystem(ADMIN, 'supervisor', [...SUP_DEFAULT, 'inbox.receive_assignments'])))).toEqual({
+        code: 'escalation', permissions: ['inbox.receive_assignments'],
+      })
+      expect(detail(await fail(createCustom(ADMIN, 'Fila', ['inbox.view', 'inbox.receive_assignments'])))).toEqual({
+        code: 'escalation', permissions: ['inbox.receive_assignments'],
+      })
+    })
+  
+    it('personalizado criado pelo proprietário com a travada: admin edita o resto, mas não tira nem põe a travada', async () => {
+      const r = (await createCustom(OWNER, 'Fila', ['inbox.view', 'inbox.reply', 'inbox.receive_assignments'])) as { id: string }
+      const upd = (perms: string[]) => svc(`SELECT wacrm.update_custom_role($1, $2, $3, NULL, NULL, $4::text[]) AS r`, [A, ADMIN, r.id, perms])
+      expect(await upd(['inbox.view', 'inbox.receive_assignments'])).toMatchObject({ id: r.id }) // tirou inbox.reply (ele tem)
+      expect(detail(await fail(upd(['inbox.view'])))).toEqual({ code: 'locked', permissions: ['inbox.receive_assignments'] })
+    })
+  
+    it('o proprietário mexe em tudo', async () => {
+      expect(await setSystem(OWNER, 'agent', AGENT_DEFAULT.filter((p) => p !== 'inbox.receive_assignments'))).toMatchObject({ customized: true })
+      expect(await hasPerm(AGENT, 'inbox.receive_assignments')).toBe(false)
+    })
   })
 })
