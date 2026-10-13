@@ -295,18 +295,22 @@ export default function HistoricoPage() {
                     key={c.id}
                     className="animate-ddm-row cursor-pointer"
                     style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
-                    tabIndex={0}
+                    tabIndex={-1}
                     onClick={() => setSelected(c)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelected(c);
-                      }
-                    }}
-                    title="Abrir conversa (Enter)"
                   >
                     <Td>
-                      <CellMain title={contactLabel(c.contact)} sub={c.contact?.name ? c.contact.phone : undefined} />
+                      {/* Botão real na primeira célula: acessível por teclado sem tirar a semântica de linha da tabela. */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(c);
+                        }}
+                        aria-label={`Abrir conversa de ${contactLabel(c.contact)}`}
+                        className="rounded-sm text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        <CellMain title={contactLabel(c.contact)} sub={c.contact?.name ? c.contact.phone : undefined} />
+                      </button>
                     </Td>
                     <Td>{channelLabel(c)}</Td>
                     <Td>

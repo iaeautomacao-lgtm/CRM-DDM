@@ -455,7 +455,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                           <span
                             className={`text-[10px] font-medium ${
                               row.auto_close
-                                ? 'text-emerald-700 dark:text-emerald-400'
+                                ? 'text-success'
                                 : 'text-muted-foreground'
                             }`}
                           >

@@ -29,16 +29,18 @@ import { useAuth } from '@/hooks/use-auth';
 import { usePermission } from '@/hooks/use-permission';
 import { normalizeForSearch } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -122,6 +124,8 @@ export function TabulacoesManager() {
     new Set()
   );
   const [saving, setSaving] = useState(false);
+  // Erros de validação por campo (junto do campo, com foco no inválido).
+  const [formErrors, setFormErrors] = useState<{ name?: string; codigo?: string }>({});
 
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -218,6 +222,7 @@ export function TabulacoesManager() {
   function openCreate() {
     setEditingTag(null);
     setForm(EMPTY_FORM);
+    setFormErrors({});
     setSelectedTeamIds(new Set());
     setFormOpen(true);
   }
@@ -232,6 +237,7 @@ export function TabulacoesManager() {
           ? String(tag.codigo_tabulacao)
           : '',
     });
+    setFormErrors({});
     setFormOpen(true);
   }
 
@@ -251,7 +257,8 @@ export function TabulacoesManager() {
     }
     const trimmed = form.name.trim();
     if (!trimmed) {
-      toast.error('Nome da tabulação é obrigatório');
+      setFormErrors({ name: 'Nome da tabulação é obrigatório' });
+      document.getElementById('tabulacao-name')?.focus();
       return;
     }
     // A trava também vale no save: não depender só do input desabilitado.
@@ -259,16 +266,19 @@ export function TabulacoesManager() {
       ? { ok: true as const, value: editingTag?.codigo_tabulacao ?? null }
       : parseCodigoTabulacao(form.codigo);
     if (!codigo.ok) {
-      toast.error(codigo.error);
+      setFormErrors({ codigo: codigo.error });
+      document.getElementById('tabulacao-codigo')?.focus();
       return;
     }
     const usedBy = codigoInUseBy(tabulacoes, codigo.value, editingTag?.id);
     if (usedBy) {
-      toast.error(
-        `O código ${codigo.value} já é usado pela tabulação "${usedBy}"`
-      );
+      setFormErrors({
+        codigo: `O código ${codigo.value} já é usado pela tabulação "${usedBy}"`,
+      });
+      document.getElementById('tabulacao-codigo')?.focus();
       return;
     }
+    setFormErrors({});
     if (!accountId || !user) return;
 
     setSaving(true);
@@ -574,13 +584,21 @@ export function TabulacoesManager() {
               <Input
                 id="tabulacao-name"
                 value={form.name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, name: e.target.value }));
+                  setFormErrors((p) => (p.name ? { ...p, name: undefined } : p));
+                }}
                 placeholder="ex.: Resolvido"
                 maxLength={40}
                 disabled={saving}
+                aria-invalid={formErrors.name ? true : undefined}
+                aria-describedby={formErrors.name ? 'tabulacao-name-error' : undefined}
               />
+              {formErrors.name && (
+                <p id="tabulacao-name-error" role="alert" className="text-xs text-destructive">
+                  {formErrors.name}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="tabulacao-codigo">
@@ -593,16 +611,29 @@ export function TabulacoesManager() {
                 <Input
                   id="tabulacao-codigo"
                   value={form.codigo}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, codigo: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, codigo: e.target.value }));
+                    setFormErrors((p) => (p.codigo ? { ...p, codigo: undefined } : p));
+                  }}
                   placeholder="ex.: 142"
                   inputMode="numeric"
                   maxLength={5}
                   disabled={saving || (editingTag !== null && !aiMapReady) || codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)}
-                  aria-describedby={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? 'tabulacao-codigo-protegido' : undefined}
+                  aria-invalid={formErrors.codigo ? true : undefined}
+                  aria-describedby={
+                    formErrors.codigo
+                      ? 'tabulacao-codigo-error'
+                      : codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)
+                        ? 'tabulacao-codigo-protegido'
+                        : undefined
+                  }
                 />
               </div>
+              {formErrors.codigo && (
+                <p id="tabulacao-codigo-error" role="alert" className="text-xs text-destructive">
+                  {formErrors.codigo}
+                </p>
+              )}
               {codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) && (
                 <p id="tabulacao-codigo-protegido" className="text-xs text-muted-foreground">{CODIGO_BLOQUEADO_TOOLTIP}</p>
               )}
@@ -623,7 +654,7 @@ export function TabulacoesManager() {
                     }
                     aria-label={`Usar ${color.name}`}
                     aria-pressed={form.color === color.value}
-                    className={`size-6 rounded-full border-2 transition-transform focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                    className={`size-6 rounded-full border-2 transition-transform outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-offset-2 ${
                       form.color === color.value
                         ? 'border-foreground scale-110'
                         : 'border-transparent'
@@ -683,16 +714,16 @@ export function TabulacoesManager() {
         </DetailDrawer>
 
         {/* Delete confirmation */}
-        <Dialog
+        <AlertDialog
           open={deleteTarget !== null}
           onOpenChange={(open) => {
-            if (!open) setDeleteTarget(null);
+            if (!open && !deleting) setDeleteTarget(null);
           }}
         >
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Excluir tabulação</DialogTitle>
-              <DialogDescription className="space-y-2 text-left">
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir tabulação</AlertDialogTitle>
+              <AlertDialogDescription className="space-y-2 text-left">
                 <span>
                   Excluir &quot;{deleteTarget?.name}&quot;? Isso a remove de
                   todas as{' '}
@@ -717,20 +748,17 @@ export function TabulacoesManager() {
                       da IA também será removido automaticamente.
                     </span>
                   )}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setDeleteTarget(null)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                className={buttonVariants({ variant: 'destructive' })}
                 disabled={deleting}
-              >
-                Cancelar
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={deleting}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void handleDelete();
+                }}
               >
                 {deleting ? (
                   <>
@@ -740,10 +768,10 @@ export function TabulacoesManager() {
                 ) : (
                   'Excluir tabulação'
                 )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </section>
 
       {/* Seção: Tabulação automática pela IA */}

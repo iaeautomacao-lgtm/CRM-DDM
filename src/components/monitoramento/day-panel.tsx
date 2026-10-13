@@ -117,7 +117,7 @@ export function DayPanel({
             Hoje
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} className="ml-auto">
+        <Button variant="ghost" size="sm" onClick={() => void load()} disabled={loading} className="ml-auto" aria-label="Atualizar o dia">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>
       </div>
