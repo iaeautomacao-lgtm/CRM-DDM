@@ -216,6 +216,13 @@ CREATE TABLE wacrm.whatsapp_test_sends (id uuid PRIMARY KEY DEFAULT gen_random_u
 ALTER TABLE wacrm.whatsapp_test_sends ENABLE ROW LEVEL SECURITY;
 CREATE POLICY whatsapp_test_sends_select ON wacrm.whatsapp_test_sends FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE POLICY account_invitations_modify ON wacrm.account_invitations FOR ALL USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+-- api_keys (026) e ai_config (a 346 troca a policy de SELECT "membro da conta" por membro + has_perm)
+CREATE TABLE wacrm.api_keys (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), key_hash text);
+ALTER TABLE wacrm.api_keys ENABLE ROW LEVEL SECURITY;
+CREATE POLICY api_keys_select ON wacrm.api_keys FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.ai_config (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), enabled boolean NOT NULL DEFAULT false, api_key text);
+ALTER TABLE wacrm.ai_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY ai_config_select ON wacrm.ai_config FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE POLICY clients_write ON wacrm.clients FOR ALL TO authenticated USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
 CREATE TABLE wacrm.team_allowed_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id));
 ALTER TABLE wacrm.team_allowed_templates ENABLE ROW LEVEL SECURITY;

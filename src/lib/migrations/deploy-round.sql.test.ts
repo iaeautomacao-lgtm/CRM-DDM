@@ -14,9 +14,9 @@ const PRE_DEPLOY = [
   "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
   "304", "305",
   "311", "312", "313", "314", "314b", "315", "316b", "317", "318", "319", "320",
-  "322", "323", "324", "325", "326", "327",
+  "322", "323", "324", "325", "326", "327", "328", "329",
   "330", "330b", "331b", "333", "334",
-  "335", "335b", "336", "337", "338", "339", "350",
+  "335", "335b", "336", "337", "338", "339", "345", "346", "350",
   "310",
 ] as const;
 /** Migrations que só rodam DEPOIS do deploy do código (o cabeçalho diz "FAZER O DEPLOY ... depois aplicar"): aplicar antes quebra o código antigo. */
@@ -370,6 +370,60 @@ suite("rodada de deploy — controle negativo: a 310 fora do fim deixa tabela no
       await db.close();
     }
   }, 60_000);
+});
+
+// A 329 tira anon (e PUBLIC) de TODAS as funções/tabelas do wacrm: não pode tirar nada de authenticated nem de service_role, e o anon só mantém peek_invitation.
+type FnPriv = { sig: string; auth: boolean; svc: boolean; anon: boolean };
+type TblPriv = { tbl: string; a_sel: boolean; a_ins: boolean; s_sel: boolean; s_ins: boolean; anon_sel: boolean };
+suite("rodada de deploy — a 329 (REVOKE do anon) não quebra authenticated, service_role nem peek_invitation", () => {
+  it.skipIf(!ROUND.includes("329"))("o que authenticated/service_role executavam e acessavam continua igual; anon só peek_invitation", async () => {
+    const db = new PGlite();
+    try {
+      await db.exec(BASELINE_SQL);
+      for (const f of BASELINE_REAL_MIGRATIONS) await db.exec(readFileSync(`${DIR}/${f}`, "utf8").replace(/NOTIFY pgrst[^;]*;/g, ""));
+      for (const n of ROUND.slice(0, ROUND.indexOf("329"))) await applyFile(db, n);
+      // peek_invitation no wacrm (se o banco vivo tiver) nasce com o padrão do Postgres (PUBLIC); a 329 devolve o EXECUTE ao anon
+      await db.exec(`CREATE OR REPLACE FUNCTION wacrm.peek_invitation(p_token_hash text) RETURNS json LANGUAGE sql AS $$ SELECT '{"ok":false}'::json $$;`);
+      const fnPriv = `SELECT p.oid::regprocedure::text AS sig,
+          has_function_privilege('authenticated', p.oid, 'EXECUTE') AS auth,
+          has_function_privilege('service_role', p.oid, 'EXECUTE') AS svc,
+          has_function_privilege('anon', p.oid, 'EXECUTE') AS anon
+        FROM pg_proc p WHERE p.pronamespace = 'wacrm'::regnamespace AND p.prokind IN ('f','p') ORDER BY 1`;
+      const tblPriv = `SELECT c.relname AS tbl,
+          has_table_privilege('authenticated', c.oid, 'SELECT') AS a_sel, has_table_privilege('authenticated', c.oid, 'INSERT') AS a_ins,
+          has_table_privilege('service_role', c.oid, 'SELECT') AS s_sel, has_table_privilege('service_role', c.oid, 'INSERT') AS s_ins,
+          has_table_privilege('anon', c.oid, 'SELECT') AS anon_sel
+        FROM pg_class c WHERE c.relnamespace = 'wacrm'::regnamespace AND c.relkind IN ('r','v','m') ORDER BY 1`;
+      const fnBefore = (await db.query<FnPriv>(fnPriv)).rows;
+      const tblBefore = (await db.query<TblPriv>(tblPriv)).rows;
+      expect(fnBefore.some((f) => f.auth), "o baseline precisa ter funções executáveis por authenticated").toBe(true);
+
+      await applyFile(db, "329");
+      await applyFile(db, "329"); // idempotente
+
+      const fnAfter = (await db.query<FnPriv>(fnPriv)).rows;
+      const tblAfter = (await db.query<TblPriv>(tblPriv)).rows;
+      const lost: string[] = [];
+      for (const b of fnBefore) {
+        const a = fnAfter.find((x) => x.sig === b.sig);
+        if (!a) continue;
+        if (b.auth && !a.auth) lost.push(`authenticated perdeu EXECUTE em ${b.sig}`);
+        if (b.svc && !a.svc) lost.push(`service_role perdeu EXECUTE em ${b.sig}`);
+        if (!b.auth && a.auth) lost.push(`authenticated GANHOU EXECUTE em ${b.sig}`);
+      }
+      for (const b of tblBefore) {
+        const a = tblAfter.find((x) => x.tbl === b.tbl)!;
+        if ((b.a_sel && !a.a_sel) || (b.a_ins && !a.a_ins)) lost.push(`authenticated perdeu acesso à tabela ${b.tbl}`);
+        if ((b.s_sel && !a.s_sel) || (b.s_ins && !a.s_ins)) lost.push(`service_role perdeu acesso à tabela ${b.tbl}`);
+      }
+      expect(lost).toEqual([]);
+      // anon: nenhuma tabela e nenhuma função, exceto peek_invitation
+      expect(tblAfter.filter((t) => t.anon_sel).map((t) => t.tbl)).toEqual([]);
+      expect(fnAfter.filter((f) => f.anon).map((f) => f.sig)).toEqual(["wacrm.peek_invitation(text)"]);
+    } finally {
+      await db.close();
+    }
+  }, 120_000);
 });
 
 // referência para quem lê o relatório: confirma que o arquivo existe quando a rodada roda
