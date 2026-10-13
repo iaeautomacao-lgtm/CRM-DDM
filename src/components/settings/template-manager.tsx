@@ -943,7 +943,7 @@ export function TemplateManager() {
     }
     setUploadingHeader(true);
     try {
-      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      const { publicUrl } = await uploadAccountMedia('template', file);
       setForm((f) => ({ ...f, header_media_url: publicUrl }));
       toast.success('Imagem enviada.');
     } catch (err) {
