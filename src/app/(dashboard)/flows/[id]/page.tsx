@@ -35,7 +35,10 @@ export default function FlowEditorPage() {
       </div>
     );
   }
-  if (!can("flows.edit")) {
+  // Quem edita (flows.edit) ou só vê execuções (flows.view_runs, abre em
+  // modo leitura — decisão do dono 13/10). O servidor decide o modo pelo
+  // `read_only` da resposta e barra PUT/ativar/excluir sem flows.edit.
+  if (!can("flows.edit") && !can("flows.view_runs")) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <ForbiddenState
@@ -54,6 +57,7 @@ function FlowEditorLoader() {
 
   const [flow, setFlow] = useState<FlowRow | null>(null);
   const [nodes, setNodes] = useState<FlowNodeRow[]>([]);
+  const [readOnly, setReadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,10 +77,13 @@ function FlowEditorLoader() {
         const json = (await res.json()) as {
           flow: FlowRow;
           nodes: FlowNodeRow[];
+          /** true = só flows.view_runs: abre sem editar (cabeçalhos de http_fetch vêm mascarados). */
+          read_only?: boolean;
         };
         if (!cancelled) {
           setFlow(json.flow);
           setNodes(json.nodes ?? []);
+          setReadOnly(json.read_only === true);
         }
       } catch (err) {
         if (!cancelled) {
@@ -131,7 +138,7 @@ function FlowEditorLoader() {
 
   return (
     <Suspense fallback={null}>
-      <FlowEditorWithDebug flowId={params.id} flow={flow} nodes={nodes} />
+      <FlowEditorWithDebug flowId={params.id} flow={flow} nodes={nodes} readOnly={readOnly} />
     </Suspense>
   );
 }
@@ -149,10 +156,12 @@ function FlowEditorWithDebug({
   flowId,
   flow,
   nodes,
+  readOnly,
 }: {
   flowId: string;
   flow: FlowRow;
   nodes: FlowNodeRow[];
+  readOnly: boolean;
 }) {
   const debug = useFlowDebug(flowId);
   // `?node=` vem do atalho do card "Fluxo" no inbox (junto com `run_id`).
@@ -163,6 +172,7 @@ function FlowEditorWithDebug({
       initialNodes={nodes}
       debug={debug}
       focusNodeKey={focusNodeKey}
+      readOnly={readOnly}
     />
   );
 }

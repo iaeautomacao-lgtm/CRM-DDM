@@ -184,6 +184,9 @@ export interface DraftOffer {
 export interface FlowEditorContextValue {
   /** Immutable post-load envelope: id, created_at, fallback_policy, etc. */
   flow: FlowRow;
+  /** Modo leitura (GET /api/flows/[id] → read_only: quem só tem
+   *  flows.view_runs). Edição, salvar, status e excluir ficam travados. */
+  readOnly: boolean;
 
   // Authored state
   state: BuilderState;
@@ -466,12 +469,14 @@ interface ProviderProps {
   initialFlow: FlowRow;
   initialNodes: FlowNodeRow[];
   children: ReactNode;
+  readOnly?: boolean;
 }
 
 export function FlowEditorProvider({
   initialFlow,
   initialNodes,
   children,
+  readOnly = false,
 }: ProviderProps) {
   const router = useRouter();
 
@@ -517,6 +522,9 @@ export function FlowEditorProvider({
   const historyRef = useRef<History<BuilderState>>(createHistory());
   const [historyTick, setHistoryTick] = useState(0);
   const setState = useCallback<typeof setStateRaw>((updaterOrValue) => {
+    // Modo leitura: nenhuma edição entra no estado (nunca fica "sujo", então
+    // autosave, rascunho local e aviso de saída não disparam).
+    if (readOnly) return;
     const prev = latestStateRef.current;
     const next = typeof updaterOrValue === "function" ? updaterOrValue(prev) : updaterOrValue;
     if (next === prev) return;
@@ -526,7 +534,7 @@ export function FlowEditorProvider({
     revisionRef.current += 1;
     setDirty(true);
     setStateRaw(next);
-  }, []);
+  }, [readOnly]);
 
   // Restaura um estado do histórico mantendo o status atual (ativar/pausar
   // é ação de servidor, não edição). Conta como edição para salvar/publicar.
@@ -665,6 +673,7 @@ export function FlowEditorProvider({
   // Decisão pura no inicializador (esta subárvore só monta no cliente,
   // ver FlowEditorShell); a limpeza de rascunho vencido/igual fica no efeito.
   const [draftOffer, setDraftOffer] = useState<DraftOffer | null>(() => {
+    if (readOnly) return null;
     const draft = readFlowDraft(getBrowserDraftStorage(), initialFlow.id, isDraftContent);
     const decision = decideDraftOffer({
       draft,
@@ -714,6 +723,7 @@ export function FlowEditorProvider({
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const save = useCallback(
     async (opts?: { silent?: boolean; confirmOrphanRuns?: boolean }): Promise<boolean> => {
+      if (readOnly) return false;
       if (savePromiseRef.current) {
         if (!await savePromiseRef.current) return false;
         return save(opts);
@@ -817,7 +827,7 @@ Publicar mesmo assim?`,
       if (success && revision !== revisionRef.current) return save(opts);
       return success;
     },
-    [initialFlow.id, state, writeDraftNow, askConfirm],
+    [initialFlow.id, state, writeDraftNow, askConfirm, readOnly],
   );
 
   const reloadFromServer = useCallback(() => {
@@ -956,6 +966,7 @@ Publicar mesmo assim?`,
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(
     async (next: BuilderState["status"]) => {
+      if (readOnly) return;
       if (next === "active" && !canActivate) {
         toast.error("Corrija os problemas abaixo antes de ativar.");
         return;
@@ -1000,11 +1011,12 @@ Publicar mesmo assim?`,
         setActivating(false);
       }
     },
-    [canActivate, save, initialFlow.id],
+    [canActivate, save, initialFlow.id, readOnly],
   );
 
   // ---- Delete ----
   const deleteFlow = useCallback(async () => {
+    if (readOnly) return;
     const yes = await askConfirm({
       title: "Excluir fluxo",
       message: `Excluir "${state.name}"? Todas as execuções ativas serão encerradas imediatamente. Essa ação não pode ser desfeita.`,
@@ -1021,7 +1033,7 @@ Publicar mesmo assim?`,
       const msg = err instanceof Error ? err.message : "Falha ao excluir";
       toast.error(msg);
     }
-  }, [initialFlow.id, router, state.name, askConfirm]);
+  }, [initialFlow.id, router, state.name, askConfirm, readOnly]);
 
   // ---- Node mutations ----
   const updateNode = useCallback(
@@ -1178,6 +1190,7 @@ Publicar mesmo assim?`,
   const value = useMemo<FlowEditorContextValue>(
     () => ({
       flow: initialFlow,
+      readOnly,
       state,
       setState,
       dirty,
@@ -1215,6 +1228,7 @@ Publicar mesmo assim?`,
     }),
     [
       initialFlow,
+      readOnly,
       state,
       setState,
       dirty,

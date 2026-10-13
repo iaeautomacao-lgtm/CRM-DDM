@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Eye } from "lucide-react";
+import { Eye, Lock } from "lucide-react";
 import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
@@ -39,6 +39,7 @@ import { NODE_META, nodeColors, type NodeType } from "./shared";
 import { cn } from "@/lib/utils";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
 import type { FlowDebugState } from "@/hooks/use-flow-debug";
+import { usePermissions } from "@/hooks/use-permission";
 
 /**
  * Below this viewport width we force list view and hide the toggle.
@@ -68,9 +69,13 @@ interface Props {
   /** `?node=` da URL: nó a centralizar/destacar ao abrir (atalho do
    *  card "Fluxo" no inbox). Ignorado se o nó não existir no fluxo. */
   focusNodeKey?: string | null;
+  /** Modo leitura (read_only do GET): abre o diagrama sem editar, salvar,
+   *  publicar nem excluir. */
+  readOnly?: boolean;
 }
 
-export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey }: Props) {
+export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey, readOnly = false }: Props) {
+  const { can } = usePermissions();
   // Read the persisted choice in the useState initializer. Safe even
   // though this is a client component because the parent page only
   // mounts us AFTER a client-side fetch resolves — there's no SSR
@@ -95,7 +100,11 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
   // Debug mode only has a diagram to show a run's path on — List has
   // no visual "which node lit up" concept, so it's not offered while
   // a run_id is active (same override precedence as the mobile force).
-  const effectiveView: View = isDebugMode ? "canvas" : isMobile ? "list" : view;
+  // Leitura: sempre o diagrama (a lista é um formulário de edição); no
+  // celular também, já que ali não há arrastar nem ligar nós.
+  const effectiveView: View = isDebugMode || readOnly ? "canvas" : isMobile ? "list" : view;
+  // O simulador é permissão própria (flows.simulate), conferida no servidor.
+  const canSimulate = !readOnly || can("flows.simulate");
 
   const choose = (next: View) => {
     setView(next);
@@ -134,19 +143,20 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
   };
 
   return (
-    <FlowEditorProvider initialFlow={initialFlow} initialNodes={initialNodes}>
+    <FlowEditorProvider initialFlow={initialFlow} initialNodes={initialNodes} readOnly={readOnly}>
       {focusNodeKey && <FocusNodeOnLoad nodeKey={focusNodeKey} />}
       <div className="flex h-full min-h-0 flex-col">
         {isDebugMode && debug && <DebugBanner debug={debug} />}
+        {readOnly && !isDebugMode && <ReadOnlyBanner />}
 
         <EditorHeader
-          view={!isMobile && !isDebugMode ? { value: effectiveView, onChange: choose } : null}
-          sim={!isMobile && !isDebugMode ? { open: simOpen, onToggle: () => setSimOpen((v) => !v) } : null}
+          view={!isMobile && !isDebugMode && !readOnly ? { value: effectiveView, onChange: choose } : null}
+          sim={!isMobile && !isDebugMode && canSimulate ? { open: simOpen, onToggle: () => setSimOpen((v) => !v) } : null}
           validation={{ open: panelOpen, onToggle: () => setPanelOpenPersisted(!panelOpen) }}
         />
         <EditorNotices />
 
-        {isMobile && !isDebugMode && (
+        {isMobile && !isDebugMode && !readOnly && (
           <p className="mx-4 mt-2 text-xs text-muted-foreground">
             O diagrama e o teste do fluxo ficam disponíveis em telas maiores. Aqui você edita pela lista.
           </p>
@@ -170,7 +180,7 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
               </div>
             )}
           </div>
-          {simOpen && !isMobile && !isDebugMode && (
+          {simOpen && !isMobile && !isDebugMode && canSimulate && (
             <div className="flex min-h-0 animate-ddm-drawer">
               <FlowSimulatorPanel onClose={() => setSimOpen(false)} />
             </div>
@@ -272,6 +282,19 @@ function NodeLegend() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Faixa do modo leitura: quem só vê execuções (flows.view_runs) abre o
+ *  fluxo para entender o caminho, sem editar. */
+function ReadOnlyBanner() {
+  return (
+    <div role="status" className="flex items-center gap-2.5 border-b border-border bg-surface-3 px-6 py-2.5 text-[13px]">
+      <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 text-foreground">
+        Modo leitura: você vê o fluxo, mas não pode editar, salvar, ativar nem excluir.
+      </span>
     </div>
   );
 }
