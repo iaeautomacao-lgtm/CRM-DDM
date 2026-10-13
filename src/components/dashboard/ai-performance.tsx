@@ -51,7 +51,7 @@ function Body({ data }: { data: AiAnalyticsData }) {
             return (
               <div key={s.label} className="grid grid-cols-[72px_minmax(0,1fr)_84px] items-center gap-2.5">
                 <span className="text-[12.5px] text-foreground">{s.label}</span>
-                <span className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                <span className="h-2 overflow-hidden rounded-full bg-muted">
                   <span
                     className={cn('block h-full origin-left animate-ddm-bar rounded-full', s.color)}
                     style={{ width: `${p}%` }}
@@ -71,7 +71,7 @@ function Body({ data }: { data: AiAnalyticsData }) {
           <span className="font-semibold text-foreground-2">Mensagens por autor</span>
           <span className="tabular-nums text-muted-foreground">{fmt(messagesRatio.total)}</span>
         </div>
-        <div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-surface-3">
+        <div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-muted">
           {messagesRatio.total > 0 && (
             <>
               <span className="origin-left animate-ddm-bar bg-foreground-2" style={{ width: `${botPct}%` }} />

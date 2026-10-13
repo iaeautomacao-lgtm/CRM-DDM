@@ -113,7 +113,7 @@ function Ranking({
               >
                 <span className="text-xs font-semibold tabular-nums text-muted-foreground">{i + 1}</span>
                 <span className="truncate text-[13px] text-foreground">{op.userName}</span>
-                <span className="hidden h-1.5 overflow-hidden rounded-full bg-surface-3 sm:block">
+                <span className="hidden h-2 overflow-hidden rounded-full bg-muted sm:block">
                   <span
                     className={cn(
                       'block h-full origin-left animate-ddm-bar rounded-full transition-[width] duration-500',

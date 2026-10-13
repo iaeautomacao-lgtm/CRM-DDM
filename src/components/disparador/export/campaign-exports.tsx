@@ -215,7 +215,7 @@ export function CampaignExportsPanel({ campaignId }: { campaignId: string }) {
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={pct ?? undefined}
-                    className="block h-1.5 overflow-hidden rounded-full bg-surface-3"
+                    className="block h-2 overflow-hidden rounded-full bg-muted"
                   >
                     <span
                       className={cn("block h-full rounded-full bg-primary transition-[width] duration-500", pct == null && "w-1/3 animate-pulse")}

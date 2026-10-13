@@ -441,7 +441,7 @@ export function KnowledgeTab({
               </span>
             </div>
             <div
-              className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              className="h-2 w-full overflow-hidden rounded-full bg-muted"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
