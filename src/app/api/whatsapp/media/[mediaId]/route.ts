@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { createClient } from '@/lib/supabase/server'
+import { ForbiddenError, getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { canAny } from '@/lib/auth/permissions'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { assertWahaUrlIsSafe, WahaUrlBlockedError } from '@/lib/whatsapp/waha-api'
@@ -23,36 +24,20 @@ export async function GET(
       )
     }
 
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Não autorizado' },
-        { status: 401 }
-      )
+    // Mídia de conversa: quem vê conversas (inbox.view ou um escopo de conversas — o visualizador lê conversas sem
+    // inbox.view). Contexto completo (revisão de segurança 13/10, item 6): papel personalizado, ajuste do cargo, membro
+    // desativado e 2FA. Antes: só sessão.
+    let ctx: Awaited<ReturnType<typeof getCurrentAccount>>
+    try {
+      ctx = await getCurrentAccount()
+      if (!canAny(ctx, ['inbox.view', 'conversations.scope_all', 'conversations.scope_team'])) {
+        throw new ForbiddenError('Você não tem acesso às conversas.', 'inbox.view')
+      }
+    } catch (err) {
+      return toErrorResponse(err)
     }
-
-    // Resolve the caller's account_id — whatsapp_config is one-per-
-    // account post-multi-user, so a teammate fetching media for a
-    // conversation in the shared inbox needs the account's config,
-    // not their personal (non-existent) row.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Seu perfil não está vinculado a uma conta.' },
-        { status: 403 },
-      )
-    }
+    const supabase = ctx.supabase
+    const accountId = ctx.accountId
 
     // WAHA PROXY LOGIC: Stream authenticated files from WAHA server
     if (mediaId === 'waha') {

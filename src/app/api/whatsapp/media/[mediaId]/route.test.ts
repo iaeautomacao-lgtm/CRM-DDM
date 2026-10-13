@@ -39,6 +39,19 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }))
 
+// Contexto completo (revisão de segurança 13/10): a rota usa getCurrentAccount e exige quem vê conversas.
+const who = vi.hoisted(() => ({ role: 'agent' as string }))
+vi.mock('@/lib/auth/account', async (orig) => ({
+  ...(await orig<typeof import('@/lib/auth/account')>()),
+  getCurrentAccount: async () => ({
+    supabase: await (await import('@/lib/supabase/server')).createClient(),
+    userId: 'u1',
+    accountId: 'a1',
+    role: who.role,
+    account: { id: 'a1', name: 'Conta' },
+  }),
+}))
+
 import { GET } from './route'
 
 const call = (file?: string) =>

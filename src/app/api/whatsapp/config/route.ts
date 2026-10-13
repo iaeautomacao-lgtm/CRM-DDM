@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { auditFetch } from '@/lib/audit/context'
-import { createClient } from '@/lib/supabase/server'
-import { isAccountRole } from '@/lib/auth/roles'
+import { getCurrentAccount, toErrorResponse, type AccountContext } from '@/lib/auth/account'
 import { can } from '@/lib/auth/permissions'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import {
@@ -29,29 +28,6 @@ import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 // than this is flagged 'warning' rather than plain 'connected', even
 // though the session itself is technically WORKING.
 const WARNING_STALE_ACTIVITY_MS = 24 * 60 * 60 * 1000
-
-/**
- * Resolve the caller's account_id from their profile. Inlined here
- * (rather than going through `@/lib/auth/account.getCurrentAccount`)
- * because the GET handler wants to return shaped 200s for every
- * non-auth failure mode, not throw — keeping the helper minimal lets
- * the existing response branches stay as-is.
- *
- * Returns null if the user has no profile or no account; callers
- * should treat that the same as "not connected".
- */
-async function resolveAccountId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (error || !data?.account_id) return null
-  return data.account_id as string
-}
 
 // Lazy-initialised service-role client. We need it to detect a
 // phone_number_id already claimed by a *different* user — under RLS,
@@ -84,21 +60,22 @@ function supabaseAdmin() {
  * qualquer membro: o inbox o usa para saber se há canal conectado e a resposta
  * nunca traz segredo (só has_app_secret).
  */
-async function requireChannelAdmin(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  message: string,
-): Promise<NextResponse | null> {
-  const { data: roleRow } = await supabase
-    .from('profiles')
-    .select('account_role')
-    .eq('user_id', userId)
-    .maybeSingle()
-  const role = (roleRow as { account_role?: string } | null)?.account_role
-  if (!role || !isAccountRole(role) || !can({ role }, 'channels.manage')) {
-    return NextResponse.json({ error: message }, { status: 403 })
+async function channelAccess(
+  requireManage: boolean,
+  message = 'Somente administradores da conta podem alterar as configurações dos canais.',
+): Promise<{ ctx: AccountContext } | { response: NextResponse }> {
+  // Contexto completo (revisão de segurança 13/10, item 6): papel personalizado, ajuste do cargo na organização, membro
+  // desativado e 2FA. false = qualquer membro (o GET, que o inbox usa para saber se há canal conectado).
+  let ctx: AccountContext
+  try {
+    ctx = await getCurrentAccount()
+  } catch (err) {
+    return { response: toErrorResponse(err) }
   }
-  return null
+  if (requireManage && !can(ctx, 'channels.manage')) {
+    return { response: NextResponse.json({ error: message }, { status: 403 }) }
+  }
+  return { ctx }
 }
 
 /**
@@ -110,28 +87,9 @@ async function requireChannelAdmin(
  */
 export async function GET() {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    const accountId = await resolveAccountId(supabase, user.id)
-    if (!accountId) {
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'no_account',
-          message: 'Seu perfil não está vinculado a uma conta.',
-        },
-        { status: 200 },
-      )
-    }
+    const access = await channelAccess(false)
+    if ('response' in access) return access.response
+    const { supabase, accountId } = access.ctx
 
     // Segredos só pelo servidor (migration 200b): a visibilidade segue a RLS
     // do usuário e a resposta (abaixo) nunca devolve o valor dos segredos.
@@ -367,41 +325,12 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    const accountId = await resolveAccountId(supabase, user.id)
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Seu perfil não está vinculado a uma conta.' },
-        { status: 403 },
-      )
-    }
-
-    // Gravação dos segredos do canal passa pelo service role (a migration
-    // 153 tira INSERT/UPDATE dessas colunas do papel authenticated) — então
-    // o "só admin" que antes vinha da RLS (whatsapp_config_insert/update,
-    // is_account_member(account_id, 'admin')) é checado aqui.
-    const { data: roleRow } = await supabase
-      .from('profiles')
-      .select('account_role')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const callerRole = (roleRow as { account_role?: string } | null)?.account_role
-    if (!callerRole || !isAccountRole(callerRole) || !can({ role: callerRole }, 'channels.manage')) {
-      return NextResponse.json(
-        { error: 'Somente administradores da conta podem alterar as configurações dos canais.' },
-        { status: 403 },
-      )
-    }
+    // Gravação dos segredos do canal passa pelo service role (a migration 153 tira INSERT/UPDATE dessas colunas do papel
+    // authenticated) — então o "só quem gere canais" que antes vinha da RLS é checado aqui (channels.manage).
+    const access = await channelAccess(true)
+    if ('response' in access) return access.response
+    const { supabase, accountId } = access.ctx
+    const user = { id: access.ctx.userId }
     const writer = supabaseAdmin()
 
     const body = await request.json()
@@ -980,27 +909,9 @@ export async function POST(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    const accountId = await resolveAccountId(supabase, user.id)
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Seu perfil não está vinculado a uma conta.' },
-        { status: 403 },
-      )
-    }
-
-    const denied = await requireChannelAdmin(supabase, user.id, 'Somente administradores da conta podem excluir canais.')
-    if (denied) return denied
+    const access = await channelAccess(true, 'Somente administradores da conta podem excluir canais.')
+    if ('response' in access) return access.response
+    const { supabase, accountId } = access.ctx
 
     const { searchParams } = new URL(request.url)
     const targetId = searchParams.get('id')
@@ -1044,27 +955,9 @@ export async function DELETE(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    const accountId = await resolveAccountId(supabase, user.id)
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Seu perfil não está vinculado a uma conta.' },
-        { status: 403 },
-      )
-    }
-
-    const denied = await requireChannelAdmin(supabase, user.id, 'Somente administradores da conta podem alterar as configurações dos canais.')
-    if (denied) return denied
+    const access = await channelAccess(true)
+    if ('response' in access) return access.response
+    const { supabase, accountId } = access.ctx
 
     const body = await request.json()
     const { id, flow_id, receptivo, habilitado, team_id, client_id } = body
