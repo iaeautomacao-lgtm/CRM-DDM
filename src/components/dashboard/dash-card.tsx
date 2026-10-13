@@ -2,8 +2,8 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
- * Painel do Dashboard (protótipo DDM): superfície com borda de 1px, raio
- * 10px, título 14px e subtítulo opcional. `action` fica à direita do título.
+ * Painel do Dashboard (Design System DDM): cartão com canto de 20px e
+ * sombra sm, título em Poppins 16px e subtítulo opcional. `action` fica à direita do título.
  */
 export function DashCard({
   title,
@@ -25,13 +25,13 @@ export function DashCard({
     <section
       aria-label={label ?? title}
       className={cn(
-        'flex min-w-0 flex-col gap-4 rounded-[10px] border border-border bg-card px-5 py-[18px]',
+        'flex min-w-0 flex-col gap-4 rounded-card bg-card p-5 shadow-sm dark:border dark:border-border',
         className,
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h3 className="m-0 font-sans text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="m-0 font-heading text-base font-semibold text-foreground">{title}</h3>
           {subtitle ? <p className="m-0 text-[12.5px] text-muted-foreground">{subtitle}</p> : null}
         </div>
         {action}

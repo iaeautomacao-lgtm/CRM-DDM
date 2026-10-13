@@ -193,7 +193,7 @@ export default function AutomationsPage() {
           onChange={setActiveTab}
           options={[
             { value: "chat", label: "Automações de Chat", count: automations ? list.length : undefined },
-            { value: "pipeline", label: "Automações de Pipeline (CRM)" },
+            { value: "pipeline", label: "Automações de funil (CRM)" },
           ]}
         />
       </PageToolbar>

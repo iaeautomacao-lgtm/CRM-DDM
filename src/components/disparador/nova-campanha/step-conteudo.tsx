@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { AlertTriangle, ArrowDown, ArrowUp, Check, FileText, Loader2, Plus, Search, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -272,7 +274,14 @@ function MetaTemplates({
             <p className="p-2 text-xs text-danger">{catalog.error}</p>
           ) : filtered.length === 0 ? (
             <p className="p-2 text-xs text-muted-foreground">
-              Nenhum template aprovado {search ? "com esse nome " : ""}nesta conta WhatsApp Business. Sincronize em Configurações → Templates.
+              Nenhum template aprovado {search ? "com esse nome " : ""}nesta conta WhatsApp Business.{" "}
+              <Can permission="templates.manage" fallback="Peça a um administrador para sincronizar os templates.">
+                Sincronize em{" "}
+                <Link href="/templates" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                  Templates
+                </Link>
+                .
+              </Can>
             </p>
           ) : (
             filtered.map((t) => {

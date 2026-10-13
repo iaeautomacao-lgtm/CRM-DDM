@@ -2,7 +2,9 @@
 
 import { validateStepDrafts } from "@/lib/billing/client-validation";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Plus, Trash2 } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +83,7 @@ export function StepsEditor({
   provider,
   canManage,
   onSaved,
+  onGoToConfig,
 }: {
   ruler: Ruler;
   steps: RulerStep[];
@@ -88,7 +91,10 @@ export function StepsEditor({
   provider: "meta" | "waha" | null;
   canManage: boolean;
   onSaved: (steps: RulerStep[]) => void;
+  /** Troca a gaveta para a aba Configuração (onde se define o canal). */
+  onGoToConfig?: () => void;
 }) {
+  const canManageTemplates = usePermission("templates.manage");
   const [drafts, setDrafts] = useState<StepDraft[]>(() => steps.map(toDraft));
   const [saving, setSaving] = useState(false);
   const [problems, setProblems] = useState<string[]>([]);
@@ -142,6 +148,14 @@ export function StepsEditor({
       {provider === null && (
         <p className="rounded-md bg-surface-3 px-3 py-2 text-xs text-foreground-2">
           Defina o canal na aba Configuração: canal Meta usa template aprovado; canal WAHA usa texto livre.
+          {onGoToConfig && (
+            <>
+              {" "}
+              <button type="button" onClick={onGoToConfig} className="font-medium text-primary-text hover:underline">
+                Ir para Configuração
+              </button>
+            </>
+          )}
         </p>
       )}
 
@@ -256,6 +270,18 @@ export function StepsEditor({
                     </option>
                   ))}
                 </select>
+                {templates.length === 0 && (
+                  <span className="text-muted-foreground">
+                    Nenhum template aprovado nesta conta.{" "}
+                    {canManageTemplates ? (
+                      <Link href="/templates" className="font-medium text-primary-text hover:underline">
+                        Abrir templates
+                      </Link>
+                    ) : (
+                      "Peça a um administrador."
+                    )}
+                  </span>
+                )}
                 {tpl?.body_text && (
                   <span className="whitespace-pre-wrap rounded-md bg-surface-3 px-2.5 py-2 text-xs text-foreground-2">{tpl.body_text}</span>
                 )}

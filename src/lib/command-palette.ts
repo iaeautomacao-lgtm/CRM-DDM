@@ -50,7 +50,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Disparador · Desempenho", group: "Campanhas", href: "/disparador/desempenho" },
   { label: "Disparador · Erros", group: "Campanhas", href: "/disparador/erros" },
   { label: "Disparador · Blacklist", group: "Campanhas", href: "/disparador/blacklist", keywords: "bloqueados descadastro" },
-  { label: "Contatos do disparador", group: "Campanhas", href: "/disparador/contatos", keywords: "importar lista planilha" },
+  { label: "Disparador · Contatos", group: "Campanhas", href: "/disparador/contatos", keywords: "contatos do disparador importar lista planilha" },
   { label: "Templates", group: "Campanhas", href: "/templates", keywords: "modelos meta" },
   { label: "Régua de cobrança", group: "Campanhas", href: "/regua", keywords: "cobranca vencimento inscricoes dunning" },
 
@@ -59,7 +59,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Agentes de IA", group: "Automação", href: "/settings?tab=agents", settingsSection: "agents" },
   { label: "Provedores de IA", group: "Configurações", href: "/settings?tab=ai", settingsSection: "ai", keywords: "openai chave modelo" },
 
-  { label: "DDM Intelligence", group: "Inteligência", href: "/inteligencia", keywords: "assistente" },
+  { label: "Inteligência", group: "Inteligência", href: "/inteligencia", keywords: "ddm intelligence assistente" },
   { label: "Chave pessoal do MCP", group: "Inteligência", href: "/inteligencia/chaves", permission: "intelligence.personal_key" },
   { label: "Relatórios · Atendimentos", group: "Inteligência", href: "/relatorios/atendimentos" },
   { label: "Relatórios · Agentes", group: "Inteligência", href: "/relatorios/agentes" },

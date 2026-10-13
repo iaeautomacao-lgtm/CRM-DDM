@@ -1,6 +1,9 @@
 "use client";
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { DisparadorMessageTemplate } from "@/types";
@@ -199,7 +202,7 @@ export function MessageTemplatePicker({
         const result = await mammoth.extractRawText({ arrayBuffer });
         text = result.value;
       } else if (name.endsWith(".txt")) {
-        text = await file.text();
+        text = await readTextFile(file);
       } else {
         toast.error("Formato não suportado. Use .docx ou .txt.");
         return;
@@ -341,6 +344,13 @@ export function MessageTemplatePicker({
                     <p className="text-xs text-muted-foreground">
                       Para usar templates aprovados pela Meta, selecione um canal
                       &quot;WhatsApp Oficial (Meta)&quot; na campanha antes de abrir o picker.
+                      <Can permission="channels.manage">
+                        {" "}Ainda não tem um canal Meta?{" "}
+                        <Link href="/canais" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                          Conectar canal
+                        </Link>
+                        .
+                      </Can>
                     </p>
                   </div>
                 ) : !wabaId ? (
@@ -351,6 +361,13 @@ export function MessageTemplatePicker({
                     <p className="text-xs text-muted-foreground">
                       Os templates são da conta WhatsApp Business (WABA) do número. Selecione só
                       números Meta da mesma WABA (e com WABA configurada) no passo Público.
+                      <Can permission="channels.manage">
+                        {" "}Para configurar a WABA, edite o canal em{" "}
+                        <Link href="/canais" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                          Canais
+                        </Link>
+                        .
+                      </Can>
                     </p>
                   </div>
                 ) : (
@@ -359,8 +376,13 @@ export function MessageTemplatePicker({
                       Nenhum template aprovado encontrado
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Sincronize os templates em Configurações → Templates ou aguarde
-                      a aprovação da Meta.
+                      <Can permission="templates.manage" fallback="Peça a um administrador para sincronizar os templates ou aguarde a aprovação da Meta.">
+                        Sincronize os templates em{" "}
+                        <Link href="/templates" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                          Templates
+                        </Link>{" "}
+                        ou aguarde a aprovação da Meta.
+                      </Can>
                     </p>
                   </div>
                 )

@@ -6,6 +6,8 @@
 // Visual do redesenho DDM; o modelo continua por número (o protótipo global foi descartado — PRD 22, 3.4).
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
@@ -451,7 +453,18 @@ export default function ControlesPage() {
       ) : (
         <>
           {(overview?.numbers ?? []).length === 0 ? (
-            <EmptyState title="Nenhum número cadastrado nesta conta" />
+            <div>
+              <EmptyState className="min-h-0" title="Nenhum número cadastrado nesta conta" />
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                <Can permission="channels.manage" fallback="Peça a um administrador para conectar um número.">
+                  Conecte um número em{" "}
+                  <Link href="/canais" className="font-medium text-primary-text underline underline-offset-2">
+                    Canais
+                  </Link>
+                  .
+                </Can>
+              </p>
+            </div>
           ) : (
             <section aria-label="Controles por número" className="ddm-stagger-blocks grid grid-cols-1 gap-3 lg:grid-cols-2">
               {(overview?.numbers ?? []).map((n) => {

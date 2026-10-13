@@ -606,7 +606,7 @@ function Composer({
               : "Digite uma mensagem"
           }
           disabled={!!recorder}
-          className="max-h-32 min-h-10 flex-1 resize-none rounded-[20px] border border-border bg-card px-4 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/20 md:text-sm"
+          className="max-h-32 min-h-10 flex-1 resize-none rounded-[20px] border border-border bg-card px-4 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/20"
         />
         {draft.trim() || !canRecord ? (
           <button

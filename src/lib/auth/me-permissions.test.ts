@@ -93,6 +93,18 @@ describe("buildMePermissions com papel personalizado (migrations 312/313)", () =
     expect(me.role).toEqual({ id: "c1", key: "supervisor", name: "Cobrança", kind: "custom", rank: 3 });
     expect(me.permissions.sort()).toEqual(["inbox.reply", "inbox.view", "reports.view_team"]);
     expect(me.scopes).toEqual({ inbox: "own", monitoring: "none", reports: "team", intelligence: "none" });
+    expect(me.pages).not.toContain("/flows");
+  });
+
+  it("só flows.view_runs abre /flows (editor em modo leitura, decisão 13/10)", () => {
+    const me = buildMePermissions({
+      account: { id: "acc-1", name: "Acme" },
+      role: "supervisor",
+      permissions: new Set(["inbox.view", "flows.view_runs"]),
+      customRole: { id: "c2", name: "Auditoria de fluxo" },
+    });
+    expect(me.pages).toContain("/flows");
+    expect(me.pages).not.toContain("/disparador");
   });
 
   it("catálogo: future não é concedível (integrations.manage)", () => {

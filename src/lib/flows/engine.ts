@@ -56,6 +56,7 @@ import { effectivePromptVersion } from "@/lib/ai/attempt-telemetry";
 import { promptVersionOf } from "@/lib/ai/prompt-versions";
 import { flowExitTagsFromNodes } from "./exit-tag-routing";
 import { flowTokenForRun } from "@/lib/whatsapp/flow-token";
+import { queueAfterDispatchFailure } from "./dispatch-failure";
 import {
   isTurnFreeInbound,
   nextAiTurnCount,
@@ -4232,6 +4233,12 @@ export async function dispatchInboundToFlows(
       // One SELECT for the whole flow's nodes — advance loop is now
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
+      // Decisão do dono (13/10, item 13): o teto de 50 voltas do go_to vale POR MENSAGEM do cliente — zera quando chega mensagem nova.
+      // O laço sem interação (go_to girando sozinho dentro do mesmo avanço) continua bloqueado em 50.
+      if (activeRun.hops_count > 0) {
+        const { error: hopsError } = await db.from("flow_runs").update({ hops_count: 0 }).eq("id", activeRun.id);
+        if (!hopsError) activeRun = { ...activeRun, hops_count: 0 };
+      }
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
     }
 
@@ -4274,16 +4281,19 @@ export async function dispatchInboundToFlows(
       "[flows] dispatchInboundToFlows threw:",
       err instanceof Error ? err.message : err,
     );
-    // Rastro em system_logs (antes só console). O retorno NÃO muda: consumed:false como sempre (mudar isso altera quem responde ao cliente).
+    // Decisão do dono (13/10, item 12): falha ao entregar ao fluxo ⇒ ninguém responde por cima (consumed:true: sem IA global nem automação) e a conversa
+    // vai para a fila, com o motivo registrado (dispatch-failure.ts). Rastro técnico em system_logs.
+    const failureDetail = err instanceof Error ? err.message : String(err);
+    const failure = await queueAfterDispatchFailure(db, input, failureDetail);
     void writeLog({
       account_id: input.accountId,
       level: "error",
       source: "flows",
       event: "flow_dispatch_error",
       message: "Exceção ao despachar mensagem recebida para os fluxos",
-      payload: { contact_id: input.contactId, conversation_id: input.conversationId ?? null, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) },
+      payload: { contact_id: input.contactId, conversation_id: input.conversationId ?? null, detail: failureDetail.slice(0, 200), queued: failure.queued, recorded: failure.recorded },
     });
-    return { consumed: false, outcome: "no_match" };
+    return { consumed: true, outcome: "dispatch_error_queued" };
   }
 }
 

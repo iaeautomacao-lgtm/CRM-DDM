@@ -45,6 +45,8 @@ import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole, type AccountRole } from "@/lib/auth/roles";
 import { supabaseAdmin } from "@/lib/account/admin-client";
 import { maskEmailForLog } from "@/lib/privacy/mask";
+// Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/auth-errors";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -78,7 +80,6 @@ async function rollbackOrphanedAuthUser(
 }
 
 const MAX_MEMBERS_PER_IMPORT = 200;
-const MIN_PASSWORD_LENGTH = 6;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // The CSV/XLSX template and the PT-BR role labels (role-meta.ts) both

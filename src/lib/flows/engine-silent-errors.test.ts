@@ -3,14 +3,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const writeLog = vi.hoisted(() => vi.fn());
-const dbState = vi.hoisted(() => ({ throwOnFrom: false }));
+const dbState = vi.hoisted(() => ({ throwOnFrom: false, throwOnTable: null as string | null, calls: [] as Array<{ table: string; op: string; payload?: unknown; filters: Array<[string, unknown]> }> }));
 
 vi.mock("@/lib/logger", () => ({ writeLog }));
 vi.mock("@/lib/ai/responder", () => ({ handleAiAutoResponse: vi.fn(), AI_EMPTY_REPLY_FALLBACK_TEXT: "fallback" }));
 vi.mock("@/lib/flows/admin-client", () => ({
   supabaseAdmin: () => {
     if (dbState.throwOnFrom) return { from: () => { throw new Error("banco fora do ar: segredo-123"); } };
-    return { from: () => ({}) };
+    // só a tabela flow_runs falha (a conversa e as decisões continuam graváveis): prova a fila depois da falha de entrega
+    return {
+      from: (table: string) => {
+        if (table === dbState.throwOnTable) throw new Error(`falha ao ler ${table}`);
+        const call: { table: string; op: string; payload?: unknown; filters: Array<[string, unknown]> } = { table, op: "select", filters: [] };
+        dbState.calls.push(call);
+        const b: Record<string, unknown> = {};
+        b.update = (p: unknown) => ((call.op = "update"), (call.payload = p), b);
+        b.insert = (p: unknown) => ((call.op = "insert"), (call.payload = p), b);
+        b.select = () => b;
+        for (const m of ["eq", "neq"]) b[m] = (c: string, v: unknown) => (call.filters.push([`${m}:${c}`, v]), b);
+        b.then = (resolve: (v: unknown) => void) => resolve({ data: call.op === "update" ? [{ id: "cv" }] : null, error: null });
+        return b;
+      },
+    };
   },
 }));
 
@@ -72,6 +86,8 @@ beforeEach(() => {
   runUpdates = [];
   failures = { tables: new Set(), runUpdate: false };
   dbState.throwOnFrom = false;
+  dbState.throwOnTable = null;
+  dbState.calls = [];
 });
 
 describe("M1 — set_tag e add_note conferem o { error } do banco", () => {
@@ -147,15 +163,27 @@ describe("M3 — endRun registra o UPDATE de status que falhou", () => {
   });
 });
 
-describe("M6 — dispatchInboundToFlows registra a exceção e MANTÉM consumed:false", () => {
-  it("exceção ao despachar: system_logs flow_dispatch_error (mensagem curta, ids) e o retorno é o mesmo de sempre", async () => {
+describe("item 12 (decisão do dono, 13/10) — falha ao entregar ao fluxo: ninguém responde e a conversa vai para a fila", () => {
+  const inbound = { accountId: "acc", contactId: "ct", conversationId: "cv", message: { kind: "text", text: "oi", messageId: "wamid.1" } as never, isFirstInboundMessage: true } as never;
+
+  it("exceção ao despachar: consumed:true (IA global e automação NÃO respondem por cima) e o registro técnico continua em system_logs", async () => {
     dbState.throwOnFrom = true;
-    const out = await dispatchInboundToFlows({
-      accountId: "acc", contactId: "ct", conversationId: "cv", message: { kind: "text", text: "oi", messageId: "wamid.1" } as never, isFirstInboundMessage: true,
-    } as never);
-    expect(out).toEqual({ consumed: false, outcome: "no_match" }); // inalterado: quem responde ao cliente não muda
+    const out = await dispatchInboundToFlows(inbound);
+    expect(out).toEqual({ consumed: true, outcome: "dispatch_error_queued" });
     const [log] = logged("flow_dispatch_error");
-    expect(log).toMatchObject({ account_id: "acc", level: "error", source: "flows", payload: { contact_id: "ct", conversation_id: "cv" } });
+    expect(log).toMatchObject({ account_id: "acc", level: "error", source: "flows", payload: { contact_id: "ct", conversation_id: "cv", queued: false } });
     expect(String((log.payload as Row).detail)).toContain("banco fora do ar");
+  });
+
+  it("a conversa vai para a fila (status pending, só se não estiver encerrada) e o motivo FALHA_ENTREGA_FLUXO é gravado em ai_decisions", async () => {
+    dbState.throwOnTable = "flow_runs";
+    const out = await dispatchInboundToFlows(inbound);
+    expect(out).toEqual({ consumed: true, outcome: "dispatch_error_queued" });
+    const update = dbState.calls.find((c) => c.table === "conversations" && c.op === "update")!;
+    expect(update.payload).toMatchObject({ status: "pending" });
+    expect(update.filters).toEqual([["eq:id", "cv"], ["eq:account_id", "acc"], ["neq:status", "closed"]]);
+    const decision = dbState.calls.find((c) => c.table === "ai_decisions" && c.op === "insert")!;
+    expect(decision.payload).toMatchObject({ account_id: "acc", conversation_id: "cv", decision_type: "handoff", needs_human: true, handoff_reason: "FALHA_ENTREGA_FLUXO", reason: "flow_dispatch_failed" });
+    expect(logged("flow_dispatch_error")[0]).toMatchObject({ payload: { queued: true, recorded: true } });
   });
 });
