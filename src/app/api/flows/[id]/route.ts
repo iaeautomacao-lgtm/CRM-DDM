@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -238,7 +239,7 @@ export async function PUT(
     .eq('id', id)
     .eq('account_id', accountId)
   if (updErr) {
-    return NextResponse.json({ error: updErr.message }, { status: 500 })
+    return internalErrorResponse("flows-id", updErr)
   }
 
   // Nós antes desta gravação — também usados para o histórico de prompts.
@@ -254,7 +255,7 @@ export async function PUT(
       .order('created_at')
       .range(0, 999)
     if (prevErr) {
-      return NextResponse.json({ error: prevErr.message }, { status: 500 })
+      return internalErrorResponse("flows-id", prevErr)
     }
     previousNodesForHistory = previousNodes ?? []
     const { error: delErr } = await admin
@@ -262,7 +263,7 @@ export async function PUT(
       .delete()
       .eq('flow_id', id)
     if (delErr) {
-      return NextResponse.json({ error: delErr.message }, { status: 500 })
+      return internalErrorResponse("flows-id", delErr)
     }
     if (body.nodes.length > 0) {
       // created_at escalonado (1 ms por nó) mantém a ordem da Lista ao
@@ -284,10 +285,7 @@ export async function PUT(
           const { error: restoreErr } = await admin.from('flow_nodes').insert(previousNodes)
           if (restoreErr) console.error('[flows PUT] falha ao restaurar nós:', restoreErr.message)
         }
-        return NextResponse.json(
-          { error: `Falha ao salvar os nós (nada foi alterado): ${insErr.message}` },
-          { status: 500 },
-        )
+        return internalErrorResponse('flows-id', insErr, { message: 'Falha ao salvar os nós (nada foi alterado).' })
       }
     }
   }
@@ -340,7 +338,7 @@ export async function DELETE(
     .eq('id', id)
     .eq('account_id', accountId)
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse("flows-id", error)
   }
   return NextResponse.json({ ok: true })
 }

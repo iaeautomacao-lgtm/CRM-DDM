@@ -1,4 +1,5 @@
 import { orIlikeContains } from '@/lib/postgrest/or-filter'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -97,7 +98,7 @@ export async function GET(
     .order('id', { ascending: false })
     .range(rangeFrom, rangeTo)
   if (runsErr) {
-    return NextResponse.json({ error: runsErr.message }, { status: 500 })
+    return internalErrorResponse("flows-runs", runsErr)
   }
   const listedPage = splitPage(listed ?? [], limit)
   let runs = listedPage.rows
@@ -201,7 +202,7 @@ export async function DELETE(
     .eq('account_id', accountId)
     .in('id', ids)
   if (matchErr) {
-    return NextResponse.json({ error: matchErr.message }, { status: 500 })
+    return internalErrorResponse("flows-runs", matchErr)
   }
   const scopedIds = (matching ?? []).map((r: { id: string }) => r.id)
   if (scopedIds.length === 0) {
@@ -216,7 +217,7 @@ export async function DELETE(
     .delete()
     .in('flow_run_id', scopedIds)
   if (eventsErr) {
-    return NextResponse.json({ error: eventsErr.message }, { status: 500 })
+    return internalErrorResponse("flows-runs", eventsErr)
   }
 
   const { error: runsErr } = await admin
@@ -224,7 +225,7 @@ export async function DELETE(
     .delete()
     .in('id', scopedIds)
   if (runsErr) {
-    return NextResponse.json({ error: runsErr.message }, { status: 500 })
+    return internalErrorResponse("flows-runs", runsErr)
   }
 
   return NextResponse.json({ deleted: scopedIds.length })

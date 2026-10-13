@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { trackCron } from "@/lib/ops/cron-heartbeat"
 import { timingSafeEqual } from 'node:crypto'
 import { registerAuditActor } from '@/lib/audit/context'
@@ -62,7 +63,7 @@ async function handlePost(request: Request) {
 
   if (error) {
     console.error('[flows-cron] active-run scan failed:', error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse("flows-cron", error)
   }
   type Row = {
     id: string

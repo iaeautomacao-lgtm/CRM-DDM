@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { auditFetch } from '@/lib/audit/context'
@@ -494,7 +495,7 @@ export async function POST(request: Request) {
 
         if (updateError) {
           console.error('Error updating config:', updateError)
-          return NextResponse.json({ error: updateError.message }, { status: 500 })
+          return internalErrorResponse("whatsapp-config", updateError)
         }
       } else {
         wahaConfigObj.waha_api_key = encryptedApiKey
@@ -507,7 +508,7 @@ export async function POST(request: Request) {
 
         if (insertError) {
           console.error('Error inserting config:', insertError)
-          return NextResponse.json({ error: insertError.message }, { status: 500 })
+          return internalErrorResponse("whatsapp-config", insertError)
         }
       }
 

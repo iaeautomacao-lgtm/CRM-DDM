@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
   }
   const { data, error } = await query
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse("flows", error)
   }
   if (limit === null) return NextResponse.json({ flows: data ?? [], has_more: false })
   const page = splitPage(data ?? [], limit)
@@ -89,10 +90,7 @@ export async function POST(request: Request) {
       .select()
       .single()
     if (flowErr || !flow) {
-      return NextResponse.json(
-        { error: flowErr?.message ?? 'Falha ao criar o fluxo' },
-        { status: 500 },
-      )
+      return internalErrorResponse("flows", flowErr)
     }
     if (template.nodes.length > 0) {
       const { error: nodesErr } = await admin.from('flow_nodes').insert(
@@ -108,10 +106,7 @@ export async function POST(request: Request) {
         // sit as an empty draft. CASCADE on flow_id removes the
         // (probably zero) nodes too.
         await admin.from('flows').delete().eq('id', flow.id)
-        return NextResponse.json(
-          { error: nodesErr.message },
-          { status: 500 },
-        )
+        return internalErrorResponse("flows", nodesErr)
       }
     }
     return NextResponse.json({ flow }, { status: 201 })
@@ -137,10 +132,7 @@ export async function POST(request: Request) {
     .select()
     .single()
   if (error || !data) {
-    return NextResponse.json(
-      { error: error?.message ?? 'insert failed' },
-      { status: 500 },
-    )
+    return internalErrorResponse("flows", error)
   }
   return NextResponse.json({ flow: data }, { status: 201 })
 }

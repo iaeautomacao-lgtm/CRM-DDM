@@ -1,3 +1,4 @@
+import { internalErrorResponse } from '@/lib/api/internal-error'
 import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -109,7 +110,7 @@ export async function POST(
     .select()
     .maybeSingle()
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse("flows-activate", error)
   }
   // Histórico de prompts (migration 148): o que entrou no ar ao ativar.
   // Texto já registrado só atualiza last_saved_at. Best-effort.
