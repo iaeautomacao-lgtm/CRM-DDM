@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -41,15 +42,18 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
-  SlidersHorizontal,
   Filter,
   X,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
-import { CustomFieldsManager } from '@/components/contacts/custom-fields-manager';
-import { usePermission } from '@/hooks/use-permission';
+import { ImportsPanel } from '@/components/contacts/imports-panel';
+import { CustomFieldsSettings } from '@/components/settings/custom-fields-settings';
+import { TagManager } from '@/components/settings/tag-manager';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ForbiddenState } from '@/components/ddm/states';
+import { usePermission, usePermissions } from '@/hooks/use-permission';
 import { ErrorState } from '@/components/ddm/states';
 import { GatedButton } from '@/components/ui/gated-button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -68,12 +72,11 @@ interface ContactWithTagIds extends Contact {
   tagIds: string[];
 }
 
-export default function ContactsPage() {
+function ContactsListTab() {
   const supabase = createClient();
   const canEdit = usePermission('contacts.edit');
   // Importar cria contatos e etiquetas em lote: o catálogo exige contacts.import (admin+), mais que contacts.edit.
   const canImport = usePermission('contacts.import');
-  const canEditSettings = usePermission('tags.manage');
 
   const [contactRowsState, setContacts] = useState<ContactWithTagIds[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +95,6 @@ export default function ContactsPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailContactId, setDetailContactId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
@@ -380,30 +382,17 @@ export default function ContactsPage() {
   }
 
   return (
-    <PageBody>
-      {/* Cabeçalho da página (redesenho DDM): título em Poppins + resumo. */}
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Contatos</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Gerencie sua lista de contatos.{' '}
-          {totalCount > 0 && (
-            <>
-              <CountUp value={totalCount} className="font-medium text-foreground-2" /> contatos no total.
-            </>
-          )}
+    <div className="flex flex-col gap-3.5">
+      {totalCount > 0 && (
+        <p className="text-sm text-muted-foreground">
+          <CountUp value={totalCount} className="font-medium text-foreground-2" /> contatos no total.
         </p>
-      </div>
+      )}
 
       {/* Barra: busca, etiquetas e ações */}
       <PageToolbar
         actions={
           <>
-            {canEditSettings && (
-              <Button variant="outline" onClick={() => setCustomFieldsOpen(true)} className="hidden sm:inline-flex">
-                <SlidersHorizontal className="size-3.5" />
-                Campos personalizados
-              </Button>
-            )}
             <GatedButton
               variant="outline"
               canAct={canImport}
@@ -626,7 +615,7 @@ export default function ContactsPage() {
                         </Button>
                       )}
                       {!hasActiveFilters && canImport && (
-                        <Link href="/disparador/contatos" className="text-[12.5px] font-medium text-primary-text hover:underline">
+                        <Link href="/contacts?tab=importacoes" className="text-[12.5px] font-medium text-primary-text hover:underline">
                           Importar lista
                         </Link>
                       )}
@@ -815,14 +804,6 @@ export default function ContactsPage() {
         onImported={fetchContacts}
       />
 
-      {/* Custom Fields Manager (admin+) */}
-      {canEditSettings && (
-        <CustomFieldsManager
-          open={customFieldsOpen}
-          onOpenChange={setCustomFieldsOpen}
-        />
-      )}
-
       {/* Delete Confirmation */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
@@ -884,7 +865,7 @@ export default function ContactsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </PageBody>
+    </div>
   );
 }
 
@@ -894,4 +875,104 @@ function contactInitials(name: string): string {
   if (parts.length === 0) return '?';
   const last = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '';
   return ((parts[0][0] ?? '') + last).toUpperCase();
+}
+
+const CONTACT_TABS = ['lista', 'importacoes', 'tags', 'campos'] as const;
+type ContactsTab = (typeof CONTACT_TABS)[number];
+
+const TAB_CLASS =
+  'flex-none px-0 pb-2.5 pt-1 text-[13px] data-active:text-foreground after:bg-primary after:!bottom-[-1px]';
+
+function ContactsContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const perms = usePermissions();
+  // Importações = campanhas.manage (rotas /api/disparador/imports); Tags e Campos = tags.manage. O servidor revalida.
+  const canImports = perms.can('campaigns.manage');
+  const canTags = perms.can('tags.manage');
+
+  const requested = searchParams.get('tab');
+  const requestedTab: ContactsTab = (CONTACT_TABS as readonly string[]).includes(requested ?? '')
+    ? (requested as ContactsTab)
+    : 'lista';
+  // Sem permissão (ou ainda carregando) a aba cai na Lista, sem piscar tela de "sem acesso".
+  const allowed: Record<ContactsTab, boolean> = {
+    lista: true,
+    importacoes: canImports,
+    tags: canTags,
+    campos: canTags,
+  };
+  const tab: ContactsTab = perms.loading || allowed[requestedTab] ? requestedTab : 'lista';
+
+  return (
+    <PageBody>
+      <div className="flex flex-col gap-1.5 pt-1">
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Contatos</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          Sua lista de contatos, as listas importadas, as tags e os campos personalizados.
+        </p>
+      </div>
+
+      <Tabs
+        value={tab}
+        onValueChange={(next) => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('tab', String(next));
+          router.replace(`/contacts?${params.toString()}`, { scroll: false });
+        }}
+      >
+        <div className="border-b">
+          <TabsList variant="line" className="h-auto justify-start gap-5 p-0">
+            <TabsTrigger value="lista" className={TAB_CLASS}>
+              Lista
+            </TabsTrigger>
+            {canImports && (
+              <TabsTrigger value="importacoes" className={TAB_CLASS}>
+                Importações
+              </TabsTrigger>
+            )}
+            {canTags && (
+              <>
+                <TabsTrigger value="tags" className={TAB_CLASS}>
+                  Tags
+                </TabsTrigger>
+                <TabsTrigger value="campos" className={TAB_CLASS}>
+                  Campos personalizados
+                </TabsTrigger>
+              </>
+            )}
+          </TabsList>
+        </div>
+
+        <TabsContent value="lista" className="pt-4">
+          <ContactsListTab />
+        </TabsContent>
+        <TabsContent value="importacoes" className="pt-4">
+          {tab === 'importacoes' &&
+            (perms.loading || canImports ? (
+              <ImportsPanel />
+            ) : (
+              <ForbiddenState
+                title="Você não tem permissão para ver as listas importadas"
+                hint="As listas importadas são restritas a administradores e ao proprietário."
+              />
+            ))}
+        </TabsContent>
+        <TabsContent value="tags" className="pt-4">
+          {tab === 'tags' && <TagManager />}
+        </TabsContent>
+        <TabsContent value="campos" className="pt-4">
+          {tab === 'campos' && <CustomFieldsSettings />}
+        </TabsContent>
+      </Tabs>
+    </PageBody>
+  );
+}
+
+export default function ContactsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ContactsContent />
+    </Suspense>
+  );
 }
