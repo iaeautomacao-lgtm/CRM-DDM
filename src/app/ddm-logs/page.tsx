@@ -185,7 +185,7 @@ type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
 
 const TAB_OPTIONS: { value: Tab; label: string }[] = [
   { value: "events", label: "Eventos" },
-  { value: "users", label: "Por Usuário" },
+  { value: "users", label: "Por usuário" },
   { value: "sessions", label: "Sessões" },
   { value: "actions", label: "Ações" },
   { value: "tests", label: "Testes" },

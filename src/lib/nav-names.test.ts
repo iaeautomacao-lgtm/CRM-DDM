@@ -35,10 +35,10 @@ describe("vocabulário", () => {
     expect(getPageTitle("/pipelines")).toBe("Funis");
   });
 
-  it("Meu perfil e Senha e sessões têm a mesma grafia no título e na busca", () => {
+  it("Meu perfil e Segurança têm a mesma grafia no título e na busca", () => {
     expect(getPageTitle("/perfil")).toBe("Meu perfil");
     expect(PALETTE_ITEMS.find((i) => i.href === "/perfil")?.label).toBe("Meu perfil");
-    expect(getPageTitle("/seguranca")).toBe("Senha e sessões");
-    expect(PALETTE_ITEMS.find((i) => i.href === "/seguranca")?.label).toBe("Senha e sessões");
+    expect(getPageTitle("/seguranca")).toBe("Segurança");
+    expect(PALETTE_ITEMS.find((i) => i.href === "/seguranca")?.label).toBe("Segurança");
   });
 });

@@ -190,7 +190,7 @@ export default function AgentesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader>Histórico de sessões (login/logout) por agente.</PageHeader>
+      <PageHeader>Histórico de sessões (login/logout) por atendente.</PageHeader>
 
       <div className="rounded-card border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
@@ -200,7 +200,7 @@ export default function AgentesPage() {
           />
 
           <div className="space-y-1">
-            <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Agente</label>
+            <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Atendente</label>
             <Select value={draft.userId} onValueChange={(v) => v && setDraft((d) => ({ ...d, userId: v }))}>
               <SelectTrigger id={`${uid}-agente`} className="w-44">
                 <SelectValue>{(v: string) => userLabel(v)}</SelectValue>
@@ -256,7 +256,7 @@ export default function AgentesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Agente</TableHead>
+                      <TableHead>Atendente</TableHead>
                       <TableHead>E-mail</TableHead>
                       <TableHead>Data do login</TableHead>
                       <TableHead>Data do logout</TableHead>

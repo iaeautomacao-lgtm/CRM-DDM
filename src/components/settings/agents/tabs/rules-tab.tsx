@@ -71,7 +71,7 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium text-foreground">Regras de Comportamento</h3>
+          <h3 className="text-sm font-medium text-foreground">Regras de comportamento</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Diretrizes prioritárias inseridas de forma estruturada no prompt. Use regras para proibições,
             formatos obrigatórios de resposta ou tratativas especiais.

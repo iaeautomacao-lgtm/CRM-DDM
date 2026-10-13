@@ -50,7 +50,7 @@ export function MonitorFiltersPanel({
   const active = hasActiveFilters(filters);
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="rounded-card border border-border bg-card">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -76,11 +76,11 @@ export function MonitorFiltersPanel({
         <div className="border-t border-border p-4">
           <div className="flex flex-wrap items-end gap-3">
             <MultiSelectFilter
-              label="Agentes"
+              label="Atendentes"
               options={agentOptions}
               selectedIds={draft.agentIds}
               onChange={(ids) => setDraft((d) => ({ ...d, agentIds: ids }))}
-              emptyText="Nenhum agente na conta."
+              emptyText="Nenhum atendente na conta."
             />
             <MultiSelectFilter
               label="Equipes"

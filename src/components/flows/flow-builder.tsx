@@ -441,7 +441,7 @@ function NodeCard({
     <div
       ref={cardRef}
       className={cn(
-        'bg-card relative overflow-hidden rounded-xl border transition-shadow duration-500',
+        'bg-card relative overflow-hidden rounded-card border transition-shadow duration-500',
         hasError
           ? 'border-danger/40'
           : isEntry

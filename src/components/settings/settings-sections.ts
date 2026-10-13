@@ -76,7 +76,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   tools: {
     id: 'tools',
-    label: 'Ferramentas',
+    label: 'Ferramentas dos agentes',
     icon: Wrench,
     group: 'workspace',
     integrationTab: true,
@@ -84,20 +84,20 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   agents: {
     id: 'agents',
-    label: 'Agentes',
+    label: 'Agentes de IA',
     icon: Sparkles,
     group: 'workspace',
     minRole: 'supervisor',
   },
   integrations: { id: 'integrations', label: 'Integrações', icon: Plug, group: 'workspace' },
-  webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
+  webhooks: { id: 'webhooks', label: 'Webhooks de saída', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
   'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor', integrationTab: true },
   ai: { id: 'ai', label: 'Provedores de IA', icon: Bot, group: 'workspace', ownerOnly: true, integrationTab: true },
 };
 
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
   { label: null, group: 'top' },
-  { label: 'Espaço de trabalho', group: 'workspace' },
+  { label: 'Administração', group: 'workspace' },
 ];
 
 /** O papel enxerga a seção? (ownerOnly e minRole). */

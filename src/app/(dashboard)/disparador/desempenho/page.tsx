@@ -369,22 +369,19 @@ export default function DisparadorDesempenhoPage() {
       ) : error ? (
         <ErrorState title="Não foi possível carregar a telemetria" hint={error} onRetry={() => void fetchData(false)} />
       ) : ticks.length === 0 && !(live && (live.activeCampaigns > 0 || live.sentLast60s > 0)) ? (
-        <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border bg-card px-6 py-10 text-center">
-          <EmptyState
-            className="min-h-0 border-0 bg-transparent p-0"
-            icon={Megaphone}
-            title="Nenhum tick registrado na janela selecionada"
-            hint="O motor de disparo grava uma linha de telemetria por minuto em wacrm.system_logs durante a execução do cron. Tente uma janela maior ou inicie um disparo para observar os dados."
-          />
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setJanela("6h")}>
-              Ver últimas 6 horas
-            </Button>
-            <Button variant="outline" onClick={() => setJanela("24h")}>
-              Ver últimas 24 horas
-            </Button>
-          </div>
-        </div>
+        <EmptyState
+          className="py-10"
+          icon={Megaphone}
+          title="Nenhum tick registrado na janela selecionada"
+          hint="O motor de disparo grava uma linha de telemetria por minuto em wacrm.system_logs durante a execução do cron. Tente uma janela maior ou inicie um disparo para observar os dados."
+        >
+          <Button variant="outline" onClick={() => setJanela("6h")}>
+            Ver últimas 6 horas
+          </Button>
+          <Button variant="outline" onClick={() => setJanela("24h")}>
+            Ver últimas 24 horas
+          </Button>
+        </EmptyState>
       ) : (
         <>
           {/* 1. Indicadores da janela */}
@@ -593,7 +590,7 @@ export default function DisparadorDesempenhoPage() {
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Activity className="size-3.5 text-primary-text" aria-hidden="true" />
-                    Últimos 20 Ticks do Disparador
+                    Últimos 20 ticks das campanhas
                   </CardTitle>
                   <CardDescription className="mt-0.5">
                     Detalhamento dos ticks por minuto gravados em <code>wacrm.system_logs</code>.
@@ -627,7 +624,7 @@ export default function DisparadorDesempenhoPage() {
                       <Th className="font-semibold text-right">Memória RSS</Th>
                       <Th className="font-semibold text-right">Vagas</Th>
                       <Th className="font-semibold text-center">Freio</Th>
-                      <Th className="font-semibold">Erros Provedor</Th>
+                      <Th className="font-semibold">Erros do provedor</Th>
                       <Th className="font-semibold text-center">Saúde</Th>
                     </tr>
                   </thead>

@@ -124,23 +124,28 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const visibleBottomNavItems = bottomNavItems.filter((item) => canOpen(item.href.split("?")[0]));
 
   const isAgentsTab = pathname === "/settings" && searchParams.get("tab") === "agents";
+  // Configurações, Agentes de IA (aba de Configurações), Relatórios e Auditoria dividem prefixos de rota.
   const activeNavHref = isAgentsTab
     ? "/settings?tab=agents"
-    : longestMatchingHref(
-        pathname,
-        visibleNavItems
-          .map((item) => item.href)
-          .filter((href) => !href.startsWith("/settings") && !href.startsWith("/relatorios")),
-      );
+    : matchesPrefix(pathname, "/settings")
+      ? "/settings"
+      : matchesPrefix(pathname, "/relatorios/auditoria")
+        ? "/relatorios/auditoria"
+        : matchesPrefix(pathname, "/relatorios")
+          ? "/relatorios/atendimentos"
+          : longestMatchingHref(
+              pathname,
+              visibleNavItems
+                .map((item) => item.href)
+                .filter((href) => !href.startsWith("/settings") && !href.startsWith("/relatorios")),
+            );
 
   // Grupos recolhidos. O grupo da tela atual abre sozinho ao navegar.
   const [closedGroups, setClosedGroups] = useState<NavGroup[]>([]);
   useEffect(() => {
     setClosedGroups(readClosedGroups());
   }, []);
-  const activeGroup = visibleNavItems.find(
-    (item) => item.href === activeNavHref || (item.href === "/relatorios/atendimentos" && pathname.startsWith("/relatorios")),
-  )?.group;
+  const activeGroup = visibleNavItems.find((item) => item.href === activeNavHref)?.group;
   useEffect(() => {
     if (!activeGroup) return;
     setClosedGroups((prev) => {
@@ -333,9 +338,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
                   <ul id={listId} className={cn("flex-col gap-0.5", groupOpen ? "flex" : "hidden")}>
                     {items.map((item) => {
-                      const reportsActive =
-                        item.href === "/relatorios/atendimentos" && pathname.startsWith("/relatorios");
-                      const isActive = reportsActive || item.href === activeNavHref;
+                      const isActive = item.href === activeNavHref;
                       const showUnread = item.href === "/inbox" && totalUnread > 0 && !isActive;
                       const unreadLabel = `${totalUnread} conversa${totalUnread === 1 ? "" : "s"} não lida${totalUnread === 1 ? "" : "s"}`;
 
@@ -405,10 +408,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <div className={cn("shrink-0 border-t border-sidebar-border py-2.5", rail ? "px-2" : "px-2.5")}>
             <ul className="flex flex-col gap-0.5">
               {visibleBottomNavItems.map((item) => {
-                const active =
-                  item.href === "/settings"
-                    ? matchesPrefix(pathname, item.href) && !isAgentsTab
-                    : matchesPrefix(pathname, item.href);
+                const active = matchesPrefix(pathname, item.href);
                 return (
                   <li key={item.href}>
                     <RailTooltip enabled={rail} label={item.label}>

@@ -7,6 +7,7 @@
 // Credencial: não digite tokens aqui — use {{cred.NOME}} (Configurações →
 // Variáveis e credenciais). A rota recusa credencial em texto.
 
+import { X } from "lucide-react";
 import type { AiAgentTool, AiAgentToolParameter } from "@/lib/flows/types";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
@@ -118,7 +119,8 @@ export function AiToolEditor({
               className="shrink-0 text-xs text-destructive hover:underline"
               onClick={() => setHeaders(headers.filter((_, j) => j !== i))}
             >
-              ✕
+              <X className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Remover</span>
             </button>
           </div>
         ))}
@@ -207,7 +209,8 @@ export function AiToolEditor({
                 }}
                 className="text-xs text-destructive hover:underline shrink-0"
               >
-                ✕
+                <X className="size-3.5" aria-hidden="true" />
+                <span className="sr-only">Remover</span>
               </button>
             </div>
             <input
