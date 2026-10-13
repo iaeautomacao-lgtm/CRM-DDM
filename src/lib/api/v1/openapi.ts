@@ -421,7 +421,7 @@ export const openApiSpec = {
     '/conversations/{id}/messages/{messageId}/media': {
       get:{
         tags:['Conversas'],operationId:'signConversationMedia',summary:'Obter link temporário de anexo',
-        description:'Escopo conversations:read. Valida posse da mensagem e devolve URL assinada do chat-media por 60 s. Mídia externa não é re-hospedada.',
+        description:'Escopo conversations:read ou conversations:export. Valida posse da mensagem e devolve URL assinada do chat-media por 60 s. Mídia externa não é re-hospedada.',
         parameters:[conversationIdParam,messageIdParam],
         responses:{'200':simpleOk('URL temporária e expiração (segundos).'),...conversationErrors},
       },
