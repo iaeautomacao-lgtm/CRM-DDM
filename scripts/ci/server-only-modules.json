@@ -53,7 +53,7 @@
     "src/lib/whatsapp/waha-webhook-auth.ts",
     "src/lib/ai/llm-shared.ts",
     "src/lib/flows/simulator/ai.ts",
-    "src/lib/whatsapp/inbound-message.ts"
+    "src/lib/whatsapp/inbound-message.ts",
     "src/lib/roles/invite-role.ts"
   ],
   "clientOnlyDirs": [
