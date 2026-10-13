@@ -190,6 +190,7 @@ async function enrichConversations(db: SupabaseClient, accountId: string, rows: 
   ]);
   return rows.map(row => {
     const { contact, ...safe } = row;
+    void contact;
     return {
       ...safe, contact: extractContact(row),
       assigned_agent_name: row.assigned_agent_id ? names.get(row.assigned_agent_id) ?? null : null,
@@ -333,8 +334,10 @@ export async function readEventPage(
   await readConversationExists(db, accountId, conversationId);
   if (opts.type === 'flow') {
     let q = db.from('flow_run_events')
-      .select('id,flow_run_id,event_type,node_key,node_type,status,duration_ms,created_at,run:flow_runs!inner(conversation_id)')
-      .eq('account_id', accountId).eq('run.conversation_id', conversationId);
+      .select('id,flow_run_id,event_type,node_key,node_type,status,duration_ms,created_at,run:flow_runs!inner(conversation_id,account_id)')
+      // Historical events may have NULL account_id. The FK to flow_runs
+      // is authoritative and its account_id always scopes the join.
+      .eq('run.account_id', accountId).eq('run.conversation_id', conversationId);
     if (opts.cursor) q = q.or(keysetFilter(opts.cursor, 'after'));
     const { data, error } = await q.order('created_at').order('id').limit(opts.limit + 1);
     if (error) throw error;
@@ -343,7 +346,7 @@ export async function readEventPage(
     const last = page.at(-1);
     return {
       conversation_id: conversationId, type: opts.type,
-      events: page.map(({ run: _run, ...safe }) => safe),
+      events: page.map(({ run, ...safe }) => { void run; return safe; }),
       next_cursor: rows.length > opts.limit && last ? encodeCursor({ at: last.created_at, id: last.id }) : null,
     };
   }
