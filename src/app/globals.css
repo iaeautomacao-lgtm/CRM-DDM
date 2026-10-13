@@ -51,6 +51,8 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
   --color-primary-soft-2: var(--primary-soft-2);
+  --color-primary-solid: var(--primary-solid);
+  --color-primary-solid-hover: var(--primary-solid-hover);
   /* Redesenho DDM: tokens extras do protótipo como utilitários
    * (bg-surface-3, bg-surface-hover, bg-selected, border-border-strong,
    * text-foreground-2, text-primary-text, bg-success-soft, bg-bubble-out…). */
@@ -321,6 +323,22 @@ html[data-theme="red"] {
   --sidebar-primary: oklch(0.577 0.245 27);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-ring: oklch(0.577 0.245 27);
+}
+
+/* ---- Botão principal: fundo sólido com texto branco ----
+ * No DDM o #FF5706 com texto branco dá 3,17:1 (abaixo do AA 4,5:1): o botão
+ * usa #D24400 (4,60:1) e o hover escurece para #B83B00. O #FF5706 continua
+ * em destaques, ícones e anel de foco (decisão do dono 13/10, item 8). Nos
+ * outros acentos o botão segue o --primary. Igual nos modos claro e escuro. */
+html[data-theme] {
+  --primary-solid: var(--primary);
+  --primary-solid-hover: var(--primary-hover);
+}
+
+:root,
+html[data-theme="ddm"] {
+  --primary-solid: #d24400;
+  --primary-solid-hover: #b83b00;
 }
 
 /* ---- MODE × ACCENT: tokens derivados do primary ----

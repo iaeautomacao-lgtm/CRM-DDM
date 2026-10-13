@@ -515,7 +515,7 @@ export function MessageTemplatePicker({
               <Button
                 disabled={saving || !nome.trim() || !conteudo.trim()}
                 onClick={handleSave}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {editingId ? "Salvar alterações" : "Salvar template"}

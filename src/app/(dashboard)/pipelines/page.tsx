@@ -474,7 +474,7 @@ export default function PipelinesPage() {
             canAct={canEditSettings}
             gateReason="criar pipelines"
             onClick={() => setNewPipelineOpen(true)}
-            className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
+            className="mt-4 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
           >
             <Plus className="mr-1 h-4 w-4" />
             Criar Pipeline
@@ -535,7 +535,7 @@ export default function PipelinesPage() {
             <Button
               onClick={handleCreatePipeline}
               disabled={creating || !newPipelineName.trim()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
             >
               {creating ? "Criando..." : "Criar Pipeline"}
             </Button>

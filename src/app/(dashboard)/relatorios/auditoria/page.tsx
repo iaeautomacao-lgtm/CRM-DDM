@@ -279,7 +279,7 @@ export default function AuditoriaPage() {
           <Button
             onClick={handlePesquisar}
             disabled={!!rangeError({ dateFrom: draft.from, dateTo: draft.to })}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
+            className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
           >
             <Search className="size-4" />
             Pesquisar

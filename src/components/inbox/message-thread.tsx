@@ -1525,7 +1525,7 @@ export function MessageThread({
               onClick={() => void handleAssumeSelf()}
               disabled={assuming}
               title="Assumir a conversa (ela passa a ser sua)"
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary-solid px-3 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-solid-hover disabled:opacity-60"
             >
               {assuming ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <UserPlus className="size-3.5" aria-hidden="true" />}
               Assumir
@@ -1615,7 +1615,7 @@ export function MessageThread({
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[12.5px] font-semibold",
                 assignedAgentId
-                  ? "bg-primary text-primary-foreground hover:bg-primary-hover"
+                  ? "bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
                   : "border border-border bg-card text-foreground hover:bg-surface-hover",
               )}
               title="Tabular e encerrar"
@@ -1894,7 +1894,7 @@ export function MessageThread({
               type="button"
               onClick={() => void handleAssumeSelf()}
               disabled={assuming}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary-solid px-3.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-solid-hover disabled:opacity-60"
             >
               {assuming ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <UserPlus className="size-3.5" aria-hidden="true" />}
               Assumir conversa

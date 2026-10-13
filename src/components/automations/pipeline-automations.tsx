@@ -254,7 +254,7 @@ export function PipelineAutomations() {
                 type="submit"
                 disabled={adding}
                 size="sm"
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
+                className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
               >
                 {adding && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
                 Adicionar Regra
