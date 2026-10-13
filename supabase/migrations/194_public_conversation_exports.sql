@@ -42,3 +42,12 @@ INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 VALUES ('conversation-api-exports', 'conversation-api-exports', false,
         31457280, ARRAY['application/x-ndjson','application/octet-stream']::text[])
 ON CONFLICT (id) DO NOTHING;
+
+-- Optimized keyset reads on full historical transcripts. Apply off-peak;
+-- regular CREATE INDEX takes a table lock during index creation.
+CREATE INDEX IF NOT EXISTS idx_conversations_public_api_page
+  ON wacrm.conversations(account_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_public_api_page
+  ON wacrm.messages(account_id, conversation_id, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_flow_runs_account_conversation
+  ON wacrm.flow_runs(account_id, conversation_id);
