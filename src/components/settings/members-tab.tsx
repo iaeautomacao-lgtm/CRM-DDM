@@ -136,7 +136,7 @@ const ROLE_FILTER_OPTIONS: { value: 'all' | AccountRole; label: string }[] = [
 function fmtDate(iso: string): string {
   // Match the rest of the dashboard's locale-light formatting.
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString('pt-BR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -175,6 +175,9 @@ export function MembersTab() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
+  const [resetError, setResetError] = useState<
+    { field: 'new' | 'confirm' | 'server'; message: string } | null
+  >(null);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -301,19 +304,24 @@ export function MembersTab() {
     setResetPasswordMember(null);
     setNewPassword('');
     setConfirmPassword('');
+    setResetError(null);
   }
 
   async function handleResetPassword() {
     if (!resetPasswordMember) return;
     if (newPassword.length < MIN_RESET_PASSWORD_LENGTH) {
-      toast.error(`A senha deve ter pelo menos ${MIN_RESET_PASSWORD_LENGTH} caracteres`);
+      setResetError({
+        field: 'new',
+        message: `A senha deve ter pelo menos ${MIN_RESET_PASSWORD_LENGTH} caracteres`,
+      });
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error('As senhas não coincidem');
+      setResetError({ field: 'confirm', message: 'As senhas não coincidem' });
       return;
     }
 
+    setResetError(null);
     setResettingPassword(true);
     try {
       const res = await apiFetch(`/api/account/members/${resetPasswordMember.user_id}/reset-password`,
@@ -325,7 +333,9 @@ export function MembersTab() {
       );
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(payload.error || 'Falha ao redefinir senha');
+        const message = payload.error || 'Falha ao redefinir senha';
+        setResetError({ field: 'server', message });
+        toast.error(message);
         return;
       }
       toast.success(`Senha de ${resetPasswordMember.full_name || 'usuário'} redefinida`);
@@ -737,6 +747,7 @@ export function MembersTab() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleRevoke(inv)}
+                        aria-label={`Revogar convite ${inv.label || 'sem título'}`}
                         className="border-danger/40 bg-danger-soft text-danger hover:bg-danger-soft hover:border-danger/60 hover:text-danger"
                       >
                         <MailX className="size-4" />
@@ -834,25 +845,48 @@ export function MembersTab() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Nova senha</Label>
+              <Label htmlFor="reset-new-password" className="text-muted-foreground">
+                Nova senha
+              </Label>
               <Input
+                id="reset-new-password"
                 type="password"
+                autoComplete="new-password"
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setResetError(null);
+                }}
                 placeholder={`Mínimo ${MIN_RESET_PASSWORD_LENGTH} caracteres`}
+                aria-invalid={resetError?.field === 'new' || undefined}
+                aria-describedby={resetError?.field === 'new' ? 'reset-password-error' : undefined}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Confirmar senha</Label>
+              <Label htmlFor="reset-confirm-password" className="text-muted-foreground">
+                Confirmar senha
+              </Label>
               <Input
+                id="reset-confirm-password"
                 type="password"
+                autoComplete="new-password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  setResetError(null);
+                }}
                 placeholder="Repita a senha"
+                aria-invalid={resetError?.field === 'confirm' || undefined}
+                aria-describedby={resetError?.field === 'confirm' ? 'reset-password-error' : undefined}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>
+            {resetError ? (
+              <p id="reset-password-error" role="alert" className="text-xs text-danger">
+                {resetError.message}
+              </p>
+            ) : null}
           </div>
           <DialogFooter className="bg-popover border-border">
             <Button

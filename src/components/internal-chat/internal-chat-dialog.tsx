@@ -644,7 +644,11 @@ export function InternalChatDialog({
       recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
     } catch (err) {
       console.error("[InternalChatDialog] failed to start recording:", err);
-      toast.error("Não foi possível acessar o microfone");
+      toast.error(
+        err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")
+          ? "Microfone bloqueado. Libere a permissão no navegador e tente de novo."
+          : "Não foi possível acessar o microfone",
+      );
     }
   }, [recording, uploading, sending, finalizeRecording]);
 

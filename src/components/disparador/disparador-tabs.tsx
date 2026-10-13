@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { Activity, AlertTriangle, Gauge, Megaphone, Phone, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +26,30 @@ export function isTabActive(pathname: string | null | undefined, href: string): 
 
 export function DisparadorTabs() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  // Há mais abas à direita da borda visível (celular): degradê indica que a faixa rola.
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const update = () => setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   return (
     <nav
+      ref={navRef}
       aria-label="Seções do Disparador"
+      style={
+        moreRight
+          ? { maskImage: "linear-gradient(to right, black calc(100% - 32px), transparent)" }
+          : undefined
+      }
       // Faixa de largura total colada no topo (protótipo DDM): anula o
       // padding do <main> do shell e fica fixa ao rolar.
       className="sticky -top-4 z-20 -mx-4 -mt-4 mb-4 flex h-11 shrink-0 items-stretch gap-1 overflow-x-auto border-b border-border bg-card px-4 [scrollbar-width:none] sm:-top-6 sm:-mx-6 sm:-mt-6 sm:mb-6"

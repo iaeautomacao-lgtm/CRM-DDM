@@ -107,9 +107,12 @@ function Bars({
   const labels = xLabelIndexes(data.length)
   const gap = range === 90 ? 1 : range === 30 ? 3 : 14
   const hp = hover >= 0 ? data[hover] : null
+  // Só o teclado anuncia o dia ao leitor de tela; o mouse apenas mostra o quadro (evita ruído a cada passagem).
+  const [viaKeyboard, setViaKeyboard] = useState(false)
   const tipLeft = hover >= 0 ? (hover + 0.5) / data.length : 0
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') setViaKeyboard(true)
     if (e.key === 'ArrowRight') {
       e.preventDefault()
       setHover(Math.min(data.length - 1, hover + 1))
@@ -147,7 +150,10 @@ function Bars({
           return (
             <div
               key={p.day}
-              onMouseEnter={() => setHover(i)}
+              onMouseEnter={() => {
+                setViaKeyboard(false)
+                setHover(i)
+              }}
               className={cn(
                 'flex h-full min-w-0 flex-1 items-end justify-center gap-px rounded-[3px]',
                 hover === i && 'bg-surface-hover',
@@ -172,7 +178,8 @@ function Bars({
       </div>
       {hp ? (
         <div
-          role="status"
+          role={viaKeyboard ? 'status' : undefined}
+          aria-hidden={viaKeyboard ? undefined : true}
           className="pointer-events-none absolute top-1 z-[5] min-w-[150px] animate-ddm-fade rounded-lg border border-border bg-popover px-3 py-2.5 shadow-overlay"
           style={{
             left: `calc(36px + (100% - 36px) * ${tipLeft})`,

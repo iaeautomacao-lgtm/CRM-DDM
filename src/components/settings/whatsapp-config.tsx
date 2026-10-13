@@ -764,21 +764,21 @@ export function WhatsAppConfig() {
 
           {/* Corrupted-token reset banner (Meta only) */}
           {provider === 'meta' && showResetBanner && (
-            <Alert className="bg-amber-950/40 border-amber-600/40">
+            <Alert className="bg-warning-soft border-warning-border">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="size-5 text-amber-400 mt-0.5 shrink-0" />
+                <AlertTriangle className="size-5 text-warning mt-0.5 shrink-0" aria-hidden="true" />
                 <div className="flex-1">
-                  <AlertTitle className="text-amber-200 mb-1">
+                  <AlertTitle className="text-foreground mb-1">
                     O token armazenado não pode ser descriptografado
                   </AlertTitle>
-                  <AlertDescription className="text-amber-100/80 text-sm">
+                  <AlertDescription className="text-muted-foreground text-sm">
                     {statusMessage}
                   </AlertDescription>
                   <Button
                     onClick={() => setPendingConfirm({ kind: 'reset' })}
                     disabled={resetting}
                     size="sm"
-                    className="mt-3 bg-amber-600 hover:bg-amber-700 text-white"
+                    className="mt-3"
                   >
                     {resetting ? (
                       <>
@@ -843,16 +843,16 @@ export function WhatsAppConfig() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between border border-border rounded-lg p-3 bg-muted/40">
                   <div className="flex items-center gap-3">
-                    <span className="relative flex h-3 w-3">
-                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                        sessionStatus === 'WORKING' ? 'bg-emerald-400' :
-                        (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-amber-400' :
-                        sessionStatus === 'STARTING' ? 'bg-info' : 'bg-red-400'
+                    <span className="relative flex h-3 w-3" aria-hidden="true">
+                      <span className={`animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                        sessionStatus === 'WORKING' ? 'bg-success-fill' :
+                        (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-warning-fill' :
+                        sessionStatus === 'STARTING' ? 'bg-info-fill' : 'bg-danger-fill'
                       }`}></span>
                       <span className={`relative inline-flex rounded-full h-3 w-3 ${
-                        sessionStatus === 'WORKING' ? 'bg-emerald-500' :
-                        (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-amber-500' :
-                        sessionStatus === 'STARTING' ? 'bg-info' : 'bg-red-500'
+                        sessionStatus === 'WORKING' ? 'bg-success-fill' :
+                        (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-warning-fill' :
+                        sessionStatus === 'STARTING' ? 'bg-info-fill' : 'bg-danger-fill'
                       }`}></span>
                     </span>
                     <div>
@@ -865,16 +865,16 @@ export function WhatsAppConfig() {
                       size="sm"
                       variant="outline"
                       onClick={checkWahaStatus}
+                      aria-label="Atualizar status do WAHA"
                       className="border-border hover:bg-muted text-muted-foreground"
                     >
-                      <RefreshCw className="size-3.5" />
+                      <RefreshCw className="size-3.5" aria-hidden="true" />
                     </Button>
                     {sessionStatus === 'STOPPED' || sessionStatus === 'FAILED' ? (
                       <Button
                         size="sm"
                         onClick={handleWahaStart}
                         disabled={wahaConnecting}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
                       >
                         {wahaConnecting ? 'Iniciando...' : 'Conectar'}
                       </Button>
@@ -884,7 +884,6 @@ export function WhatsAppConfig() {
                         variant="destructive"
                         onClick={handleWahaStop}
                         disabled={wahaConnecting}
-                        className="bg-red-600 hover:bg-red-700 text-white"
                       >
                         {wahaConnecting ? 'Parando...' : 'Desconectar'}
                       </Button>
@@ -895,7 +894,7 @@ export function WhatsAppConfig() {
                 {/* QR Code Container */}
                 {(sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') && (
                   <div className="grid gap-6 md:grid-cols-2 items-start mt-4">
-                    <div className="flex flex-col items-center justify-center p-6 border border-amber-600/30 bg-amber-950/10 rounded-lg space-y-3">
+                    <div className="flex flex-col items-center justify-center p-6 border border-warning-border bg-warning-soft rounded-lg space-y-3">
                       <div className="bg-white p-3 rounded-md">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -905,7 +904,7 @@ export function WhatsAppConfig() {
                         />
                       </div>
                       <div className="text-center">
-                        <h5 className="text-sm font-semibold text-amber-200">Escanear QR Code</h5>
+                        <h5 className="text-sm font-semibold text-foreground">Escanear QR Code</h5>
                         <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
                           Escaneie este QR code usando o WhatsApp no seu celular (Aparelhos conectados &gt; Conectar um aparelho) para autorizar a sessão.
                         </p>
@@ -937,7 +936,7 @@ export function WhatsAppConfig() {
                             disabled={pairingLoading}
                             className="bg-background border-border text-sm h-9"
                           />
-                          <p className="text-[10px] text-amber-400 font-medium">
+                          <p className="text-xs text-warning font-medium">
                             💡 Dica: Digite apenas o DDD + Número. O sistema adiciona o 55 automático se você esquecer!
                           </p>
                         </div>
@@ -951,7 +950,7 @@ export function WhatsAppConfig() {
                       </form>
 
                       {pairingError && (
-                        <p className="text-xs text-red-400">{pairingError}</p>
+                        <p role="alert" className="text-xs text-danger">{pairingError}</p>
                       )}
 
                       {pairingCode && (
@@ -988,10 +987,10 @@ export function WhatsAppConfig() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between border border-border rounded-lg p-3 bg-muted/40">
                   <div className="flex items-center gap-3">
-                    <span className="relative flex h-3 w-3">
+                    <span className="relative flex h-3 w-3" aria-hidden="true">
                       <span className={`relative inline-flex rounded-full h-3 w-3 ${
-                        voipStatus === 'open' ? 'bg-emerald-500 animate-pulse' :
-                        (voipStatus === 'qr' || voipStatus === 'SCAN_QR') ? 'bg-amber-500 animate-pulse' : 'bg-red-500'
+                        voipStatus === 'open' ? 'bg-success-fill animate-pulse motion-reduce:animate-none' :
+                        (voipStatus === 'qr' || voipStatus === 'SCAN_QR') ? 'bg-warning-fill animate-pulse motion-reduce:animate-none' : 'bg-danger-fill'
                       }`}></span>
                     </span>
                     <div>
@@ -1010,7 +1009,6 @@ export function WhatsAppConfig() {
                         size="sm"
                         disabled={voipLoading || !wahaSession}
                         onClick={handleCreateVoipSession}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
                       >
                         {voipLoading ? 'Ativando...' : 'Ativar Ligações'}
                       </Button>
@@ -1020,7 +1018,7 @@ export function WhatsAppConfig() {
 
                 {/* VoIP QR Code Container */}
                 {(voipStatus === 'qr' || voipStatus === 'SCAN_QR') && voipQr && (
-                  <div className="flex flex-col items-center justify-center p-6 border border-amber-600/30 bg-amber-950/10 rounded-lg space-y-3">
+                  <div className="flex flex-col items-center justify-center p-6 border border-warning-border bg-warning-soft rounded-lg space-y-3">
                     <div className="bg-white p-3 rounded-md">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -1030,7 +1028,7 @@ export function WhatsAppConfig() {
                       />
                     </div>
                     <div className="text-center">
-                      <h5 className="text-sm font-semibold text-amber-200">Escanear QR Code de Ligações</h5>
+                      <h5 className="text-sm font-semibold text-foreground">Escanear QR Code de Ligações</h5>
                       <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
                         Escaneie este QR code usando seu celular no WhatsApp (Aparelhos Conectados) para permitir ligações no CRM.
                       </p>
@@ -1048,7 +1046,7 @@ export function WhatsAppConfig() {
                 {connectionStatus === 'connected' ? (
                   <CheckCircle2 className="size-4 text-primary" />
                 ) : (
-                  <XCircle className="size-4 text-red-500" />
+                  <XCircle className="size-4 text-danger" aria-hidden="true" />
                 )}
                 <AlertTitle className="text-foreground mb-0">
                   {connectionStatus === 'connected' ? 'Credenciais válidas' : 'Não conectado'}
@@ -1068,22 +1066,18 @@ export function WhatsAppConfig() {
             <Alert
               className={
                 isRegistered
-                  ? 'bg-emerald-950/30 border-emerald-700/50'
-                  : 'bg-amber-950/30 border-amber-700/50'
+                  ? 'bg-success-soft border-success/40'
+                  : 'bg-warning-soft border-warning-border'
               }
             >
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                   {isRegistered ? (
-                    <CheckCircle2 className="size-4 text-emerald-400" />
+                    <CheckCircle2 className="size-4 text-success" aria-hidden="true" />
                   ) : (
-                    <AlertTriangle className="size-4 text-amber-400" />
+                    <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
                   )}
-                  <AlertTitle
-                    className={
-                      'mb-0 ' + (isRegistered ? 'text-emerald-200' : 'text-amber-200')
-                    }
-                  >
+                  <AlertTitle className="mb-0 text-foreground">
                     {isRegistered
                       ? 'Registrado — A Meta enviará eventos para o wacrm'
                       : 'Não registrado — A Meta não enviará eventos'}
@@ -1117,7 +1111,7 @@ export function WhatsAppConfig() {
                 ) : lastRegistrationError ? (
                   <>
                     Última tentativa falhou com:{' '}
-                    <span className="text-red-300">
+                    <span className="text-danger">
                       {lastRegistrationError}
                     </span>
                     .
@@ -1387,7 +1381,7 @@ export function WhatsAppConfig() {
                 variant="outline"
                 onClick={() => setPendingConfirm({ kind: 'reset' })}
                 disabled={resetting}
-                className="border-red-900 text-red-400 hover:text-red-300 hover:bg-red-950/40"
+                className="border-danger/40 text-danger hover:text-danger hover:bg-danger-soft"
               >
                 {resetting ? (
                   <>
@@ -1464,7 +1458,7 @@ export function WhatsAppConfig() {
                       <ol className="list-decimal list-inside space-y-1">
                         <li>No painel <strong>Controle da Sessão</strong>, clique em <strong>Conectar</strong></li>
                         <li>Escaneie o QR code com o WhatsApp no seu celular</li>
-                        <li>Aguarde até o status mudar para <strong className="text-emerald-400">WORKING</strong></li>
+                        <li>Aguarde até o status mudar para <strong className="text-success">WORKING</strong></li>
                       </ol>
                     </AccordionContent>
                   </AccordionItem>
