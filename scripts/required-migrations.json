@@ -443,6 +443,10 @@
     {
       "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "346_api_keys_ai_config_select_has_perm",
+      "kind": "registry"
     }
   ]
 }
