@@ -1102,9 +1102,9 @@ const EVENT_COLOR: Record<string, string> = {
   completed: "text-success",
   run_completed: "text-success",
   run_error: "text-danger",
-  tool_called: "text-violet-500",
-  tool_result: "text-violet-500",
-  ai_agent_takeover: "text-violet-500",
+  tool_called: "text-primary-text",
+  tool_result: "text-primary-text",
+  ai_agent_takeover: "text-primary-text",
   ai_agent_failed: "text-danger",
 };
 
