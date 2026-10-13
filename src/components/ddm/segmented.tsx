@@ -45,12 +45,12 @@ export function Segmented<T extends string | number>({
             aria-pressed={on}
             onClick={() => onChange(o.value)}
             className={cn(
-              'shrink-0 whitespace-nowrap rounded-[6px] font-semibold transition-colors',
+              'shrink-0 whitespace-nowrap rounded-md font-semibold transition-colors',
               size === 'sm' && 'h-6 px-[9px] text-xs',
               size === 'md' && 'h-[26px] px-2.5 text-xs',
               size === 'lg' && 'h-7 px-2.5 text-[12.5px]',
               on
-                ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]'
+                ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
                 : 'text-foreground-2 hover:text-foreground',
             )}
           >

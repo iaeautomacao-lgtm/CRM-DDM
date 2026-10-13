@@ -50,7 +50,7 @@ export function MonitorFiltersPanel({
   const active = hasActiveFilters(filters);
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="rounded-card border border-border bg-card">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

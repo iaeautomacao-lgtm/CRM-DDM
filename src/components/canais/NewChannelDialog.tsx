@@ -284,7 +284,7 @@ export function NewChannelDialog({
               <button
                 type="button"
                 onClick={() => chooseProvider("waha")}
-                className="flex flex-col items-center gap-2 rounded-xl border border-border p-4 text-center hover:bg-muted"
+                className="flex flex-col items-center gap-2 rounded-card border border-border p-4 text-center hover:bg-muted"
               >
                 <MessageCircle className="size-6 text-[#25D366]" />
                 <span className="text-sm font-medium text-foreground">WhatsApp WAHA</span>
@@ -293,7 +293,7 @@ export function NewChannelDialog({
               <button
                 type="button"
                 onClick={() => chooseProvider("meta")}
-                className="flex flex-col items-center gap-2 rounded-xl border border-border p-4 text-center hover:bg-muted"
+                className="flex flex-col items-center gap-2 rounded-card border border-border p-4 text-center hover:bg-muted"
               >
                 <Cloud className="h-8 w-8 text-[#25D366]" />
                 <span className="text-sm font-medium text-foreground">WhatsApp Meta</span>

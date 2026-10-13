@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -24,7 +24,7 @@ import { Segmented } from "@/components/ddm/segmented";
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { PageHeader } from "@/components/ddm/page-header";
 import { StatusChip } from "@/components/ddm/status-chip";
-import { ForbiddenState } from "@/components/ddm/states";
+import { EmptyState, ForbiddenState } from "@/components/ddm/states";
 import { usePermissions } from "@/hooks/use-permission";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -1033,8 +1033,7 @@ function MonitoramentoBoard() {
               }}
             />
           ) : teams.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
-              <p>Nenhuma equipe criada ainda.</p>
+            <EmptyState icon={Users} title="Nenhuma equipe criada ainda.">
               <Can
                 permission="teams.manage"
                 fallback={
@@ -1056,7 +1055,7 @@ function MonitoramentoBoard() {
                   Criar primeira equipe
                 </Button>
               </Can>
-            </div>
+            </EmptyState>
           ) : (
             <>
               <Can permission="teams.manage">

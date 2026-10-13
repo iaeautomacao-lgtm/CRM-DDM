@@ -29,7 +29,7 @@ import { toast } from "sonner";
 import { usePermission } from "@/hooks/use-permission";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
-import { ErrorState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { PageHeader } from "@/components/ddm/page-header";
 
@@ -511,43 +511,33 @@ export default function PipelinesPage() {
 
       {/* Board */}
       {selectedIsArchived && selectedPipeline ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
-          <Archive className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
-          <h3 className="text-lg font-medium text-foreground">Funil arquivado: {selectedPipeline.name}</h3>
-          <p className="max-w-md text-sm text-muted-foreground">
-            As etapas e os negócios ficam ocultos nas listas e nos relatórios até o funil ser restaurado. Nada foi apagado.
-          </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <GatedButton canAct={canEditSettings} gateReason="restaurar funis" disabled={restoring} onClick={handleRestorePipeline}>
-              <ArchiveRestore className="size-3.5" />
-              {restoring ? "Restaurando..." : "Restaurar funil"}
-            </GatedButton>
-            {canDeleteForever && (
-              <Button variant="destructive" onClick={() => setSettingsOpen(true)}>
-                Excluir definitivamente
-              </Button>
-            )}
-          </div>
-        </div>
+        <EmptyState
+          icon={Archive}
+          title={`Funil arquivado: ${selectedPipeline.name}`}
+          hint="As etapas e os negócios ficam ocultos nas listas e nos relatórios até o funil ser restaurado. Nada foi apagado."
+        >
+        <GatedButton canAct={canEditSettings} gateReason="restaurar funis" disabled={restoring} onClick={handleRestorePipeline}>
+          <ArchiveRestore className="size-3.5" />
+          {restoring ? "Restaurando..." : "Restaurar funil"}
+        </GatedButton>
+        {canDeleteForever && (
+          <Button variant="destructive" onClick={() => setSettingsOpen(true)}>
+            Excluir definitivamente
+          </Button>
+        )}
+        </EmptyState>
       ) : activePipelines.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20">
-          <GitBranch className="h-12 w-12 text-muted-foreground" />
-          <h3 className="mt-4 text-lg font-medium text-foreground">
-            Nenhum funil ainda
-          </h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Crie um funil para começar a acompanhar negócios
-          </p>
-          <GatedButton
-            canAct={canEditSettings}
-            gateReason="criar funis"
-            onClick={() => setNewPipelineOpen(true)}
-            className="mt-4 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            Criar funil
-          </GatedButton>
-        </div>
+        <EmptyState icon={GitBranch} title="Nenhum funil ainda" hint="Crie um funil para começar a acompanhar negócios">
+        <GatedButton
+          canAct={canEditSettings}
+          gateReason="criar funis"
+          onClick={() => setNewPipelineOpen(true)}
+         
+        >
+          <Plus className="mr-1 h-4 w-4" />
+          Criar funil
+        </GatedButton>
+        </EmptyState>
       ) : boardError ? (
         <ErrorState
           title="Não foi possível carregar as etapas e os negócios"

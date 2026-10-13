@@ -1,5 +1,5 @@
 import { BarChart3 } from 'lucide-react'
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -13,11 +13,14 @@ export function EmptyState({
   hint,
   icon: Icon = BarChart3,
   className,
+  children,
 }: {
   title?: string
   hint?: string
   icon?: ComponentType<{ className?: string }>
   className?: string
+  /** Ações da tela vazia (botões/links). */
+  children?: ReactNode
 }) {
   return (
     <div
@@ -31,6 +34,7 @@ export function EmptyState({
       </div>
       <p className="text-sm font-semibold text-foreground">{title}</p>
       {hint && <p className="max-w-xs text-xs text-muted-foreground">{hint}</p>}
+      {children && <div className="mt-1 flex flex-wrap items-center justify-center gap-2">{children}</div>}
     </div>
   )
 }

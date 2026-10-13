@@ -146,7 +146,7 @@ export function DayPanel({
             <Kpi label="Transferências" value={data.transfers} />
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-3">
+          <div className="rounded-card border border-border bg-card p-3">
             <p className="mb-2 text-xs font-semibold text-foreground">Recebidas por hora</p>
             <div className="flex h-28 items-end gap-1">
               {data.hourly.map((n, h) => (
@@ -215,13 +215,13 @@ function Kpi({ label, value, onClick }: { label: string; value: number | string;
     <button
       type="button"
       onClick={onClick}
-      className="rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+      className="rounded-card border border-border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
       title="Ver as conversas"
     >
       {body}
     </button>
   ) : (
-    <div className="rounded-xl border border-border bg-card p-3">{body}</div>
+    <div className="rounded-card border border-border bg-card p-3">{body}</div>
   );
 }
 
@@ -239,7 +239,7 @@ function DayTable({
   onOpen: (metric: DrilldownMetric, key: string, label: string) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
       <p className="border-b border-border px-3 py-2 text-xs font-semibold text-foreground">{title}</p>
       <table className="w-full text-xs">
         <thead className="text-muted-foreground">

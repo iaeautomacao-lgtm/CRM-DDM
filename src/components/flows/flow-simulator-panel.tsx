@@ -177,7 +177,7 @@ export function FlowSimulatorPanel({ onClose }: { onClose: () => void }) {
   return (
     <aside
       aria-label="Testar fluxo"
-      className="flex min-h-0 w-[380px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-card"
+      className="flex min-h-0 w-[380px] shrink-0 flex-col overflow-hidden rounded-card border border-border bg-card"
     >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <FlaskConical className="h-4 w-4 text-primary" />

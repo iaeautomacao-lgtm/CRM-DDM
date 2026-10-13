@@ -445,7 +445,7 @@ export function ImportModal({
                 fileInputRef.current?.click();
             }}
             className={cn(
-              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-5 transition-all',
+              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed p-5 transition-all',
               file
                 ? 'border-primary/35 bg-primary/[0.04]'
                 : 'hover:border-primary/40 border-border/80 bg-background/40 hover:bg-background/70'
@@ -510,7 +510,7 @@ export function ImportModal({
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-border ring-1 ring-border/50">
+              <div className="overflow-hidden rounded-card border border-border ring-1 ring-border/50">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[32rem] text-xs">
                     <thead>
@@ -594,7 +594,7 @@ export function ImportModal({
           )}
 
           {result && (
-            <div role="status" className="rounded-xl border border-border bg-background/50 p-4">
+            <div role="status" className="rounded-card border border-border bg-background/50 p-4">
               <p
                 ref={resultTitleRef}
                 tabIndex={-1}

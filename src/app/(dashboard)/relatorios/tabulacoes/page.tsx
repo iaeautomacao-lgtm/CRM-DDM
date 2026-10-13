@@ -189,7 +189,7 @@ export default function TabulacoesPage() {
   return (
     <div className="space-y-4">
       <PageHeader>Conversas encerradas no período, por tabulação e origem.</PageHeader>
-      <div className="border-border bg-card space-y-3 rounded-xl border p-4">
+      <div className="border-border bg-card space-y-3 rounded-card border p-4">
         <PeriodFilter
           value={draft}
           onChange={(range) =>
