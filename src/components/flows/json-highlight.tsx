@@ -34,31 +34,31 @@ function tokenizeJson(json: string): React.ReactNode[] {
     const tok = match[0];
     if (tok.endsWith(":")) {
       nodes.push(
-        <span key={key++} style={{ color: "#FF5706" }}>
+        <span key={key++} className="text-primary-text">
           {tok}
         </span>,
       );
     } else if (tok.startsWith('"')) {
       nodes.push(
-        <span key={key++} className="text-emerald-300">
+        <span key={key++} className="text-success">
           {tok}
         </span>,
       );
     } else if (tok === "true" || tok === "false") {
       nodes.push(
-        <span key={key++} className="text-sky-300">
+        <span key={key++} className="text-info">
           {tok}
         </span>,
       );
     } else if (tok === "null") {
       nodes.push(
-        <span key={key++} className="text-neutral-500">
+        <span key={key++} className="text-muted-foreground">
           {tok}
         </span>,
       );
     } else {
       nodes.push(
-        <span key={key++} className="text-purple-300">
+        <span key={key++} className="text-warning">
           {tok}
         </span>,
       );
@@ -86,7 +86,7 @@ export function JsonHighlight({
   return (
     <pre
       className={cn(
-        "overflow-x-auto rounded-md bg-[#0b0b0d] p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-neutral-300",
+        "overflow-x-auto rounded-md bg-surface-3 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground-2",
         className,
       )}
     >

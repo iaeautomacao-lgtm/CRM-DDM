@@ -784,7 +784,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
 
   return (
     <>
-      <div className="h-full w-full overflow-hidden" aria-label="Diagrama do fluxo">
+      <div className="h-full w-full overflow-hidden" role="region" aria-label="Diagrama do fluxo">
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}

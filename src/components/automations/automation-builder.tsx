@@ -6,6 +6,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useId,
   useState,
   type ReactNode,
 } from "react"
@@ -112,7 +113,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   update_contact_field: { label: "Atualizar campo do contato", icon: PencilLine, border: "border-l-primary" },
   create_deal: { label: "Criar negócio", icon: Briefcase, border: "border-l-primary" },
   wait: { label: "Aguardar", icon: Hourglass, border: "border-l-border" },
-  condition: { label: "Condição (Se/Senão)", icon: GitBranch, border: "border-l-amber-500" },
+  condition: { label: "Condição (Se/Senão)", icon: GitBranch, border: "border-l-warning" },
   send_webhook: { label: "Enviar webhook", icon: Webhook, border: "border-l-primary" },
   close_conversation: { label: "Encerrar conversa", icon: CircleSlash, border: "border-l-primary" },
 }
@@ -852,10 +853,10 @@ function TriggerCard({
               />
             )}
             {type === "tag_added" && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              <div role="group" aria-labelledby="automation-trigger-tag-label">
+                <span id="automation-trigger-tag-label" className="mb-1 block text-xs font-medium text-muted-foreground">
                   Tag
-                </label>
+                </span>
                 <TagSelect
                   value={(config.tag_id as string) ?? ""}
                   onChange={(v) => onConfigChange({ ...config, tag_id: v })}
@@ -919,10 +920,11 @@ function KeywordMatchConfig({
   return (
     <div className="space-y-2">
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        <label htmlFor="automation-keywords" className="mb-1 block text-xs font-medium text-muted-foreground">
           Palavras-chave (separadas por vírgula)
         </label>
         <Input
+          id="automation-keywords"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
@@ -937,10 +939,11 @@ function KeywordMatchConfig({
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        <label htmlFor="automation-match-type" className="mb-1 block text-xs font-medium text-muted-foreground">
           Tipo de correspondência
         </label>
         <select
+          id="automation-match-type"
           value={config?.match_type ?? "contains"}
           onChange={(e) => onChange({ ...config, match_type: e.target.value as "exact" | "contains" })}
           className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:outline-none"
@@ -1050,6 +1053,7 @@ function StepRenderer({
           <button
             type="button"
             onClick={() => props.setExpandedId(expanded ? null : step.cid)}
+            aria-expanded={expanded}
             className="flex w-full items-center gap-3 px-4 py-3 text-left"
           >
             <GripVertical className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden />
@@ -1154,10 +1158,10 @@ function ConditionBranches({
     // cram each branch to ~170px which is too narrow for the nested
     // cards. Two-column grid returns on sm+.
     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <BranchColumn label="Sim" color="text-primary">
+      <BranchColumn label="Sim" color="text-primary-text">
         <StepList {...props} steps={yes} parentPath={yesPath} />
       </BranchColumn>
-      <BranchColumn label="Não" color="text-rose-400">
+      <BranchColumn label="Não" color="text-danger">
         <StepList {...props} steps={no} parentPath={noPath} />
       </BranchColumn>
     </div>
@@ -1447,9 +1451,10 @@ function FieldBlock({
   label: string
   children: React.ReactNode
 }) {
+  const labelId = useId()
   return (
-    <div className="mb-2 last:mb-0">
-      <label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
+    <div role="group" aria-labelledby={labelId} className="mb-2 last:mb-0">
+      <span id={labelId} className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </div>
   )
