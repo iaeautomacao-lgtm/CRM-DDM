@@ -38,7 +38,7 @@ function fakeDb(tables: Record<string, any[]>): SupabaseClient {
           // Interpret only the deterministic keyset OR created by the helpers.
           const match = /^created_at\.(gt|lt)\.([^,]+),and\(created_at\.eq\.([^,]+),id\.(gt|lt)\.([^)]+)\)$/.exec(expr);
           if (match) checks.push(row => {
-            const [_, direction, at, _, idDirection, id] = match;
+            const [, direction, at, , idDirection, id] = match;
             const left = row.created_at.localeCompare(at);
             const right = row.id.localeCompare(id);
             return direction === 'gt' && idDirection === 'gt'
