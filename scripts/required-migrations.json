@@ -402,6 +402,10 @@
       "kind": "registry"
     },
     {
+      "version": "329_revoke_anon_wacrm",
+      "kind": "registry"
+    },
+    {
       "version": "330_api_v1_conversation_extract",
       "kind": "registry"
     },
@@ -445,7 +449,7 @@
       "kind": "registry"
     },
     {
-      "version": "347_conversations_messages_write_rls",
+      "version": "348_deals_pipelines_write_rls_has_perm",
       "kind": "registry"
     }
   ]
