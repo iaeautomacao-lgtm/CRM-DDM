@@ -25,11 +25,12 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, GitFork, List } from "lucide-react";
+import { Eye, FlaskConical, GitFork, List } from "lucide-react";
 import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
+import { FlowTestPanel } from "./flow-test-panel";
 import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
 import { EditorHeader } from "./header";
 import { EditorNotices } from "./editor-notices";
@@ -47,7 +48,7 @@ import type { FlowDebugState } from "@/hooks/use-flow-debug";
  */
 const MOBILE_BREAKPOINT = "(max-width: 767px)";
 
-type View = "canvas" | "list";
+type View = "canvas" | "list" | "test";
 
 const STORAGE_KEY = "wacrm.flowEditor.view";
 const VALIDATION_PANEL_STORAGE_KEY = "flows-validation-panel-open";
@@ -94,12 +95,12 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
   // Debug mode only has a diagram to show a run's path on — List has
   // no visual "which node lit up" concept, so it's not offered while
   // a run_id is active (same override precedence as the mobile force).
-  const effectiveView: View = isDebugMode ? "canvas" : isMobile ? "list" : view;
+  const effectiveView: View = isDebugMode ? "canvas" : view === "test" ? "test" : isMobile ? "list" : view;
 
   const choose = (next: View) => {
     setView(next);
     try {
-      window.localStorage.setItem(STORAGE_KEY, next);
+      if (next !== "test") window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // ignore
     }
@@ -142,24 +143,32 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
             stage on small screens. Also omitted in debug mode — List
             isn't offered there (see effectiveView above), so a
             Canvas/List toggle with only one live option is just noise. */}
-        {!isMobile && !isDebugMode && (
+        {!isDebugMode && (
           <div className="flex items-center gap-4 px-6 py-3.5">
             <div
               role="group"
               aria-label="Visualização do editor"
               className="inline-flex gap-0.5 rounded-lg border border-border bg-muted p-0.5"
             >
-              <SegButton
-                active={effectiveView === "canvas"}
-                onClick={() => choose("canvas")}
-                icon={<GitFork className="h-3.5 w-3.5" />}
-                label="Diagrama"
-              />
+              {!isMobile && (
+                <SegButton
+                  active={effectiveView === "canvas"}
+                  onClick={() => choose("canvas")}
+                  icon={<GitFork className="h-3.5 w-3.5" />}
+                  label="Diagrama"
+                />
+              )}
               <SegButton
                 active={effectiveView === "list"}
                 onClick={() => choose("list")}
                 icon={<List className="h-3.5 w-3.5" />}
                 label="Lista"
+              />
+              <SegButton
+                active={effectiveView === "test"}
+                onClick={() => choose("test")}
+                icon={<FlaskConical className="h-3.5 w-3.5" />}
+                label="Teste"
               />
             </div>
             <NodeLegend />
@@ -170,21 +179,25 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
         <div className="relative mx-6 min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card-2">
           {effectiveView === "canvas" ? (
             <FlowCanvas debug={debug} />
-          ) : (
+          ) : effectiveView === "list" ? (
             <div className="absolute inset-0 overflow-y-auto">
               <FlowBuilder />
             </div>
-          )}
+          ) : null}
+          {/* Preserve the session when switching between editor views. */}
+          <div className={effectiveView === "test" ? "absolute inset-0" : "hidden"}>
+            <FlowTestPanel />
+          </div>
           {/* Reopen affordance — only rendered while the bar below is
               collapsed, in both views (the bar itself is shared across
               views too, per its own header comment). */}
-          {!panelOpen && (
+          {!panelOpen && effectiveView !== "test" && (
             <ValidationPanelBadge onClick={() => setPanelOpenPersisted(true)} />
           )}
         </div>
 
         {/* ---- validation / activate-readiness bar ---- */}
-        {panelOpen && (
+        {panelOpen && effectiveView !== "test" && (
           <div className="px-6 pb-5 pt-3">
             <ValidationPanel onClose={() => setPanelOpenPersisted(false)} />
           </div>
