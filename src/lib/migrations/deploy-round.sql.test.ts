@@ -13,8 +13,8 @@ import { BASELINE_REAL_MIGRATIONS, BASELINE_SQL, USER_SESSIONS_290 } from "./dep
 const PRE_DEPLOY = [
   "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
   "304", "305",
-  "311", "312", "313", "314", "314b", "315", "316b", "317", "320",
-  "322", "323", "324", "325", "326",
+  "311", "312", "313", "314", "314b", "315", "316b", "317", "318", "319", "320",
+  "322", "323", "324", "325", "326", "327",
   "330", "330b", "331b", "333", "334",
   "310",
 ] as const;
@@ -127,7 +127,7 @@ async function exists(db: PGlite, c: Created) {
 }
 
 // ---------- rollback do cabeçalho ----------
-const SQL_START = /^(BEGIN|COMMIT|DROP|DELETE|ALTER|DO|UPDATE|CREATE|REVOKE|GRANT|END|FOR|EXECUTE|SELECT)\b/i;
+const SQL_START = /^(BEGIN|COMMIT|DROP|DELETE|ALTER|DO|UPDATE|CREATE|REVOKE|GRANT|END|FOR|EXECUTE|SELECT)\b|^(AS\s+\$\$|RETURNS\s|LANGUAGE\s|SECURITY\s+(DEFINER|INVOKER)|SET\s+search_path)/i; // 2ª parte: cabeça de CREATE FUNCTION de várias linhas ("AS $$" sem \b: "as" é artigo em prosa)
 function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
   const lines = sqlOf(n).split("\n");
   const start = lines.findIndex((l) => /^--\s*ROLLBACK/i.test(l));
@@ -149,7 +149,9 @@ function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
     // comando que continua na linha seguinte (ex.: lista de funções num DROP FUNCTION de várias linhas): aceita a continuação
     const open = kept.length > 0 && !/;\s*$/.test(kept[kept.length - 1]);
     if (open && !inDollar && !t.startsWith("(") && !t.startsWith("--")) {
-      kept.push(t.replace(/\s+--\s.*$/, ""));
+      const cont = t.replace(/\s+--\s.*$/, "");
+      kept.push(cont);
+      if (((cont.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar; // "AS $$" abre o corpo da função na linha de continuação
       return;
     }
     if (t.startsWith("--")) return; // comentário dentro do bloco de rollback
@@ -267,7 +269,9 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         for (const name of [...c.tables, ...c.functions]) {
           if (baselineExisting.get(later)!.has(`tabela ${name}`) || baselineExisting.get(later)!.has(`função ${name}`)) continue; // já existe antes da rodada
           if (own.tables.includes(name) || own.functions.includes(name)) continue;
-          if (new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
+          // uso CONDICIONAL (só chama se a função já existe: to_regprocedure/pg_proc) não é dependência: a 310, sempre a última, cobre as tabelas
+          const guarded = new RegExp(`to_regprocedure\\('wacrm\\.${name}\\(|proname\\s*=\\s*'${name}'`, "i").test(code);
+          if (!guarded && new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
         }
       }
     });

@@ -134,6 +134,8 @@ CREATE POLICY contact_phones_select ON wacrm.contact_phones FOR SELECT USING (EX
 ALTER TABLE wacrm.contact_import_variables ENABLE ROW LEVEL SECURITY;
 CREATE POLICY contact_import_variables_select ON wacrm.contact_import_variables FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_import_variables.contact_id AND wacrm.is_account_member(c.account_id)));
 
+-- Auditoria v2 (131): a 318 confere a ASSINATURA REAL no pré-check e chama a função nos triggers de cargos; o corpo não é objeto deste teste.
+CREATE FUNCTION wacrm.audit_write(p_account uuid, p_event text, p_resource_type text, p_resource_id uuid, p_label text, p_action text, p_summary text, p_changes jsonb DEFAULT NULL, p_metadata jsonb DEFAULT NULL) RETURNS void LANGUAGE plpgsql AS $$ BEGIN NULL; END $$;
 -- RPCs de relatório (a 322 reescreve o guard is_account_member(p_account_id) pela definição VIVA). Aqui só reproduzem a ASSINATURA e o
 -- número de ocorrências do guard que a 322 confere; a lógica de cada relatório não é o objeto deste teste.
 CREATE FUNCTION wacrm.get_attendance_report_by_team(p_account_id uuid, p_from timestamptz, p_to timestamptz) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
@@ -184,7 +186,7 @@ CREATE POLICY intelligence_tool_calls_select ON wacrm.intelligence_tool_calls FO
 CREATE TABLE wacrm.ai_prompt_versions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.ai_prompt_versions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY ai_prompt_versions_select ON wacrm.ai_prompt_versions FOR SELECT USING (wacrm.is_account_member(account_id));
-CREATE TABLE wacrm.account_invitations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.account_invitations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), role wacrm.account_role_enum NOT NULL DEFAULT 'agent', accepted_at timestamptz, accepted_by_user_id uuid);
 ALTER TABLE wacrm.account_invitations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY account_invitations_select ON wacrm.account_invitations FOR SELECT USING (wacrm.is_account_member(account_id));
 CREATE TABLE wacrm.message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
