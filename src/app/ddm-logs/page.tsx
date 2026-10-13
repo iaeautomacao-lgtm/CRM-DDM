@@ -1084,7 +1084,7 @@ export default function DdmLogsPage() {
               else loadFeedbackFirstPage();
             }}
             disabled={activeLoading}
-            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-primary-solid px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {activeLoading ? "Atualizando..." : "Atualizar"}
           </button>

@@ -37,6 +37,8 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permission";
+import { Can } from "@/components/auth/can";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -239,6 +241,7 @@ export default function EnvioEmLotePage() {
 
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
   const [campaignId, setCampaignId] = useState<string | null>(null);
 
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
@@ -274,6 +277,7 @@ export default function EnvioEmLotePage() {
       setCampaigns(
         rows.map((r) => ({ id: r.id, nome: r.nome, createdAt: r.created_at, status: r.status })),
       );
+      setCampaignsLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -562,7 +566,7 @@ export default function EnvioEmLotePage() {
                 <Button
                   onClick={handlePesquisar}
                   disabled={!campaignId}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
                 >
                   <Search className="size-4" />
                   Pesquisar
@@ -586,6 +590,16 @@ export default function EnvioEmLotePage() {
             title="Selecione uma campanha"
             hint="Escolha uma campanha no filtro acima para ver os detalhes e os itens enviados."
           />
+          {campaignsLoaded && campaigns.length === 0 && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Ainda não há campanhas nesta conta.{" "}
+              <Can permission="campaigns.view">
+                <Link href="/disparador/campanhas" className="font-medium text-primary-text underline underline-offset-2">
+                  Ir para Campanhas
+                </Link>
+              </Can>
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -763,7 +777,7 @@ export default function EnvioEmLotePage() {
                       onClick={() => setPage(p)}
                       aria-label={`Página ${p}`}
                       aria-current={p === page ? "page" : undefined}
-                      className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
+                      className={p === page ? "bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover" : ""}
                     >
                       {p}
                     </Button>

@@ -616,7 +616,7 @@ export function AiAgentSettings() {
           <Button
             type="submit"
             disabled={saving}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 w-full md:w-auto"
+            className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover w-full md:w-auto"
           >
             {saving ? (
               <>

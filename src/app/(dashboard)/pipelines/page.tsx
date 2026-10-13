@@ -329,7 +329,7 @@ export default function PipelinesPage() {
       .single();
 
     if (error || !pipeline) {
-      toast.error("Falha ao criar pipeline");
+      toast.error("Falha ao criar funil");
       setCreating(false);
       return;
     }
@@ -347,7 +347,7 @@ export default function PipelinesPage() {
     setSelectedPipelineId(pipeline.id);
     await refreshPipelines();
     setCreating(false);
-    toast.success("Pipeline criado");
+    toast.success("Funil criado");
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
@@ -355,7 +355,7 @@ export default function PipelinesPage() {
   if (loadError && !loading && pipelines.length === 0) {
     return (
       <ErrorState
-        title="Não foi possível carregar os pipelines"
+        title="Não foi possível carregar os funis"
         onRetry={() => {
           setLoading(true);
           void refreshPipelines().finally(() => setLoading(false));
@@ -384,7 +384,7 @@ export default function PipelinesPage() {
     <div className="flex flex-col gap-4">
       {/* Cabeçalho (redesenho DDM) */}
       <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Pipelines</h2>
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Funis</h2>
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Negócios por etapa · arraste para mover</p>
       </div>
       <div className="flex flex-wrap items-center gap-2.5">
@@ -396,7 +396,7 @@ export default function PipelinesPage() {
             >
               <GitBranch className="size-3.5 text-primary" />
               <span>
-                {selectedPipeline?.name ?? "Selecionar Pipeline"}
+                {selectedPipeline?.name ?? "Selecionar funil"}
               </span>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
@@ -406,7 +406,7 @@ export default function PipelinesPage() {
             >
               {pipelines.length === 0 && (
                 <DropdownMenuItem disabled className="text-muted-foreground">
-                  Nenhum pipeline ainda
+                  Nenhum funil ainda
                 </DropdownMenuItem>
               )}
               {pipelines.map((p) => (
@@ -430,7 +430,7 @@ export default function PipelinesPage() {
                   className="text-popover-foreground"
                 >
                   <Settings className="mr-2 h-3.5 w-3.5" />
-                  Gerenciar Pipelines
+                  Gerenciar funil
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -442,11 +442,11 @@ export default function PipelinesPage() {
           <GatedButton
             variant="outline"
             canAct={canEditSettings}
-            gateReason="criar pipelines"
+            gateReason="criar funis"
             onClick={() => setNewPipelineOpen(true)}
           >
             <Plus className="size-3.5" />
-            Adicionar pipeline
+            Adicionar funil
           </GatedButton>
           <GatedButton
             canAct={canCreateDeals}
@@ -465,19 +465,19 @@ export default function PipelinesPage() {
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20">
           <GitBranch className="h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-medium text-foreground">
-            Nenhum pipeline ainda
+            Nenhum funil ainda
           </h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Crie um pipeline para começar a acompanhar negócios
+            Crie um funil para começar a acompanhar negócios
           </p>
           <GatedButton
             canAct={canEditSettings}
-            gateReason="criar pipelines"
+            gateReason="criar funis"
             onClick={() => setNewPipelineOpen(true)}
-            className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
+            className="mt-4 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
           >
             <Plus className="mr-1 h-4 w-4" />
-            Criar Pipeline
+            Criar funil
           </GatedButton>
         </div>
       ) : boardError ? (
@@ -506,10 +506,10 @@ export default function PipelinesPage() {
       <Dialog open={newPipelineOpen} onOpenChange={setNewPipelineOpen}>
         <DialogContent className="sm:max-w-sm bg-popover border-border">
           <DialogHeader>
-            <DialogTitle className="text-popover-foreground">Novo Pipeline</DialogTitle>
+            <DialogTitle className="text-popover-foreground">Novo funil</DialogTitle>
           </DialogHeader>
           <div className="py-2">
-            <Label htmlFor="new-pipeline-name" className="text-muted-foreground">Nome do Pipeline</Label>
+            <Label htmlFor="new-pipeline-name" className="text-muted-foreground">Nome do funil</Label>
             <Input
               id="new-pipeline-name"
               value={newPipelineName}
@@ -535,9 +535,9 @@ export default function PipelinesPage() {
             <Button
               onClick={handleCreatePipeline}
               disabled={creating || !newPipelineName.trim()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
             >
-              {creating ? "Criando..." : "Criar Pipeline"}
+              {creating ? "Criando..." : "Criar funil"}
             </Button>
           </DialogFooter>
         </DialogContent>

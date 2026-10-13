@@ -1,5 +1,6 @@
 'use client';
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -164,7 +165,7 @@ export function ImportModal({
     setFile(selected);
     setResult(null);
 
-    const text = await selected.text();
+    const text = await readTextFile(selected);
     const {
       rows,
       hasTagsColumn: csvHasTags,

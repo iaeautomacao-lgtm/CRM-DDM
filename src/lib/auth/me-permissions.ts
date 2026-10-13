@@ -79,7 +79,11 @@ export function buildMePermissions(ctx: MePermissionsInput): MePermissions {
       intelligence: scopeOf(has, "intelligence.scope_account", "intelligence.use", "none"),
     },
     // Páginas com gate que o papel acessa hoje (ROUTE_ALLOWLIST); o front deixa de duplicar a tabela.
-    pages: Object.keys(ROUTE_ALLOWLIST).filter((prefix) => canAccessRoute(ctx.role, prefix)),
+    // /flows também abre para quem só vê execuções (flows.view_runs, papel personalizado): o
+    // editor abre em modo leitura (decisão do dono 13/10, item 11); as APIs seguem por permissão.
+    pages: Object.keys(ROUTE_ALLOWLIST).filter(
+      (prefix) => canAccessRoute(ctx.role, prefix) || (prefix === "/flows" && has("flows.view_runs")),
+    ),
     status: "active",
   };
 }

@@ -12,6 +12,7 @@ import {
   MODE_STORAGE_KEY,
   MODES,
   STORAGE_KEY,
+  SYSTEM_DARK_QUERY,
   THEME_IDS,
 } from "@/lib/themes";
 
@@ -19,7 +20,7 @@ import {
 const poppins = Poppins({
   variable: "--font-poppins",
   subsets: ["latin"],
-  weight: ["500", "600"],
+  weight: ["500", "600", "700"],
 });
 
 const inter = Inter({
@@ -73,13 +74,20 @@ const THEME_BOOT_SCRIPT = `
     d.dataset.theme = THEMES.indexOf(savedTheme) !== -1 ? savedTheme : THEME_DEFAULT;
 
     var MODE_KEY = ${JSON.stringify(MODE_STORAGE_KEY)};
-    var MODE_DEFAULT = ${JSON.stringify(DEFAULT_MODE)};
     var MODES = ${JSON.stringify(MODES)};
     var savedMode = localStorage.getItem(MODE_KEY);
-    d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : MODE_DEFAULT;
+    d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : systemMode();
   } catch (_e) {
     d.dataset.theme = ${JSON.stringify(DEFAULT_THEME)};
-    d.dataset.mode = ${JSON.stringify(DEFAULT_MODE)};
+    d.dataset.mode = systemMode();
+  }
+  // Sem escolha salva, segue o tema do sistema (Design System DDM, 13/10).
+  function systemMode() {
+    try {
+      return window.matchMedia(${JSON.stringify(SYSTEM_DARK_QUERY)}).matches ? "dark" : "light";
+    } catch (_e) {
+      return ${JSON.stringify(DEFAULT_MODE)};
+    }
   }
 })();
 `;

@@ -2,7 +2,9 @@
 
 import { windowError } from "@/lib/billing/client-validation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
+import { usePermission } from "@/hooks/use-permission";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -183,6 +185,7 @@ export function RulerDrawer({
                 templates={templates}
                 provider={provider}
                 canManage={canManage}
+                onGoToConfig={() => setTab("config")}
                 onSaved={(next) => {
                   setSteps(next);
                   const r = { ...ruler, steps_count: next.length };
@@ -216,6 +219,7 @@ function ConfigForm({
   onSaved: (r: Ruler) => void;
   onDeleted: () => void;
 }) {
+  const canManageChannels = usePermission("channels.manage");
   const [form, setForm] = useState(ruler);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -293,6 +297,18 @@ function ConfigForm({
             </option>
           ))}
         </select>
+        {lines.length === 0 && (
+          <span className="text-muted-foreground">
+            Nenhum canal conectado.{" "}
+            {canManageChannels ? (
+              <Link href="/canais" className="font-medium text-primary-text hover:underline">
+                Conectar canal
+              </Link>
+            ) : (
+              "Peça a um administrador."
+            )}
+          </span>
+        )}
       </label>
 
       <div className="grid gap-3 sm:grid-cols-2">

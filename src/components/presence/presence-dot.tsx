@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils";
 import type { PresenceStatus } from "@/lib/presence";
 
-// Single source of truth for presence colours. Semantic accents
-// (emerald / amber / muted), mirroring the role-chip palette already
-// used across settings, so they're intentionally not tokenized.
+// Fonte única das cores de presença: preenchimentos semânticos do Design System
+// DDM (bg-success-fill / bg-warning-fill). No claro eles ficam abaixo de 3:1 no
+// branco, então o ponto isolado leva um anel fino e o significado sempre vem
+// junto de um rótulo (label/tooltip), nunca só pela cor.
 export const PRESENCE_DOT_CLASS: Record<PresenceStatus, string> = {
-  online: "bg-emerald-500",
-  away: "bg-amber-500",
+  online: "bg-success-fill",
+  away: "bg-warning-fill",
   offline: "bg-muted-foreground/50",
 };
 
@@ -31,7 +32,7 @@ export function PresenceDot({
       aria-label={label}
       title={label}
       className={cn(
-        "inline-block size-2 shrink-0 rounded-full",
+        "inline-block size-2 shrink-0 rounded-full ring-1 ring-foreground/15",
         PRESENCE_DOT_CLASS[status],
         className,
       )}

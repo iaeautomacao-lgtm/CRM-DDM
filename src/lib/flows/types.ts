@@ -329,7 +329,7 @@ export interface AnchorNodeConfig {
 
 /**
  * Unconditional jump to another node in the SAME flow (typically an
- * `anchor`). Guarded by `flow_runs.hops_count` (MAX 50) so a cyclical
+ * `anchor`). Guarded by `flow_runs.hops_count` (MAX 50 per customer message; reset when a new message arrives) so a cyclical
  * go_to chain fails the run instead of looping forever.
  */
 export interface GoToNodeConfig {
@@ -758,7 +758,12 @@ export interface DispatchInboundResult {
      * disparar IA global/automações em paralelo; a mensagem fica para o
      * atendente no inbox.
      */
-    | "other_channel_run";
+    | "other_channel_run"
+    /**
+     * A entrega ao fluxo falhou (exceção): ninguém responde por cima (consumed=true) e a conversa foi para a fila com o motivo registrado
+     * (decisão do dono, 13/10).
+     */
+    | "dispatch_error_queued";
 }
 
 // ============================================================

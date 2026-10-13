@@ -33,6 +33,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { usePermission } from '@/hooks/use-permission';
+import { MissingCredentialNotice } from '../../missing-credential-notice';
+import { SecretDialog, type SecretItem as SavedSecret } from '../../secret-dialog';
+import { extractCredRefs, missingCredNames } from '@/lib/secrets/cred-refs';
 import type {
   AgentFormData,
   KnowledgeBaseFileItem,
@@ -48,6 +52,8 @@ interface KnowledgeTabProps {
   /** Teto de caracteres da base deste agente (knowledge.max_chars). */
   maxChars: number;
   secrets: SecretItem[];
+  /** Credencial criada ali mesmo ("Criar agora"): entra na lista sem recarregar. */
+  onSecretCreated?: (secret: SecretItem) => void;
   readOnly?: boolean;
 }
 
@@ -72,8 +78,11 @@ export function KnowledgeTab({
   onFilesChange,
   maxChars,
   secrets,
+  onSecretCreated,
   readOnly,
 }: KnowledgeTabProps) {
+  const canCreateSecret = usePermission('secrets.write');
+  const [creatingSecret, setCreatingSecret] = useState(false);
   const [fileFilter, setFileFilter] = useState('');
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -214,6 +223,20 @@ export function KnowledgeTab({
   const selectedSecretName = rag.credential?.startsWith('{{cred.') && rag.credential.endsWith('}}')
     ? rag.credential.slice(7, -2)
     : rag.credential;
+
+  const missingRefs = rag.enabled ? missingCredNames(extractCredRefs([rag.credential]), secrets) : [];
+
+  function secretCreated(saved: SavedSecret) {
+    onSecretCreated?.({
+      id: saved.id,
+      name: saved.name,
+      kind: saved.kind,
+      last4: saved.last4 ?? undefined,
+      description: saved.description ?? undefined,
+    });
+    // Sem referência escolhida ainda: já seleciona a recém-criada.
+    if (!rag.credential) updateRag({ credential: `{{cred.${saved.name}}}` });
+  }
 
   return (
     <div className="space-y-8">
@@ -441,7 +464,7 @@ export function KnowledgeTab({
               </span>
             </div>
             <div
-              className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              className="h-2 w-full overflow-hidden rounded-full bg-muted"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
@@ -592,6 +615,17 @@ export function KnowledgeTab({
                   <div>
                     Nenhuma credencial cadastrada. Cadastre um token ou chave em{' '}
                     <strong>Configurações → Variáveis e credenciais</strong> para associar com segurança ao RAG.
+                    {!readOnly && (
+                      <div className="mt-1.5">
+                        {canCreateSecret ? (
+                          <Button type="button" size="sm" variant="outline" onClick={() => setCreatingSecret(true)}>
+                            Criar agora
+                          </Button>
+                        ) : (
+                          <span>Peça a um administrador.</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -617,6 +651,18 @@ export function KnowledgeTab({
                     ))}
                   </SelectContent>
                 </Select>
+              )}
+              {!readOnly && <MissingCredentialNotice names={missingRefs} onCreated={secretCreated} />}
+              {creatingSecret && (
+                <SecretDialog
+                  item={null}
+                  presetKind="credential"
+                  onClose={() => setCreatingSecret(false)}
+                  onSaved={(saved) => {
+                    setCreatingSecret(false);
+                    secretCreated(saved);
+                  }}
+                />
               )}
               <p className="text-[11px] text-muted-foreground">
                 O token é injetado pelo servidor com segurança usando marcador <code>{'{{cred.NOME}}'}</code>.

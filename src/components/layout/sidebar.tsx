@@ -57,11 +57,11 @@ function RailTooltip({
 
 function navItemClass(rail: boolean, active = false) {
   return cn(
-    "relative flex w-full items-center rounded-md text-[13px] font-medium transition-colors",
-    rail ? "h-9 justify-center px-0" : "h-9 gap-2.5 px-2.5 text-left",
+    "relative flex w-full items-center rounded-field text-sm transition-colors duration-150 ease-out",
+    rail ? "h-10 justify-center px-0" : "h-10 gap-3 px-3.5 text-left",
     active
-      ? "bg-muted/70 text-foreground before:absolute before:left-0 before:h-4 before:w-0.5 before:rounded-full before:bg-primary"
-      : "text-muted-foreground hover:bg-muted/55 hover:text-foreground",
+      ? "bg-primary-solid font-semibold text-white shadow-sm"
+      : "font-medium text-foreground-2 hover:bg-surface-hover hover:text-foreground",
   );
 }
 
@@ -94,16 +94,17 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const rail = collapsed && isDesktop;
 
   // Itens que o servidor libera (GET /api/me/permissions, campo pages).
-  const { canOpen } = usePermissions();
+  const { canOpen, can } = usePermissions();
   const visibleNavItems = navItems
     .filter((item) => canOpen(item.href.split("?")[0]))
-    .filter((item) => item.href !== "/settings?tab=ai" || accountRole !== "admin");
+    // Agentes de IA: quem não vê agentes não vê o item (a aba de Configurações exige ai.agents.view).
+    .filter((item) => item.href !== "/settings?tab=agents" || can("ai.agents.view"));
 
   const visibleBottomNavItems = bottomNavItems.filter((item) => canOpen(item.href.split("?")[0]));
 
-  const isAiTab = pathname === "/settings" && searchParams.get("tab") === "ai";
-  const activeNavHref = isAiTab
-    ? "/settings?tab=ai"
+  const isAgentsTab = pathname === "/settings" && searchParams.get("tab") === "agents";
+  const activeNavHref = isAgentsTab
+    ? "/settings?tab=agents"
     : longestMatchingHref(
         pathname,
         visibleNavItems
@@ -168,7 +169,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           aria-label={rail ? (unread > 0 ? `${label} (${internalUnreadLabel})` : label) : undefined}
           className={navItemClass(rail)}
         >
-          <Icon className="h-4 w-4 shrink-0" />
+          <Icon className="size-[18px] shrink-0" />
           {!rail && <span className="flex-1">{label}</span>}
           {unread > 0 &&
             (rail ? (
@@ -291,8 +292,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                               >
                                 <item.icon
                                   className={cn(
-                                    "h-4 w-4 shrink-0",
-                                    isActive ? "text-primary" : "text-muted-foreground",
+                                    "size-[18px] shrink-0",
+                                    isActive ? "text-white" : "text-muted-foreground",
                                   )}
                                 />
                                 {!rail && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
@@ -358,7 +359,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               {visibleBottomNavItems.map((item) => {
                 const active =
                   item.href === "/settings"
-                    ? matchesPrefix(pathname, item.href) && !isAiTab
+                    ? matchesPrefix(pathname, item.href) && !isAgentsTab
                     : matchesPrefix(pathname, item.href);
                 return (
                   <li key={item.href}>

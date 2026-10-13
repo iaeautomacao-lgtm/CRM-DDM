@@ -4,6 +4,7 @@
 // blocos vão para o job em segundo plano (POST /imports → PUT /blocks/[n] → POST /start) e o progresso segue
 // pelo GET /imports/[id]. Depois do start, fechar a gaveta (ou a aba) não interrompe a importação.
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2, RotateCcw, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -104,7 +105,7 @@ export function ImportListDrawer({
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         parsed = tableFromMatrix(XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false }));
       } else {
-        parsed = parseImportCsv(await f.text());
+        parsed = parseImportCsv(await readTextFile(f));
       }
       if (parsed.rows.length === 0) {
         toast.error("Arquivo vazio ou sem dados.");
@@ -408,7 +409,7 @@ export function ProgressBar({ pct, tone = "brand" }: { pct: number; tone?: "bran
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(w)}
-      className="block h-2 w-full overflow-hidden rounded-full bg-surface-3"
+      className="block h-2 w-full overflow-hidden rounded-full bg-muted"
     >
       <span
         className={cn(

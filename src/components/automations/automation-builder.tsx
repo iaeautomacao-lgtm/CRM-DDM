@@ -649,7 +649,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           <Button
             onClick={save}
             disabled={saving}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
+            className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {isEditing ? "Salvar" : "Salvar rascunho"}

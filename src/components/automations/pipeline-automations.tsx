@@ -172,7 +172,7 @@ export function PipelineAutomations() {
           <div>
             <CardTitle className="flex items-center gap-2 text-foreground">
               <Clock className="size-4 text-primary" />
-              Regras de Envelhecimento de Cards (Pipeline)
+              Regras de Envelhecimento de Cards (funil)
             </CardTitle>
             <CardDescription className="text-muted-foreground">
               Transfira automaticamente negócios entre colunas se eles ficarem estagnados por um determinado período.
@@ -254,7 +254,7 @@ export function PipelineAutomations() {
                 type="submit"
                 disabled={adding}
                 size="sm"
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
+                className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
               >
                 {adding && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
                 Adicionar Regra

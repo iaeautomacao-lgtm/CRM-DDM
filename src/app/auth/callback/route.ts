@@ -9,8 +9,12 @@ export async function GET(request: Request) {
   const code = searchParams.get('code')
   // se "next" for informado, redireciona para lá, senão vai para a home do dashboard
   const next = safeReturnPath(searchParams.get('next'))
+  // Link de definição de senha gerado pelo SERVIDOR (convite em lote — revisão de segurança 13/10): não tem o PKCE do
+  // navegador, então vem como token_hash + type e é verificado aqui (padrão do Supabase para SSR). Só 'recovery'.
+  const tokenHash = searchParams.get('token_hash')
+  const type = searchParams.get('type')
 
-  if (code) {
+  if (code || (tokenHash && type === 'recovery')) {
     const cookieStore = await cookies()
     // Anon key, not service role — exchangeCodeForSession is an Auth
     // operation, not a data query, so it doesn't go through RLS and
@@ -35,7 +39,9 @@ export async function GET(request: Request) {
         },
       }
     )
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const { error } = code
+      ? await supabase.auth.exchangeCodeForSession(code)
+      : await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash as string })
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`)
     }

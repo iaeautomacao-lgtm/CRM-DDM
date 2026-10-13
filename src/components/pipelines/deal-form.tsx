@@ -397,7 +397,7 @@ export function DealForm({
                     type="button"
                     onClick={() => handleStatusChange("won")}
                     disabled={!!statusAction || deal.status === "won"}
-                    className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    className="flex-1 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover disabled:opacity-50"
                   >
                     {statusAction === "won" ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -453,7 +453,7 @@ export function DealForm({
               <Button
                 onClick={handleSave}
                 disabled={saving || !title.trim() || !contactId || !stageId}
-                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                className="flex-1 bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
               >
                 {saving ? "Salvando..." : deal ? "Salvar Alterações" : "Criar Negócio"}
               </Button>

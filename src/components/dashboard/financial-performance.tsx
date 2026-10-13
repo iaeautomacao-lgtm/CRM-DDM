@@ -43,18 +43,18 @@ export function FinancialPerformance({ data, loading }: { data: AiAnalyticsData 
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-px overflow-hidden rounded-lg border border-border bg-border">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
             {[
               { label: 'Acordos ganhos', value: fin.totalWonValue },
               { label: 'Em negociação', value: fin.totalOpenValue },
               { label: 'Ticket médio', value: fin.ticketMedio },
             ].map((f) => (
-              <div key={f.label} className="flex flex-col gap-1.5 bg-card px-4 py-3.5">
+              <div key={f.label} className="flex flex-col gap-1.5 rounded-field bg-muted px-4 py-3.5">
                 <span className="text-[12.5px] text-foreground-2">{f.label}</span>
                 <CountUp
                   value={f.value}
                   format={brl}
-                  className="whitespace-nowrap text-[22px] font-semibold tracking-[-0.02em] text-foreground"
+                  className="whitespace-nowrap font-heading text-[22px] font-bold tracking-[-0.01em] text-foreground"
                 />
               </div>
             ))}
@@ -113,7 +113,7 @@ function Ranking({
               >
                 <span className="text-xs font-semibold tabular-nums text-muted-foreground">{i + 1}</span>
                 <span className="truncate text-[13px] text-foreground">{op.userName}</span>
-                <span className="hidden h-1.5 overflow-hidden rounded-full bg-surface-3 sm:block">
+                <span className="hidden h-2 overflow-hidden rounded-full bg-muted sm:block">
                   <span
                     className={cn(
                       'block h-full origin-left animate-ddm-bar rounded-full transition-[width] duration-500',

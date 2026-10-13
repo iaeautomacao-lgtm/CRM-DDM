@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -225,6 +226,7 @@ export function TemplateManager() {
   // Escrita (criar, sincronizar, editar, reenviar, apagar, pastas, mover, tags de canal): templates.manage, a chave que
   // todas as rotas /api/whatsapp/templates/* exigem — inclusive a listagem de pastas.
   const canManage = usePermission('templates.manage');
+  const canManageChannels = usePermission('channels.manage');
   const [folders, setFolders] = useState<TemplateFolder[]>([]);
   const [channels, setChannels] = useState<TemplateChannel[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -1312,6 +1314,18 @@ export function TemplateManager() {
                       ? 'Crie seu primeiro template de mensagem ou sincronize os aprovados do Meta.'
                       : 'Ajuste a busca, o status ou a pasta.'}
                   </p>
+                  {templates.length === 0 && channels.length === 0 && (
+                    <p className="text-[12.5px] text-muted-foreground">
+                      Falta um canal Meta conectado nesta conta.{' '}
+                      {canManageChannels ? (
+                        <Link href="/canais" className="font-medium text-primary-text hover:underline">
+                          Conectar em Canais
+                        </Link>
+                      ) : (
+                        <span>Peça a um administrador.</span>
+                      )}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <DenseTable>
@@ -1551,6 +1565,18 @@ export function TemplateManager() {
                   : channels.length === 0
                     ? 'Nenhum canal Meta habilitado nesta conta — conecte um em Canais.'
                     : 'A qual canal Meta este template será enviado.'}
+                {!editingId && channels.length === 0 && (
+                  <>
+                    {' '}
+                    {canManageChannels ? (
+                      <Link href="/canais" className="font-medium text-primary-text hover:underline">
+                        Ir para Canais
+                      </Link>
+                    ) : (
+                      <span>Peça a um administrador.</span>
+                    )}
+                  </>
+                )}
               </p>
             </div>
 

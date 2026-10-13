@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { ChevronRight, LogOut, Menu, Search, Settings as SettingsIcon, User } from "lucide-react";
+import { LogOut, Menu, Search, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -60,17 +60,17 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           <Menu className="h-5 w-5" />
         </button>
         {crumbs.length > 1 && (
-          <nav aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground sm:flex">
+          <nav aria-label="Você está em" className="hidden min-w-0 items-center gap-2 text-xs text-muted-foreground sm:flex">
             {crumbs.slice(0, -1).map((c) => (
               <span key={c.label} className="flex min-w-0 items-center gap-1.5">
                 {c.href ? (
-                  <Link href={c.href} className="truncate rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Link href={c.href} className="truncate rounded-sm transition-colors duration-150 ease-out hover:text-primary-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     {c.label}
                   </Link>
                 ) : (
                   <span className="truncate">{c.label}</span>
                 )}
-                <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="shrink-0" aria-hidden="true">/</span>
               </span>
             ))}
           </nav>
@@ -86,7 +86,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           onClick={openCommandPalette}
           aria-label={`Buscar telas (${isMac ? "⌘K" : "Ctrl+K"})`}
           aria-keyshortcuts="Control+K Meta+K"
-          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-8 md:w-56 md:justify-start md:gap-2 md:border md:border-border md:bg-card md:px-2.5"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-8 md:w-56 md:justify-start md:gap-2 md:rounded-field md:border md:border-border md:bg-card md:px-2.5"
         >
           <Search className="size-4 shrink-0" aria-hidden="true" />
           <span className="hidden flex-1 text-left text-[13px] md:inline">Buscar…</span>
@@ -106,7 +106,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
                 alt={profile.full_name ?? "Avatar"}
               />
             ) : null}
-            <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
+            <AvatarFallback className="bg-primary-soft text-sm font-bold text-primary-text">
               {initial}
             </AvatarFallback>
           </Avatar>
@@ -153,7 +153,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             Configurações
           </DropdownMenuItem>}
           <DropdownMenuItem render={<Link href="/seguranca" />}>
-            <User className="size-4" /> Minha senha e sessões
+            <User className="size-4" /> Senha e sessões
           </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem

@@ -936,7 +936,7 @@ export function MessageComposer({
                   disabled={!text.trim() || sessionExpired || sending}
                   aria-label="Enviar mensagem"
                   onClick={handleSend}
-                  className="h-8 shrink-0 gap-1.5 rounded-md bg-primary px-3.5 text-[12.5px] font-semibold hover:bg-primary-hover disabled:bg-surface-3 disabled:text-muted-foreground disabled:opacity-100"
+                  className="h-8 shrink-0 gap-1.5 rounded-md bg-primary-solid px-3.5 text-[12.5px] font-semibold hover:bg-primary-solid-hover disabled:bg-surface-3 disabled:text-muted-foreground disabled:opacity-100"
                 >
                   <Send className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="hidden sm:inline">Enviar</span>

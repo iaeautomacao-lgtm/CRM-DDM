@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Info, Pause, RefreshCw, Siren } from "lucide-react";
 
@@ -60,7 +61,7 @@ function MonitorKpi(props: { title: string; value: ReactNode; sub?: ReactNode; t
       </span>
       <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">{props.value}</span>
       {props.bar != null && (
-        <span className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3" role="presentation">
+        <span className="h-2 w-full overflow-hidden rounded-full bg-muted" role="presentation">
           <span
             className={cn(
               "block h-full origin-left animate-ddm-bar rounded-full transition-[width] duration-500",
@@ -301,7 +302,18 @@ export default function MonitorV2Page() {
           {/* Por número */}
           <TableCard title="Por número" hint="Ritmo, vagas, fila e freio de cada número de envio.">
             {s.numbers.length === 0 ? (
-              <EmptyState className="m-4 mt-0" title="Nenhum número cadastrado" />
+              <>
+                <EmptyState className="m-4 mt-0 min-h-0" title="Nenhum número cadastrado" />
+                <p className="-mt-2 mb-4 text-center text-xs text-muted-foreground">
+                  <Can permission="channels.manage" fallback="Peça a um administrador para conectar um número.">
+                    Conecte um número em{" "}
+                    <Link href="/canais" className="font-medium text-primary-text underline underline-offset-2">
+                      Canais
+                    </Link>
+                    .
+                  </Can>
+                </p>
+              </>
             ) : (
               <DenseTable minWidth={760}>
                 <thead>
@@ -394,7 +406,7 @@ export default function MonitorV2Page() {
                         {c.pauseReason && <p className="m-0 mt-1 whitespace-normal text-[11px] text-danger">{c.pauseReason}</p>}
                       </Td>
                       <Td>
-                        <span className="block h-1.5 w-full overflow-hidden rounded-full bg-surface-3" role="presentation">
+                        <span className="block h-2 w-full overflow-hidden rounded-full bg-muted" role="presentation">
                           <span
                             className="block h-full origin-left animate-ddm-bar rounded-full bg-primary transition-[width] duration-500"
                             style={{ width: `${Math.max(c.progressPct > 0 ? 2 : 0, c.progressPct)}%` }}
