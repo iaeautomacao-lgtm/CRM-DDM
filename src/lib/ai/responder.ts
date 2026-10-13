@@ -1841,6 +1841,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         mediaUrl: voiceMediaUrl || null,
       });
       if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
+        await assertAiMayRespond(db, accountId, conversationId);
         await send({
           conversationId,
           senderType: "bot",
@@ -1964,6 +1965,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
           try {
             console.log(`[AI Agent] Sending PDF document to client...`);
+            await assertAiMayRespond(db, accountId, conversationId);
             await sendWahaMediaMessage(wahaConfig!, variant, payBoletoUrl, "document", "Boleto-Acordo.pdf");
           } catch (pdfErr) {
             console.error("[AI Agent] Failed to send PDF document via WAHA:", pdfErr);
@@ -1993,6 +1995,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
           try {
             console.log(`[AI Agent] Sending PDF document via Meta to client...`);
+            await assertAiMayRespond(db, accountId, conversationId);
             await sendMediaMessage({
               phoneNumberId: config.phone_number_id,
               accessToken,
