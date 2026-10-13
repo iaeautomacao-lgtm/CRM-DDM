@@ -44,6 +44,7 @@ import {
 } from "@/lib/ai/tool-recovery";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { createAiHeartbeat, type AiHeartbeat } from "@/lib/ai/heartbeat";
+import { assertAiMayRespond, AiHumanTakeoverError } from "@/lib/ai/human-takeover-guard";
 import { gatedFetch } from "@/lib/ai/llm-gate";
 import { buildAgentKnowledgeContext } from "@/lib/ai/knowledge/knowledge-context";
 import { createVectorRetriever } from "@/lib/ai/knowledge/vector-store";
@@ -585,6 +586,8 @@ async function handleAiAutoResponseAttempt(
   tracker?: AiAttemptTracker,
 ): Promise<AiAutoResponseResult> {
   const db = supabaseAdmin();
+  try { await assertAiMayRespond(db, accountId, conversationId); }
+  catch (err) { if (err instanceof AiHumanTakeoverError) return { outcome: "skipped", reason: "human_takeover", detectedTag: null, modelUsed: null }; throw err; }
 
   // 1. Fetch AI Configuration
   const { data: aiConfig, error: aiConfigError } = await db
@@ -1220,6 +1223,7 @@ async function handleAiAutoResponseAttempt(
       tracker.trace.phase = "llm";
       await tracker.heartbeat?.beat();
     }
+    await assertAiMayRespond(db, accountId, conversationId);
     if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
   };
 
@@ -1247,6 +1251,7 @@ async function handleAiAutoResponseAttempt(
             tracker.trace.tools.push(toolName);
             await tracker.heartbeat?.beat();
           }
+          await assertAiMayRespond(db, accountId, conversationId);
           if (onToolCall) await onToolCall(toolName, toolArgs);
         },
         trackedOnToolResult,
@@ -1310,6 +1315,8 @@ async function handleAiAutoResponseAttempt(
     }
   }
 
+  try { await assertAiMayRespond(db, accountId, conversationId); }
+  catch (err) { if (err instanceof AiHumanTakeoverError) return { outcome: "skipped", reason: "human_takeover", detectedTag: null, modelUsed: responseModel }; throw err; }
   generatedText = generatedText.trim();
 
   // Integração fora do ar (ex.: API DDM respondeu "Erro ao executar a
@@ -1575,6 +1582,8 @@ async function handleAiAutoResponseAttempt(
   // Instagram/Messenger: saem pela Graph API (src/lib/channels/social.ts).
   // A simulação de digitação e o retry por variante de telefone abaixo não
   // se aplicam a esses canais.
+  try { await assertAiMayRespond(db, accountId, conversationId); }
+  catch (err) { if (err instanceof AiHumanTakeoverError) return { outcome: "skipped", reason: "human_takeover", detectedTag, modelUsed: responseModel }; throw err; }
   const conversationChannel = await getConversationChannel(conversationId);
   if (conversationChannel === "webchat" || isSocialChannel(conversationChannel)) {
     const send = conversationChannel === "webchat" ? sendWebchatMessage : sendSocialMessage;
@@ -1587,6 +1596,7 @@ async function handleAiAutoResponseAttempt(
         mediaUrl: voiceMediaUrl || null,
       });
       if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
+        await assertAiMayRespond(db, accountId, conversationId);
         await send({
           conversationId,
           senderType: "bot",
@@ -1691,9 +1701,12 @@ async function handleAiAutoResponseAttempt(
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
+  try { await assertAiMayRespond(db, accountId, conversationId); }
+  catch (err) { if (err instanceof AiHumanTakeoverError) return { outcome: "skipped", reason: "human_takeover", detectedTag, modelUsed: responseModel }; throw err; }
   const voiceProviderUrl = voiceMediaUrl ? await resolveProviderMedia(voiceMediaUrl, accountId) : null;
   for (const variant of variants) {
     try {
+      await assertAiMayRespond(db, accountId, conversationId);
       if (isWaha) {
         if (voiceMediaUrl) {
           const result = await sendWahaMediaMessage(wahaConfig!, variant, voiceProviderUrl!, "audio", "voice.mp3");
@@ -1707,6 +1720,7 @@ async function handleAiAutoResponseAttempt(
         if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
           try {
             console.log(`[AI Agent] Sending PDF document to client...`);
+            await assertAiMayRespond(db, accountId, conversationId);
             await sendWahaMediaMessage(wahaConfig!, variant, payBoletoUrl, "document", "Boleto-Acordo.pdf");
           } catch (pdfErr) {
             console.error("[AI Agent] Failed to send PDF document via WAHA:", pdfErr);
@@ -1736,6 +1750,7 @@ async function handleAiAutoResponseAttempt(
         if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
           try {
             console.log(`[AI Agent] Sending PDF document via Meta to client...`);
+            await assertAiMayRespond(db, accountId, conversationId);
             await sendMediaMessage({
               phoneNumberId: config.phone_number_id,
               accessToken,
@@ -1752,6 +1767,7 @@ async function handleAiAutoResponseAttempt(
       workingPhone = variant;
       break;
     } catch (err) {
+      if (err instanceof AiHumanTakeoverError) return { outcome: "skipped", reason: "human_takeover", detectedTag, modelUsed: responseModel };
       if (isWaha) {
         console.error("[AI Agent] WAHA send error:", err);
         break;
@@ -2140,7 +2156,7 @@ export async function generateOpenAiResponse(
         const normalizedArgs = prepared.args;
 
         if (onToolCall) {
-          await onToolCall(toolName, normalizedArgs).catch(() => {});
+          await onToolCall(toolName, normalizedArgs);
         }
 
         if (prepared.failure) {

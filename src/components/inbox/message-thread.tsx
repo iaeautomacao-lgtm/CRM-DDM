@@ -1426,6 +1426,7 @@ export function MessageThread({
   const assignLabel = assignedAgentId
     ? (currentAssignee?.full_name ?? "Atribuído")
     : "Atribuir";
+  const humanControlText = assignedAgentId ? "Atendimento humano — IA pausada" : null;
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -1478,6 +1479,7 @@ export function MessageThread({
           </div>
         </div>
 
+        {humanControlText && <span className="shrink-0 text-xs text-warning" title="Atribuição humana impede respostas automáticas">{humanControlText}</span>}
         <div className="flex shrink-0 items-center gap-1.5" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
             <DropdownMenuTrigger
