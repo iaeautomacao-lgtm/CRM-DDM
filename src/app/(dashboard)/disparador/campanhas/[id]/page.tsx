@@ -253,7 +253,7 @@ export default function CampanhaContatosPage({
 
       {/* Resumo da campanha (campaign_metrics_live, mesma fonte dos cartões da lista). */}
       {m && (
-        <section aria-label="Resumo da campanha" className="flex flex-col gap-3 rounded-[10px] border border-border bg-card px-[18px] py-4">
+        <section aria-label="Resumo da campanha" className="flex flex-col gap-3 rounded-card border border-border bg-card px-[18px] py-4">
           {segments.length > 0 && (
             <>
               <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-surface-3" role="img" aria-label="Distribuição dos envios">

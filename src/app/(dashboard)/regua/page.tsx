@@ -177,7 +177,7 @@ function ReguaBoard({ canManage }: { canManage: boolean }) {
           ) : loading ? (
             <div className="flex flex-col gap-2" aria-busy="true">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full rounded-[10px]" />
+                <Skeleton key={i} className="h-16 w-full rounded-field" />
               ))}
             </div>
           ) : rulers.length === 0 ? (

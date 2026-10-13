@@ -251,7 +251,7 @@ export function ImportListDrawer({
             type="button"
             onClick={() => fileInput.current?.click()}
             disabled={reading}
-            className="flex flex-col items-center gap-1.5 rounded-[10px] border-[1.5px] border-dashed border-border-strong bg-surface-3 px-6 py-8 text-center transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-ring"
+            className="flex flex-col items-center gap-1.5 rounded-card border-[1.5px] border-dashed border-border-strong bg-surface-3 px-6 py-8 text-center transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-ring"
           >
             {reading ? (
               <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden="true" />

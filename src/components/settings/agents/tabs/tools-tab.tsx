@@ -65,7 +65,7 @@ export function ToolsTab({ data, onChange, catalog, readOnly, canManageTools, on
   return (
     <div className="space-y-6">
       {data.legacyTools.length > 0 && (
-        <div className="space-y-2 rounded-[10px] border border-border bg-card-2 p-4">
+        <div className="space-y-2 rounded-card border border-border bg-card-2 p-4">
           <h3 className="text-sm font-medium text-foreground">Ferramentas legadas deste agente (vindas do fluxo)</h3>
           <p className="text-xs text-muted-foreground">
             Estas ferramentas vieram da configuração do nó e são preservadas a cada versão. Só dá para ligar ou desligar;
@@ -116,7 +116,7 @@ export function ToolsTab({ data, onChange, catalog, readOnly, canManageTools, on
       </div>
 
       {catalog.length === 0 ? (
-        <div className="rounded-[10px] border border-dashed border-border p-8 text-center space-y-2">
+        <div className="rounded-card border border-dashed border-border p-8 text-center space-y-2">
           <Wrench className="size-5 mx-auto text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             Nenhuma ferramenta cadastrada no catálogo da conta ainda.
@@ -130,7 +130,7 @@ export function ToolsTab({ data, onChange, catalog, readOnly, canManageTools, on
             return (
               <div
                 key={tool.id}
-                className="rounded-[10px] border border-border bg-card p-4 space-y-2 transition-colors hover:border-border-strong"
+                className="rounded-card border border-border bg-card p-4 space-y-2 transition-colors hover:border-border-strong"
               >
                 <div className="flex flex-wrap items-center gap-3">
                   <Checkbox
@@ -182,7 +182,7 @@ export function ToolsTab({ data, onChange, catalog, readOnly, canManageTools, on
       )}
 
       {orphans.length > 0 && (
-        <div className="rounded-[10px] border border-warning-border bg-warning-soft p-4 space-y-2">
+        <div className="rounded-field border border-warning-border bg-warning-soft p-4 space-y-2">
           <p className="flex items-center gap-1.5 text-xs font-medium text-warning">
             <AlertTriangle className="size-3.5" />
             Ferramentas vinculadas que não existem mais no catálogo

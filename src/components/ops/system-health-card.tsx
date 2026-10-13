@@ -93,7 +93,7 @@ export function SystemHealthCard({ className }: { className?: string }) {
 
   return (
     <section aria-labelledby="system-health-title" className={className}>
-      <div className="flex flex-col gap-3 rounded-[10px] border bg-card p-4">
+      <div className="flex flex-col gap-3 rounded-card border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Activity className="size-4 text-primary" aria-hidden />
           <h2 id="system-health-title" className="text-[14px] font-semibold text-foreground">

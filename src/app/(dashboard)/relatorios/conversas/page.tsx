@@ -196,7 +196,7 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
   const contactInitial = contactLabel(row.contactName, row.contactPhone).charAt(0).toUpperCase();
 
   return (
-    <div className="overflow-hidden rounded-[10px] border border-border">
+    <div className="overflow-hidden rounded-card border border-border">
       <button
         type="button"
         aria-expanded={expanded}
@@ -481,7 +481,7 @@ export default function ConversasPage() {
         </p>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card">
+      <div className="rounded-card border border-border bg-card">
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
@@ -655,11 +655,11 @@ export default function ConversasPage() {
             ))}
           </div>
         ) : loadError ? (
-          <div className="rounded-[10px] border border-border bg-card p-4">
+          <div className="rounded-card border border-border bg-card p-4">
             <ErrorState title="Não foi possível carregar as conversas" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[10px] border border-border bg-card p-4">
+          <div className="rounded-card border border-border bg-card p-4">
             <EmptyState
               icon={MessageCircle}
               title="Nenhuma conversa encontrada"
@@ -681,7 +681,7 @@ export default function ConversasPage() {
               </div>
             ))}
 
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-card px-4 py-3">
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>

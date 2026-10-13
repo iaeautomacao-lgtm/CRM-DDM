@@ -326,7 +326,7 @@ export function KnowledgeTab({
         </div>
 
         {/* Arquivos da conta: envio, uso do teto, vínculo (modo escolhido) e remoção */}
-        <div className="rounded-[10px] border border-border bg-card p-4 space-y-3 max-w-2xl">
+        <div className="rounded-card border border-border bg-card p-4 space-y-3 max-w-2xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
@@ -488,7 +488,7 @@ export function KnowledgeTab({
       </div>
 
       {/* Busca por trechos (RAG vetorial, TASK1-D) */}
-      <div className="rounded-[10px] border border-border p-5 space-y-4 max-w-2xl bg-card">
+      <div className="rounded-card border border-border p-5 space-y-4 max-w-2xl bg-card">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
@@ -559,7 +559,7 @@ export function KnowledgeTab({
       </div>
 
       {/* 2. Bloco RAG Externo */}
-      <div className="rounded-[10px] border border-border p-5 space-y-5 max-w-2xl bg-card">
+      <div className="rounded-card border border-border p-5 space-y-5 max-w-2xl bg-card">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">

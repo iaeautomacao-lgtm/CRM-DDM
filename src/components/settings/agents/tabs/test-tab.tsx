@@ -120,7 +120,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section aria-label="Conversa de teste" className="flex min-h-[28rem] flex-col overflow-hidden rounded-[10px] border border-border bg-card">
+      <section aria-label="Conversa de teste" className="flex min-h-[28rem] flex-col overflow-hidden rounded-card border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
           <FlaskConical className="size-4 text-primary" />
           <span className="text-sm font-semibold">Testar agente</span>
@@ -193,7 +193,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
       </section>
 
       <aside className="space-y-4">
-        <div className="space-y-2 rounded-[10px] border border-border bg-card p-3 text-xs">
+        <div className="space-y-2 rounded-card border border-border bg-card p-3 text-xs">
           <p className="font-medium text-foreground">Respostas das ferramentas (mock)</p>
           {tools.length === 0 ? (
             <p className="text-muted-foreground">Nenhuma ferramenta ligada neste agente.</p>
@@ -242,7 +242,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
         </div>
 
         {turns.length > 0 && (
-          <div className="rounded-[10px] border border-border bg-card p-3">
+          <div className="rounded-card border border-border bg-card p-3">
             <p className="mb-1 text-xs font-medium">O que o agente fez</p>
             <ol className="space-y-2">
               {turns.map((turn) => (

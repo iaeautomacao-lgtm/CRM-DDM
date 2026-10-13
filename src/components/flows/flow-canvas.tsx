@@ -230,7 +230,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
         } as React.CSSProperties
       }
       className={cn(
-        'bg-card relative max-w-[260px] min-w-[220px] rounded-[10px] border px-3.5 py-3 text-left shadow-[0_2px_6px_rgba(0,0,0,0.18)] transition-[box-shadow,border-color]',
+        'bg-card relative max-w-[260px] min-w-[220px] rounded-card border px-3.5 py-3 text-left shadow-[0_2px_6px_rgba(0,0,0,0.18)] transition-[box-shadow,border-color]',
         selected
           ? 'border-[var(--nc)]'
           : 'border-border hover:border-[var(--nc-ring)]',

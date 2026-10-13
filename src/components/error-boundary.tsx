@@ -43,8 +43,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.state.hasError) {
       return (
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4 text-center">
-          <div className="flex size-16 items-center justify-center rounded-full bg-[#FF5706]/10">
-            <AlertTriangle className="size-8 text-[#FF5706]" />
+          <div className="flex size-16 items-center justify-center rounded-full bg-primary-soft">
+            <AlertTriangle className="size-8 text-primary" />
           </div>
           <div className="space-y-1">
             <h2 className="text-lg font-semibold text-foreground">Algo deu errado</h2>
@@ -54,7 +54,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </div>
           <Button
             onClick={() => window.location.reload()}
-            className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
           >
             Recarregar página
           </Button>

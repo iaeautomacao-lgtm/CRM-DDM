@@ -276,7 +276,7 @@ export function WebchatClient({ token }: { token: string }) {
         className="flex h-full w-full max-w-[420px] animate-ddm-up flex-col overflow-hidden bg-card sm:h-[min(680px,100%)] sm:rounded-2xl sm:shadow-[0_24px_60px_rgba(20,16,12,.14),0_0_0_1px_rgba(20,16,12,.06)]"
       >
       <header className="flex shrink-0 items-center gap-3 bg-[#18191B] px-4 py-3.5 text-white">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-primary text-[13px] font-bold text-primary-foreground">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-field bg-primary text-[13px] font-bold text-primary-foreground">
           {page.brand.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0">

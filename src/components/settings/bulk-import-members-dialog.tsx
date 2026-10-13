@@ -351,7 +351,7 @@ export function BulkImportMembersDialog({
               }
             }}
             className={cn(
-              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed p-5 transition-colors focus-visible:outline-2 focus-visible:outline-primary',
+              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed p-5 transition-colors focus-visible:outline-2 focus-visible:outline-primary',
               file ? 'border-primary bg-primary-soft' : 'border-border bg-surface-2 hover:border-primary',
             )}
           >
@@ -469,7 +469,7 @@ export function BulkImportMembersDialog({
 
           {result && (
             <div className="animate-ddm-up space-y-3">
-              <div className="rounded-[10px] border border-border bg-surface-2 p-4">
+              <div className="rounded-card border border-border bg-surface-2 p-4">
                 <p className="text-sm font-semibold text-foreground">Importação concluída</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {result.imported > 0 && (
@@ -486,7 +486,7 @@ export function BulkImportMembersDialog({
               </div>
 
               {result.errors.length > 0 && (
-                <ul className="divide-y divide-border overflow-hidden rounded-[10px] border border-warning-border bg-warning-soft">
+                <ul className="divide-y divide-border overflow-hidden rounded-field border border-warning-border bg-warning-soft">
                   {result.errors.map((err, i) => (
                     <li key={i} className="flex items-start gap-2 px-3 py-2 text-xs">
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />

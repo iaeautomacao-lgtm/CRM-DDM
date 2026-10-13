@@ -325,7 +325,7 @@ export default function TabulacoesPage() {
               hint="Não há conversas encerradas neste período e escopo. Ajuste os filtros."
             />
           ) : (
-          <div className="border-border bg-card overflow-x-auto rounded-[10px] border">
+          <div className="border-border bg-card overflow-x-auto rounded-card border">
             <Table>
               <TableHeader>
                 <TableRow>

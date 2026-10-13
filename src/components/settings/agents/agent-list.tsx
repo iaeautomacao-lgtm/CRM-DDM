@@ -202,7 +202,7 @@ export function AgentList({ canEdit, onOpen }: { canEdit: boolean; onOpen: (id: 
       ) : loading ? (
         <div className="grid gap-3 md:grid-cols-2" aria-busy>
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-36 rounded-[10px]" />
+            <Skeleton key={i} className="h-36 rounded-field" />
           ))}
         </div>
       ) : visible.length === 0 ? (
@@ -239,7 +239,7 @@ function AgentCard({
   return (
     <div
       className={cn(
-        'group flex h-full flex-col gap-3 rounded-[10px] border bg-card p-4 transition-colors hover:border-border-strong',
+        'group flex h-full flex-col gap-3 rounded-card border bg-card p-4 transition-colors hover:border-border-strong',
         !agent.enabled && 'bg-card/70',
       )}
     >

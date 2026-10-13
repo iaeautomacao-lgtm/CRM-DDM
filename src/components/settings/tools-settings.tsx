@@ -103,7 +103,7 @@ export function ToolsSettings() {
       <div className="flex flex-col gap-2" aria-busy>
         <Skeleton className="h-6 w-48" />
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-16 rounded-[10px]" />
+          <Skeleton key={i} className="h-16 rounded-field" />
         ))}
       </div>
     );

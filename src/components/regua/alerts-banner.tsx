@@ -51,7 +51,7 @@ export function AlertsBanner() {
 
   if (failed) {
     return (
-      <div role="status" className="flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-card px-4 py-2.5 text-sm text-foreground-2">
+      <div role="status" className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-card px-4 py-2.5 text-sm text-foreground-2">
         <AlertTriangle className="size-4 text-warning" aria-hidden />
         Não foi possível verificar os alertas da régua.
         <Button type="button" variant="ghost" size="sm" onClick={load} disabled={loading}>
@@ -81,8 +81,8 @@ export function AlertsBanner() {
           role="alert"
           className={
             a.severity === "critical"
-              ? "flex flex-wrap items-center gap-2 rounded-[10px] bg-danger-soft px-4 py-2.5 text-sm text-danger"
-              : "flex flex-wrap items-center gap-2 rounded-[10px] bg-warning-soft px-4 py-2.5 text-sm text-warning"
+              ? "flex flex-wrap items-center gap-2 rounded-field bg-danger-soft px-4 py-2.5 text-sm text-danger"
+              : "flex flex-wrap items-center gap-2 rounded-field bg-warning-soft px-4 py-2.5 text-sm text-warning"
           }
         >
           <StatusChip tone={a.severity === "critical" ? "bad" : "warn"}>{a.severity === "critical" ? "Crítico" : "Atenção"}</StatusChip>

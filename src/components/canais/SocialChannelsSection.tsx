@@ -160,7 +160,7 @@ export function SocialChannelsSection({
       )}
     >
       {setup && (setup.instagram.missing.length > 0 || setup.messenger.missing.length > 0 || !setup.webhook_verify_token) && (
-        <div className="mx-[18px] mb-3.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
+        <div className="mx-[18px] mb-3.5 rounded-field border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
           <p className="font-semibold text-foreground">Configuração pendente no servidor (.env)</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {setup.instagram.missing.length > 0 && <li>Instagram: {setup.instagram.missing.join(", ")}</li>}

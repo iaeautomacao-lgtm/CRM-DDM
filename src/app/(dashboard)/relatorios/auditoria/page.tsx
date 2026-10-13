@@ -254,7 +254,7 @@ export default function AuditoriaPage() {
         )}
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card p-4">
+      <div className="rounded-card border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.from, dateTo: draft.to }}
@@ -287,7 +287,7 @@ export default function AuditoriaPage() {
         </div>
       </div>
 
-      <div className="rounded-[10px] border border-border bg-card">
+      <div className="rounded-card border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (

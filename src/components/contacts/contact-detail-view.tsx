@@ -1294,8 +1294,8 @@ export function ContactDetailView({
             </div>
           </div>
           <div className="grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]" aria-hidden="true">
-            <Skeleton className="h-80 rounded-[10px]" />
-            <Skeleton className="h-80 rounded-[10px]" />
+            <Skeleton className="h-80 rounded-field" />
+            <Skeleton className="h-80 rounded-field" />
           </div>
         </PageBody>
       );
@@ -1307,7 +1307,7 @@ export function ContactDetailView({
             <ArrowLeft className="size-3" />
             Contatos
           </Link>
-          <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+          <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-card border border-dashed border-border bg-card px-6 py-12 text-center">
             <p className="text-[13.5px] font-semibold text-foreground">Contato não encontrado</p>
             <p className="text-[12.5px] text-muted-foreground">Ele pode ter sido excluído ou você não tem acesso.</p>
           </div>
@@ -1328,7 +1328,7 @@ export function ContactDetailView({
         </nav>
 
         {/* Cabeçalho do contato */}
-        <section className="flex animate-ddm-up flex-col gap-4 rounded-[10px] border border-border bg-card p-5 md:flex-row md:items-start">
+        <section className="flex animate-ddm-up flex-col gap-4 rounded-card border border-border bg-card p-5 md:flex-row md:items-start">
           <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary-soft font-heading text-lg font-semibold text-primary-text" aria-hidden="true">
             {getInitials(contact.name)}
           </span>
@@ -1397,21 +1397,21 @@ export function ContactDetailView({
 
         <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
           <div className="ddm-stagger flex flex-col gap-3.5">
-            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+            <section className="rounded-card border border-border bg-card p-[18px]">
               <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Dados</h3>
               {renderDetails()}
             </section>
-            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+            <section className="rounded-card border border-border bg-card p-[18px]">
               <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Telefones</h3>
               {renderPhones(contact)}
             </section>
-            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+            <section className="rounded-card border border-border bg-card p-[18px]">
               <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Campos personalizados</h3>
               {renderCustom()}
             </section>
           </div>
 
-          <section className="flex min-h-[420px] flex-col rounded-[10px] border border-border bg-card">
+          <section className="flex min-h-[420px] flex-col rounded-card border border-border bg-card">
             <div className="border-b border-border px-[18px] py-3">
               <Segmented
                 ariaLabel="Seções do contato"

@@ -1381,7 +1381,7 @@ export default function EquipeDetailPage({
               )}
 
               {allowedTemplateIds.size === 0 ? (
-                <div className="flex items-start gap-2 rounded-md border border-[#FF5706]/30 bg-[#FF5706]/10 px-3 py-2 text-xs text-[#FF5706]">
+                <div className="flex items-start gap-2 rounded-field border border-primary/30 bg-primary-soft px-3 py-2 text-xs text-primary-text">
                   <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
                   <span>
                     Se nenhum template estiver marcado, operadores desta equipe não terão
