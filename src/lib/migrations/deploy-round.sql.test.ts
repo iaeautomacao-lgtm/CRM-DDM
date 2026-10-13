@@ -270,6 +270,8 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         for (const name of [...c.tables, ...c.functions]) {
           if (baselineExisting.get(later)!.has(`tabela ${name}`) || baselineExisting.get(later)!.has(`função ${name}`)) continue; // já existe antes da rodada
           if (own.tables.includes(name) || own.functions.includes(name)) continue;
+          // uso protegido por pré-checagem pelo nome em pg_proc (ex.: a 334 só chama apply_mfa_policy se a 310 já existir)
+          if (new RegExp(`proname\\s*=\\s*'${name}'`, "i").test(code)) continue;
           if (new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
         }
       }

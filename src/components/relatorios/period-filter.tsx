@@ -45,7 +45,7 @@ export function PeriodFilter({
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             value={value.dateFrom}
-            onChange={(e) => onChange(normalizeRange({ ...value, dateFrom: e.target.value }))}
+            onChange={(e) => onChange({ ...value, dateFrom: e.target.value })}
             className="min-w-[8.5rem] flex-1 sm:w-38 sm:flex-none"
           />
           <span className="text-xs text-muted-foreground">até</span>
@@ -55,7 +55,7 @@ export function PeriodFilter({
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             value={value.dateTo}
-            onChange={(e) => onChange(normalizeRange({ ...value, dateTo: e.target.value }))}
+            onChange={(e) => onChange({ ...value, dateTo: e.target.value })}
             className="min-w-[8.5rem] flex-1 sm:w-38 sm:flex-none"
           />
         </div>
