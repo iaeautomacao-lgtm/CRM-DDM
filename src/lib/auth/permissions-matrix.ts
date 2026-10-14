@@ -73,6 +73,10 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("settings/account-config/[key]", "DELETE", "admin", "settings.account"),
   pg("account/ai-config", "GET", "admin", "ai.config"),
   pg("account/ai-config", "POST", "admin", "ai.config"),
+  pg("account/copilot-config", "GET", "agent", "inbox.view"), // Acordito (14/10)
+  pg("account/copilot-config", "PUT", "admin", "ai.config"),
+  pg("ai/copilot/suggestions", "POST", "agent", "inbox.reply"),
+  pg("ai/copilot/feedback", "POST", "agent", "inbox.reply"),
   pg("account/api-keys", "GET", "viewer", "api_keys.view"),
   pg("account/api-keys", "POST", "admin", "api_keys.manage"),
   pg("account/api-keys/[id]", "DELETE", "admin", "api_keys.manage"),
