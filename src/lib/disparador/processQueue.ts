@@ -42,6 +42,7 @@ import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
 import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 import { flowTokenForQueueItem, loadFlowTemplate } from "@/lib/disparador/flow-button";
+import { trackDispatchText, trackDispatchVariables, UTMPAY_UNAVAILABLE_ERROR } from "@/lib/utmpay/dispatch";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -806,6 +807,36 @@ export async function processQueueItem(
   // F23: só dígitos (replace("+") trocava apenas o 1º "+" e deixava máscara/espaços chegarem à Meta).
   const normalizedPhone = phone.replace(/\D/g, "");
 
+  // UTMpay (migration 356): TODO disparo sai com link rastreado (um por envio, tid = id do item) quando a conta tem o UTMpay configurado. O link
+  // que a operação informou vira o DESTINO. Meta/template troca só a variável do corpo; WAHA e texto livre trocam a URL do texto (caminhos
+  // separados). Se o UTMpay falhar, o link cru NÃO sai: o item volta com erro claro (a conta pode optar por enviar sem rastreio).
+  let sentText = cleanText;
+  let metaItem = item;
+  let utmpayFailed = false;
+  if (provider === "meta" && item.template_name) {
+    const tracked = await trackDispatchVariables(supabaseAdmin(), config.account_id, item, item.template_variables ?? []);
+    if (tracked.kind === "tracked") metaItem = { ...item, template_variables: tracked.variables };
+    else utmpayFailed = tracked.kind === "failed";
+  } else {
+    const tracked = await trackDispatchText(supabaseAdmin(), config.account_id, item, cleanText);
+    if (tracked.kind === "tracked") sentText = tracked.text;
+    else utmpayFailed = tracked.kind === "failed";
+  }
+  if (utmpayFailed) {
+    await markQueueError(item.id, UTMPAY_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
+    const trackLog = throttleItemLog(item.campaign_id, "message_utmpay_unavailable", null);
+    if (trackLog.log) {
+      void writeLog({
+        level: "warn",
+        source: "disparador",
+        event: "message_utmpay_unavailable",
+        message: "UTMpay indisponível; item devolvido à fila sem enviar o link ao cliente",
+        payload: { campaign_id: item.campaign_id, queue_id: item.id, suppressed_since_last: trackLog.suppressed },
+      });
+    }
+    return { outcome: "deferred", reason: "utmpay_unavailable" };
+  }
+
   let externalMessageId: string;
   const providerStartedAt = Date.now();
   // F14: enquanto espera o provedor, renova o lease do item em voo (o watchdog só age em lease vencido).
@@ -820,14 +851,14 @@ export async function processQueueItem(
         lease.stop();
         return stop;
       }
-      externalMessageId = await sendViaMeta(config, item, normalizedPhone, cleanText, tipo);
+      externalMessageId = await sendViaMeta(config, metaItem, normalizedPhone, sentText, tipo);
     } else {
       const stop = await beginProviderCall(item.id);
       if (stop) {
         lease.stop();
         return stop;
       }
-      externalMessageId = await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+      externalMessageId = await sendViaWaha(config, item, normalizedPhone, sentText, tipo);
     }
     lease.stop();
     observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: true, signal: null, code: null });
@@ -1023,7 +1054,7 @@ export async function processQueueItem(
     p_campaign_id: item.campaign_id,
     p_contact_id: item.contact_id,
     p_session_id: item.session_id,
-    p_mensagem: cleanText,
+    p_mensagem: sentText,
     p_waha_message_id: externalMessageId,
     p_tentativas: (item.tentativas || 0) + 1,
   };

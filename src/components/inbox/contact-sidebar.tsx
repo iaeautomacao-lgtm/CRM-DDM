@@ -43,6 +43,7 @@ import {
 import { ConversationCard } from "@/components/contact-timeline/ConversationCard";
 import { ConversationFlowCard } from "@/components/inbox/conversation-flow-card";
 import { ContactChannelsCard } from "@/components/inbox/contact-channels-card";
+import { ConversationTrackingBadge } from "@/components/utmpay/tracking-badge";
 import { usePermissions } from "@/hooks/use-permission";
 
 // One more than the display cap — same "fetch cap+1 to detect more
@@ -680,6 +681,8 @@ export function ContactSidebar({
               </div>
             )}
           </div>
+
+          <ConversationTrackingBadge conversationId={conversation?.id ?? null} className="mt-2" />
 
           <div className="mt-1">
             <ContactChannelsCard

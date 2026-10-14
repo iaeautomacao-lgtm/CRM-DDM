@@ -73,6 +73,9 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("settings/account-config/[key]", "DELETE", "admin", "settings.account"),
   pg("account/ai-config", "GET", "admin", "ai.config"),
   pg("account/ai-config", "POST", "admin", "ai.config"),
+  pg("account/utmpay-config", "GET", "admin", "settings.account"), // UTMpay (14/10)
+  pg("account/utmpay-config", "PUT", "admin", "settings.account"),
+  pg("account/utmpay-config/test", "POST", "admin", "settings.account"),
   pg("account/copilot-config", "GET", "agent", "inbox.view"), // Acordito (14/10)
   pg("account/copilot-config", "PUT", "admin", "ai.config"),
   pg("ai/copilot/suggestions", "POST", "agent", "inbox.reply"),
@@ -167,6 +170,9 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("contacts", "POST", "agent", "contacts.edit"),
   pg("contacts/[id]", "PATCH", "agent", "contacts.edit"),
   pg("contacts/[id]/tags", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/utmpay", "GET", "viewer", "contacts.view"), // selo UTMpay (14/10)
+  pg("conversations/[id]/utmpay", "GET", "agent", "inbox.view"),
+  pg("utmpay/ranking", "GET", "viewer", "campaigns.view"),
   pg("contacts/[id]/activity", "GET", "viewer", "contacts.view"),
   pg("contacts/[id]/campaigns", "GET", "viewer", "contacts.view"),
   pg("contacts/[id]/tags", "POST", "agent", "contacts.edit"),
@@ -187,6 +193,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   disp("disparador/campaigns/[id]/unschedule", "POST"),
   disp("disparador/campaigns/[id]/queue-details", "GET"),
   disp("disparador/campaigns/[id]/info", "GET", "campaigns.manage"),
+  disp("disparador/campaigns/[id]/funil", "GET", "campaigns.manage"), // funil UTMpay (14/10)
   disp("disparador/campaigns/[id]/audience", "GET", "campaigns.manage"),
   disp("disparador/campaigns/planned-metrics", "POST"),
   r("disparador/campaigns/recalculate-metrics", "GET", "admin", "campaigns.manage"),

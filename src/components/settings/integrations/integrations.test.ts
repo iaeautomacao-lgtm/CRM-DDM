@@ -6,15 +6,15 @@ import { displayUrl, endpointHealth } from './webhooks-settings';
 
 describe('abas de Integrações por papel', () => {
   it('proprietário vê todas; admin sem Provedores de IA; supervisor sem Webhooks; operador só chaves de API', () => {
-    expect(visibleIntegrationTabs('owner')).toEqual(['api', 'secrets', 'tools', 'webhooks', 'ai', 'api-docs']);
-    expect(visibleIntegrationTabs('admin')).toEqual(['api', 'secrets', 'tools', 'webhooks', 'api-docs']);
+    expect(visibleIntegrationTabs('owner')).toEqual(['api', 'secrets', 'tools', 'webhooks', 'utmpay', 'ai', 'api-docs']);
+    expect(visibleIntegrationTabs('admin')).toEqual(['api', 'secrets', 'tools', 'webhooks', 'utmpay', 'api-docs']);
     expect(visibleIntegrationTabs('supervisor')).toEqual(['api', 'secrets', 'tools', 'api-docs']);
     expect(visibleIntegrationTabs('agent')).toEqual(['api']);
   });
 
   it('o menu mostra "Integrações" no lugar das abas; os links antigos continuam válidos', () => {
     expect(showInRail('integrations', 'admin')).toBe(true);
-    for (const tab of ['api', 'secrets', 'tools', 'webhooks', 'ai', 'api-docs'] as const) {
+    for (const tab of ['api', 'secrets', 'tools', 'webhooks', 'utmpay', 'ai', 'api-docs'] as const) {
       expect(showInRail(tab, 'owner')).toBe(false);
       expect(resolveSection(tab)).toBe(tab);
     }

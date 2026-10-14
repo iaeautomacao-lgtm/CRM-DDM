@@ -12,6 +12,7 @@ import { totalFromStatusCounts } from "@/lib/disparador/queue-total";
 import { EXPORT_SYNC_MAX_ROWS } from "@/lib/disparador/export-jobs";
 import {
   attachLegacyCsvNames,
+  attachUtmpayResults,
   SELECT_COLUMNS,
   SELECT_COLUMNS_REPLIED,
   toDetailRow,
@@ -273,10 +274,9 @@ export async function GET(
       campaignId,
       campaign.import_draft_id ?? null,
     );
-    const rows = await attachConversations(
-      namedRows,
+    const rows = await attachUtmpayResults(
+      await attachConversations(namedRows, ctx.accountId, campaignId),
       ctx.accountId,
-      campaignId,
     );
     let total = count ?? statusTotal ?? 0;
     if (totalFromCounts && statusTotal === null) {
