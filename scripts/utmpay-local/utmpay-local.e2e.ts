@@ -22,6 +22,8 @@ const holder = vi.hoisted(() => ({
   db: null as unknown,
   afterFns: [] as Array<() => Promise<void>>,
   settled: new Map<string, boolean>(),
+  // Resposta de localiza_dev por CPF (quando o cenário a define); senão vale `settled`.
+  ddmBody: new Map<string, unknown[]>(),
 }));
 
 vi.mock("@/lib/flows/admin-client", () => ({ supabaseAdmin: () => holder.db }));
@@ -34,19 +36,26 @@ vi.mock("next/server", async (orig) => {
   const real = await orig<typeof import("next/server")>();
   return { ...real, after: (fn: () => Promise<void>) => void holder.afterFns.push(fn) };
 });
-vi.mock("@/lib/billing/ddm-source", () => ({
-  ddmAllowance: () => async () => true,
-  // API DDM simulada: a situação do CPF muda conforme o teste decide (quitado ou em aberto).
-  fetchDdmSituation: async (cpf: string) => {
-    const settled = holder.settled.get(String(cpf)) === true;
-    return { situacao_acordo: settled ? "PAGO" : "Acordo vigente", valor_em_aberto: settled ? 0 : 500, instituicao: "Instituição Teste", settled };
-  },
-}));
+vi.mock("@/lib/billing/ddm-source", async (orig) => {
+  const real = await orig<typeof import("@/lib/billing/ddm-source")>();
+  return {
+    ...real,
+    ddmAllowance: () => async () => true,
+    // API DDM simulada: a resposta de `localiza_dev` do CPF muda conforme o teste decide; o texto passa pelo interpretador e pelo mapeamento REAIS.
+    fetchDdmSituation: async (cpf: string) => {
+      const body = holder.ddmBody.get(String(cpf));
+      if (body) return real.interpretSituation(body);
+      const settled = holder.settled.get(String(cpf)) === true;
+      return real.interpretSituation([{ situacao_acordo: settled ? "Quitado" : "Acordo na DDM", valor_em_aberto: settled ? "0,00" : "500,00", instituicao: "Instituição Teste" }]);
+    },
+  };
+});
 
 import { POST as eventsRoute } from "@/app/api/integrations/utmpay/events/route";
+import { POST as recheckRoute } from "@/app/api/integrations/utmpay/recheck/route";
 import { resetUtmpayConfigCache } from "@/lib/utmpay/config";
 import { trackDispatchText } from "@/lib/utmpay/dispatch";
-import { recheckPendingPayments } from "@/lib/utmpay/ingest";
+import { detectFromDdm, recheckPendingPayments } from "@/lib/utmpay/ingest";
 import { resetLinkQueues } from "@/lib/utmpay/links";
 import { signUtmpayBody } from "@/lib/utmpay/signature";
 import { loadCampaignFunnel } from "@/lib/utmpay/stats";
@@ -65,6 +74,12 @@ const CONTACTS = {
   humano: { id: "00000000-0000-0000-0000-0000000000f3", cpf: "52998224725", conv: "00000000-0000-0000-0000-000000000c03", item: "10000000-0000-4000-8000-000000000003" },
 } as const;
 type Who = keyof typeof CONTACTS;
+// Contatos dos cenários de DETECÇÃO por consulta à DDM (o DDMPay hoje só manda `click`): nenhum aviso de funil chega, só o clique.
+const EXTRA = {
+  detecta: { id: "00000000-0000-0000-0000-0000000000f4", cpf: "86288366757", conv: "00000000-0000-0000-0000-000000000c04", item: "10000000-0000-4000-8000-000000000004" },
+  desconhecido: { id: "00000000-0000-0000-0000-0000000000f5", cpf: "05172486305", conv: "00000000-0000-0000-0000-000000000c05", item: "10000000-0000-4000-8000-000000000005" },
+  cron: { id: "00000000-0000-0000-0000-0000000000f6", cpf: "16899535009", conv: "00000000-0000-0000-0000-000000000c06", item: "10000000-0000-4000-8000-000000000006" },
+} as const;
 const DESTINO = "https://ddmacordos.com/acordo/negociar?ref=teste";
 const MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 const WHATSAPP_UA = "WhatsApp/2.24.10.80 A";
@@ -161,6 +176,12 @@ describe("UTMpay ↔ CRM, ponta a ponta (local)", () => {
       INSERT INTO wacrm.profiles VALUES ('${ATT1}', 'Ana Atendente');
     `);
     for (const [who, c] of Object.entries(CONTACTS)) {
+      await pg.exec(`
+        INSERT INTO wacrm.contacts VALUES ('${c.id}', '${ACC}', 'Contato ${who}', '${c.cpf}');
+        INSERT INTO wacrm.conversations VALUES ('${c.conv}', '${ACC}', '${c.id}');
+      `);
+    }
+    for (const [who, c] of Object.entries(EXTRA)) {
       await pg.exec(`
         INSERT INTO wacrm.contacts VALUES ('${c.id}', '${ACC}', 'Contato ${who}', '${c.cpf}');
         INSERT INTO wacrm.conversations VALUES ('${c.conv}', '${ACC}', '${c.id}');
@@ -344,7 +365,7 @@ describe("UTMpay ↔ CRM, ponta a ponta (local)", () => {
     await settleCrm();
     await waitFor(async () => (await linkRow("direto")).pagou_em !== null, "pagou_em do C1");
     const row = await linkRow("direto");
-    expect(row).toMatchObject({ atribuicao: "direto", atendente_id: null, situacao_acordo: "PAGO", instituicao: "Instituição Teste" });
+    expect(row).toMatchObject({ atribuicao: "direto", atendente_id: null, situacao_acordo: "Quitado", instituicao: "Instituição Teste" });
     expect(row.fechou_em).not.toBeNull();
     expect(Number(row.valor_em_aberto)).toBe(0);
     expect(row.verificado_em).not.toBeNull();
@@ -375,7 +396,7 @@ describe("UTMpay ↔ CRM, ponta a ponta (local)", () => {
     await settleCrm();
     await waitFor(async () => (await linkRow("humano")).verificado_em !== null, "verificação do C3 na DDM");
     const before = await linkRow("humano");
-    expect(before).toMatchObject({ atribuicao: "humano", atendente_id: ATT1, situacao_acordo: "Acordo vigente" });
+    expect(before).toMatchObject({ atribuicao: "humano", atendente_id: ATT1, situacao_acordo: "Acordo na DDM" });
     expect(before.fechou_em).not.toBeNull();
     expect(before.pagou_evento_em, "o evento paid foi recebido").not.toBeNull();
     expect(before.pagou_em, "mas a DDM ainda não confirmou").toBeNull();
@@ -385,7 +406,7 @@ describe("UTMpay ↔ CRM, ponta a ponta (local)", () => {
     expect(result).toEqual({ checked: 1, confirmed: 1 });
     const after = await linkRow("humano");
     expect(after.pagou_em).not.toBeNull();
-    expect(after.situacao_acordo).toBe("PAGO");
+    expect(after.situacao_acordo).toBe("Quitado");
   });
 
   it("11. idempotência e segurança no CRM: o mesmo aviso reenviado = duplicate (sem duplicar); assinatura errada e relógio velho = 401", async () => {
@@ -425,5 +446,92 @@ describe("UTMpay ↔ CRM, ponta a ponta (local)", () => {
     expect(await eventCount("payment_start")).toBe(3);
     expect(await eventCount("paid")).toBe(3);
     expect(await eventCount("cpf_view")).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------------
+  // DETECÇÃO POR CONSULTA À DDM: o DDMPay (hoje) só manda `click`; fechou/pagou saem do cron de reconferência.
+  type Extra = (typeof EXTRA)[keyof typeof EXTRA];
+  const rowOf = async (item: string) => (await q<Record<string, unknown>>(`SELECT * FROM wacrm.utmpay_links WHERE tid = $1`, [item]))[0];
+  const ddmResponse = (situacao: string, valor = "800,00") => [{ situacao_acordo: situacao, valor_em_aberto: valor, instituicao: "Instituição Teste" }];
+  const detect = (opts: { recheckMinutes?: number } = {}) =>
+    detectFromDdm(holder.db as never, { situation: (cpf) => fetchDdmSituation(cpf), windowDays: async () => 7 }, opts);
+
+  /** Gera o link rastreado de um contato extra e faz o clique de celular (a ÚNICA coisa que o DDMPay avisa). */
+  async function linkAndClick(c: Extra) {
+    const r = await trackDispatchText(holder.db as never, ACC, { id: c.item, campaign_id: CAMP, contact_id: c.id }, `Veja ${DESTINO}`, { fetcher: (url, init) => fetch(url, init), windowMs: 10 });
+    expect(r.kind).toBe("tracked");
+    if (r.kind !== "tracked") return;
+    const short = r.text.match(/http:\/\/127\.0\.0\.1:\d+\/s\/\w+/)![0];
+    const res = await fetch(short, { redirect: "manual", headers: { "User-Agent": MOBILE_UA } });
+    expect(res.status).toBe(302);
+    await waitFor(() => delivered(c.item, "click"), `click de ${c.item}`);
+    await settleCrm();
+  }
+
+  it("14. só chega o CLICK (o DDMPay não manda o funil): o fechou vem pela consulta à DDM, com a atribuição pela conversa", async () => {
+    const c = EXTRA.detecta;
+    await linkAndClick(c);
+    await pg.query(`INSERT INTO wacrm.messages (conversation_id, sender_type, origin, sender_id, content_text) VALUES ($1, 'customer', 'customer', NULL, 'quero fechar'), ($1, 'agent', 'operator', $2, 'vamos fechar')`, [c.conv, ATT1]);
+    await wait(1300);
+    holder.ddmBody.set(c.cpf, ddmResponse("Acordo na DDM"));
+
+    const result = await detect();
+    expect(result).toMatchObject({ checked: 1, fechou: 1, pagou: 0, unknown: 0 });
+    const row = await rowOf(c.item);
+    expect(row.clicou_em).not.toBeNull();
+    expect(row.fechou_em).not.toBeNull();
+    expect(row.pagou_em).toBeNull();
+    expect(row).toMatchObject({ atribuicao: "humano", atendente_id: ATT1, situacao_acordo: "Acordo na DDM", instituicao: "Instituição Teste" });
+    expect(Number(row.valor_em_aberto)).toBe(800);
+    // Nenhum aviso de funil chegou: só o click está nos eventos; o resultado veio da DDM.
+    expect(await eventCount("click", c.item)).toBe(1);
+    expect(await eventCount("payment_start", c.item)).toBe(0);
+    expect(await eventCount("paid", c.item)).toBe(0);
+  });
+
+  it("15. depois a DDM passa a indicar QUITADO ⇒ pagou_em (o fechou_em que já existia não é sobrescrito)", async () => {
+    const c = EXTRA.detecta;
+    const before = await rowOf(c.item);
+    holder.ddmBody.set(c.cpf, ddmResponse("Quitado", "0,00"));
+    const result = await detect({ recheckMinutes: 0 }); // ignora o intervalo mínimo entre consultas do mesmo link
+    expect(result).toMatchObject({ checked: 1, fechou: 0, pagou: 1 });
+    const after = await rowOf(c.item);
+    expect(after.pagou_em).not.toBeNull();
+    expect((after.fechou_em as Date).getTime()).toBe((before.fechou_em as Date).getTime());
+    expect(after).toMatchObject({ situacao_acordo: "Quitado" });
+    expect(Number(after.valor_em_aberto)).toBe(0);
+    // pagou ⇒ sai da fila de detecção: uma nova rodada não consulta de novo
+    expect(await detect({ recheckMinutes: 0 })).toMatchObject({ checked: 0 });
+  });
+
+  it("16. situação DESCONHECIDA: não marca nada e loga uma vez", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const c = EXTRA.desconhecido;
+    await linkAndClick(c);
+    holder.ddmBody.set(c.cpf, ddmResponse("status-novo-xyz"));
+    expect(await detect()).toMatchObject({ checked: 1, fechou: 0, pagou: 0, unknown: 1 });
+    expect(await detect({ recheckMinutes: 0 })).toMatchObject({ checked: 1, unknown: 1 }); // segunda rodada
+    const row = await rowOf(c.item);
+    expect(row.fechou_em).toBeNull();
+    expect(row.pagou_em).toBeNull();
+    expect(warn.mock.calls.filter((call) => String(call[0]).includes("situacao_acordo desconhecida"))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("17. o cron real (/api/integrations/utmpay/recheck) faz o passo de detecção e exige o segredo", async () => {
+    const c = EXTRA.cron;
+    await linkAndClick(c);
+    holder.ddmBody.set(c.cpf, ddmResponse("Aguardando Pgto"));
+    process.env.AUTOMATION_CRON_SECRET = "segredo-do-cron-de-teste";
+    const call = (headers: Record<string, string>) => recheckRoute(new Request("http://127.0.0.1/api/integrations/utmpay/recheck", { method: "POST", headers }));
+
+    expect((await call({})).status).toBe(401);
+    expect((await call({ "x-cron-secret": "errado" })).status).toBe(401);
+    const res = await call({ "x-cron-secret": "segredo-do-cron-de-teste" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { detection: { checked: number; fechou: number; pagou: number } };
+    expect(body.detection).toMatchObject({ fechou: 1, pagou: 0 });
+    expect((await rowOf(c.item)).fechou_em).not.toBeNull();
+    delete process.env.AUTOMATION_CRON_SECRET;
   });
 });
