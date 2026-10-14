@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
 import { canAccessRoute } from "../role-utils";
 import { ROUTE_MATRIX } from "./permissions-matrix";
 import { can } from "./permissions";
-import { ACCOUNT_ROLES } from "./roles";
 
 describe("decisão 9: o visualizador não vê automações", () => {
   // A tela, a API e o motor de automações saíram (legado, 14/10); o catálogo de permissões segue sem o visualizador.
