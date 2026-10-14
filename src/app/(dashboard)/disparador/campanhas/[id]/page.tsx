@@ -43,6 +43,7 @@ import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { CampaignExportsPanel } from "@/components/disparador/export/campaign-exports";
+import { CampaignUtmpayFunnel } from "@/components/disparador/utmpay-funnel";
 
 interface QueueRow {
   id: string;
@@ -297,6 +298,8 @@ export default function CampanhaContatosPage({
           />
         </section>
       )}
+
+      {allowed && <CampaignUtmpayFunnel campaignId={campaignId} />}
 
       {allowed && <CampaignExportsPanel campaignId={campaignId} />}
 

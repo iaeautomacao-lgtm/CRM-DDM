@@ -33,6 +33,7 @@ import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
+import { AccountUtmpayRanking } from "@/components/disparador/utmpay-funnel";
 import { ExportJobButton } from "@/components/disparador/export/campaign-exports";
 import { parseReusedList, type ReusedList } from "@/lib/disparador/import-client";
 import {
@@ -404,6 +405,7 @@ export default function CampanhasPage() {
   // Assistente "Nova campanha" (src/components/disparador/nova-campanha).
   // editingCampaign = campanha em rascunho ou agendada sendo editada.
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [rankingDias, setRankingDias] = useState(30);
   const [reusedList, setReusedList] = useState<ReusedList | null>(null);
   const [editingCampaign, setEditingCampaign] = useState<EditableCampaign | null>(null);
   // "Iniciar agora" numa campanha agendada (fila começa agora, não no horário).
@@ -1158,6 +1160,8 @@ export default function CampanhasPage() {
           />
         </div>
       </PageToolbar>
+
+      <AccountUtmpayRanking dias={rankingDias} onDiasChange={setRankingDias} />
 
       {loading ? (
         <div className="flex flex-col gap-2.5" aria-busy="true" aria-label="Carregando campanhas">

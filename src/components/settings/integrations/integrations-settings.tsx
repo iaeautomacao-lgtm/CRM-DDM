@@ -15,6 +15,7 @@ import { AiProvidersPanel } from '@/components/settings/ai-providers-panel';
 import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
 import { SECTION_META, type IntegrationTab } from '@/components/settings/settings-sections';
 import { AcorditoSettingsSection } from '@/components/settings/acordito-settings-section';
+import { UtmpaySettings } from '@/components/settings/utmpay-settings';
 import { WebhooksSettings } from './webhooks-settings';
 
 const PANELS: Record<IntegrationTab, () => ReactNode> = {
@@ -22,6 +23,7 @@ const PANELS: Record<IntegrationTab, () => ReactNode> = {
   secrets: () => <SecretsSettings />,
   tools: () => <ToolsSettings />,
   webhooks: () => <WebhooksSettings />,
+  utmpay: () => <UtmpaySettings />,
   ai: () => (
     <>
       <AiProvidersPanel />

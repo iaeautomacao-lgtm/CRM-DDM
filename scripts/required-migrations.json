@@ -511,6 +511,10 @@
     {
       "version": "355_acordito_enabled_default",
       "kind": "registry"
+    },
+    {
+      "version": "356_utmpay_integracao",
+      "kind": "registry"
     }
   ]
 }

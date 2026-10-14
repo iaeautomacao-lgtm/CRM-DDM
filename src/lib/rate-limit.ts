@@ -285,6 +285,10 @@ export const RATE_LIMITS = {
   apiV1CampaignCreate: { limit: 6, windowMs: 60_000 },
   /** Relatórios de violação do CSP (rota pública): 60/min por IP. */
   cspReport: { limit: 60, windowMs: 60_000 },
+  /** Webhook de eventos do UTMpay (público, assinado): um único servidor manda todos os cliques/etapas, então o teto é alto; 6000/min por IP. */
+  utmpayEvents: { limit: 6000, windowMs: 60_000 },
+  /** Teste de conexão do UTMpay (chama um servidor externo): 6/min por usuário. */
+  utmpayTest: { limit: 6, windowMs: 60_000 },
   /** API v1: extração de conversas e mensagens (TASK38); 60/min por chave nas três rotas, além do limite geral. */
   apiV1Extract: { limit: 60, windowMs: 60_000 },
   /** Plano de segurança 13/10 (Âncora 1): rotas que gastam IA, banco ou a Meta/WAHA. Por usuário (ou conta, nas de admin). */
