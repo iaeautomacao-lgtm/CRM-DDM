@@ -27,11 +27,9 @@ describe("buildContentSecurityPolicy (produção, passo 1)", () => {
     for (const outsider of ["facebook.com", "openai.com", "meuchatia", "elevenlabs"]) expect(csp).not.toContain(outsider);
   });
 
-  it("frames: próprio, Supabase e o Extrator de Leads (padrão e o configurado)", () => {
-    expect(directive(csp, "frame-src")).toEqual(["'self'", "https://*.supabase.co", "https://grupoddmlead.lovable.app"]);
-    expect(directive(buildContentSecurityPolicy({ leadExtractorUrl: "https://leads.cliente.com/app?x=1" }), "frame-src")).toContain("https://leads.cliente.com");
-    // URL inválida ou de esquema perigoso não vira origem
-    expect(directive(buildContentSecurityPolicy({ leadExtractorUrl: "javascript:alert(1)" }), "frame-src")).toEqual(["'self'", "https://*.supabase.co"]);
+  it("frames: só o próprio servidor e o Supabase (o Extrator de Leads saiu, 14/10)", () => {
+    expect(directive(csp, "frame-src")).toEqual(["'self'", "https://*.supabase.co"]);
+    expect(csp).not.toContain("lovable");
   });
 
   it("fecha o que não usamos: object-src none, frame-ancestors none, base-uri e form-action próprios, worker self/blob", () => {

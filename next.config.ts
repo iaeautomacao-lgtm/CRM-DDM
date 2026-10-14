@@ -64,7 +64,6 @@ const SECURITY_HEADERS = [
     key: "Content-Security-Policy-Report-Only",
     value: buildContentSecurityPolicy({
       isDev: process.env.NODE_ENV !== "production",
-      leadExtractorUrl: process.env.LEAD_EXTRACTOR_URL,
     }),
   },
 ] as const;

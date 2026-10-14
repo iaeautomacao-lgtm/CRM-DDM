@@ -15,7 +15,7 @@ import { hashApiKey } from "@/lib/api-keys/keys";
 //
 // Autenticação: header x-stress-secret == env STRESS_RUN_SECRET.
 // Mesmo padrão de comparação em tempo constante já usado em
-// /api/flows/cron e /api/automations/cron.
+// /api/flows/cron.
 // ============================================================
 
 let _adminClient: SupabaseClient | null = null;

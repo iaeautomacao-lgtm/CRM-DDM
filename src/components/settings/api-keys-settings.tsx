@@ -189,7 +189,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           personal ? (
             <>
               Chaves pessoais para conectar assistentes externos (Claude
-              Desktop/Code, n8n) ao DDM Intelligence pelo MCP (
+              Desktop/Code, n8n) ao Acordito pelo MCP (
               <code className="text-xs">/api/mcp</code>). A chave age como
               você: vê só os dados que você vê no CRM, e deixa de funcionar
               se for revogada ou se o seu acesso mudar.

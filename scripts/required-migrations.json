@@ -503,6 +503,10 @@
     {
       "version": "353_close_public_schema_legacy",
       "kind": "registry"
+    },
+    {
+      "version": "354_acordito_copilot",
+      "kind": "registry"
     }
   ]
 }

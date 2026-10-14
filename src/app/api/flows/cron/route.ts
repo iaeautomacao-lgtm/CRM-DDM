@@ -23,9 +23,8 @@ import { sweepStalledAiConversations } from '@/lib/flows/ai-watchdog'
  * new triggers for them. The cron is therefore not optional.
  *
  * Auth: re-uses `AUTOMATION_CRON_SECRET` so operators only have one
- * secret to provision. The two endpoints (`/api/automations/cron`
- * and this one) are independent operations; we keep them on separate
- * URLs so one failing doesn't block the other.
+ * secret to provision. O antigo `/api/automations/cron` saiu (14/10); este endpoint
+ * é uma operação independente das demais.
  *
  * Hosting: hit on a schedule (Vercel Cron / GitHub Actions / external
  * pinger). A 5-minute interval is more than enough for a 24h timeout

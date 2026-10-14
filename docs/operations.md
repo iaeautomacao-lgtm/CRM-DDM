@@ -27,7 +27,6 @@ Use:
 
 O repositório contém, entre outros:
 
-- `/api/automations/cron`
 - `/api/disparador/cron`
 - `/api/flows/cron`
 - retry de assignment de conversas

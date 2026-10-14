@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
   role: "admin", accountId: "account-a", userId: "user-a",
   rows: {} as Record<string, Record<string, unknown>[]>,
   calls: [] as { table: string; method: string; args: unknown[] }[],
-  analyze: vi.fn(), loadSteps: vi.fn(async () => []),
+  analyze: vi.fn(),
 }));
 
 function client() {
@@ -54,16 +54,10 @@ vi.mock("@/lib/auth/account", async () => {
     }),
   };
 });
-vi.mock("@/lib/automations/admin-client", () => ({ supabaseAdmin: client }));
 vi.mock("@/lib/disparador/admin-client", () => ({ supabaseAdmin: client }));
 vi.mock("@/lib/relatorios/admin-client", () => ({ supabaseAdmin: client }));
-vi.mock("@/lib/automations/steps-tree", () => ({
-  loadStepsTree: state.loadSteps, insertSteps: vi.fn(), replaceSteps: vi.fn(),
-}));
 vi.mock("@/lib/ai/sentiment", () => ({ analyzeConversationSentimentAndTags: state.analyze }));
 
-import { GET as automations } from "../automations/route";
-import { GET as automation } from "../automations/[id]/route";
 import { POST as exportFile } from "../relatorios/exports/route";
 import { GET as queue } from "../disparador/campaigns/[id]/queue-details/route";
 import { POST as channelTest } from "../whatsapp/channel-test/route";
@@ -87,15 +81,6 @@ describe("segurança das rotas: contas, papéis e orçamentos", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-
-  it("agent consulta automações e detalhe; todas as leituras têm account_id", async () => {
-    state.role = "agent";
-    state.rows.automations = [{ id: "auto-1" }];
-    expect((await automations()).status).toBe(200);
-    expect((await automation(get(""), params)).status).toBe(200);
-    expect(state.calls.filter((c) => c.method === "eq" && c.args[0] === "account_id")).toHaveLength(2);
-    expect(state.loadSteps).toHaveBeenCalledOnce();
-  });
 
   it.each(["xlsx", "csv", "CSV"])("export aceita %s com chave gerada pelo servidor", async (ext) => {
     const res = await exportFile(post({ exportType: "conversas", description: "x", fileName: `../a.${ext}`, fileBase64: "aGk=" }));

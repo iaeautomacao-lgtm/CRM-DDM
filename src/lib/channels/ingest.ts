@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { dispatchInboundToFlows } from "@/lib/flows/engine";
 import { maybeScheduleSentiment } from "@/lib/ai/sentiment-trigger";
-import { runAutomationsForTrigger } from "@/lib/automations/engine";
 import { chatMediaReference } from "@/lib/storage/chat-media";
 import { MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import type { ParsedInbound } from "@/lib/flows/types";
@@ -125,20 +124,6 @@ export async function ingestSocialEvent(ev: SocialInboundEvent): Promise<void> {
     { accountId: channel.account_id, contactId, conversationId: conversation.id },
     { text: contentText, flowConsumed: flowResult.consumed, isInteractiveReply: Boolean(ev.replyId) },
   );
-
-  const triggers: Array<"new_contact_created" | "first_inbound_message" | "new_message_received" | "keyword_match"> = [];
-  if (!flowResult.consumed) triggers.push("new_message_received", "keyword_match");
-  if (created) triggers.unshift("new_contact_created");
-  if (isFirstInboundMessage) triggers.unshift("first_inbound_message");
-  for (const triggerType of triggers) {
-    void runAutomationsForTrigger({
-      accountId: channel.account_id,
-      triggerType,
-      contactId,
-      lineId: channel.id,
-      context: { message_text: contentText ?? "", conversation_id: conversation.id },
-    }).catch((err) => console.error("[social] automação falhou:", err));
-  }
 }
 
 /** Contato pela identidade do canal; cria (sem telefone) na primeira mensagem. */

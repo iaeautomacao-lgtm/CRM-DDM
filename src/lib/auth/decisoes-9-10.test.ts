@@ -1,5 +1,5 @@
 // Decisões do dono de 13/10 (itens 9 e 10), travadas por teste:
-//   9) o Visualizador NÃO usa as automações (API);
+//   9) o Visualizador NÃO vê automações;
 //  10) o Supervisor NÃO vê as listas importadas (importações do disparador).
 // Se alguém mudar a matriz, o ROUTE_ALLOWLIST ou o RLS das tabelas de importação, este teste falha.
 import { readdirSync, readFileSync } from "node:fs";
@@ -10,14 +10,11 @@ import { canAccessRoute } from "../role-utils";
 import { ROUTE_MATRIX } from "./permissions-matrix";
 import { can } from "./permissions";
 
-describe("decisão 9: o visualizador não usa as automações", () => {
-  it("API: toda rota de automações pede automations.view/edit, que o visualizador não tem", () => {
-    const entries = ROUTE_MATRIX.filter((e) => e.route === "automations" || e.route.startsWith("automations/"));
-    expect(entries.length).toBeGreaterThan(0);
-    for (const e of entries) {
-      expect(["automations.view", "automations.edit"], e.route).toContain(e.permission);
-      expect(can({ role: "viewer" }, e.permission), `${e.method} ${e.route}`).toBe(false);
-    }
+describe("decisão 9: o visualizador não vê automações", () => {
+  // A tela, a API e o motor de automações saíram (legado, 14/10); o catálogo de permissões segue sem o visualizador.
+  it("o visualizador não tem automations.view nem automations.edit", () => {
+    expect(can({ role: "viewer" }, "automations.view")).toBe(false);
+    expect(can({ role: "viewer" }, "automations.edit")).toBe(false);
   });
 });
 

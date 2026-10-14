@@ -119,7 +119,6 @@ vi.mock('@/lib/audit/context', () => ({
   registerAuditActor: async () => {},
 }))
 vi.mock('@/lib/logger', () => ({ writeLog: async () => {}, maskPhone: (p: string) => p }))
-vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: async () => {} }))
 vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows: async () => {} }))
 vi.mock('@/lib/ai/sentiment-trigger', () => ({ maybeScheduleSentiment: () => {} }))
 vi.mock('@/lib/disparador/reply-tracker', () => ({ recordCampaignReply: async () => {} }))

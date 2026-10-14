@@ -43,6 +43,9 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
+import { AcorditoPanel } from "./acordito-panel";
+import { useAcorditoSuggestions } from "@/hooks/use-acordito-suggestions";
+import type { AcorditoSuggestion } from "@/lib/acordito/client";
 import { QuickReplyMenu, QUICK_REPLY_MENU_ID } from "./quick-reply-menu";
 import { trackQuickReplyUse, useQuickReplies } from "@/hooks/use-quick-replies";
 import { useAuth } from "@/hooks/use-auth";
@@ -135,6 +138,8 @@ interface MessageComposerProps {
   onRecallHandled?: () => void;
   /** Nome do contato para {nome}/{primeiro_nome} das respostas rápidas. */
   contactName?: string | null;
+  /** Id da última mensagem do cliente: muda quando chega mensagem nova e o Acordito pede sugestões de novo. */
+  lastCustomerMessageId?: string | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -159,6 +164,7 @@ export function MessageComposer({
   recall,
   onRecallHandled,
   contactName,
+  lastCustomerMessageId = null,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -207,6 +213,23 @@ export function MessageComposer({
   // escolha só troca o rascunho, o operador revisa e envia. Usa a chave de IA
   // da conta (409 ai_not_configured quando não há) e tem limite por usuário.
   const canRewrite = can("inbox.ai_assist");
+
+  // Acordito (copiloto interno): 3 sugestões de resposta; clicar só preenche o campo (POST /api/ai/copilot/suggestions).
+  const acordito = useAcorditoSuggestions({
+    conversationId,
+    lastCustomerMessageId,
+    enabled: canSend && !sessionExpired,
+  });
+  const { reportSend: reportAcorditoSend } = acordito;
+  const pickAcordito = (s: AcorditoSuggestion) => {
+    acordito.pick(s);
+    setText(s.text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      el?.focus();
+      el?.setSelectionRange(s.text.length, s.text.length);
+    });
+  };
   const [rewriting, setRewriting] = useState(false);
   const [rewriteOpen, setRewriteOpen] = useState(false);
   const [rewriteOptions, setRewriteOptions] = useState<{ key: string; label: string; text: string }[]>([]);
@@ -291,6 +314,7 @@ export function MessageComposer({
     setSending(true);
     try {
       onSend(trimmed, replyTo?.id);
+      reportAcorditoSend(trimmed);
       setText("");
       try {
         localStorage.removeItem(`wacrm:draft:${conversationId}`);
@@ -301,7 +325,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId, reportAcorditoSend]);
 
   // ---- Respostas rápidas ("/atalho" ou botão ⚡) ----------------------
   const { profile } = useAuth();
@@ -746,6 +770,9 @@ export function MessageComposer({
               Somente leitura: seu perfil pode ver esta conversa, mas não responder.
             </p>
           )}
+          {!inputsDisabled && !draft && (
+            <AcorditoPanel state={acordito.state} onPick={pickAcordito} onRegenerate={acordito.regenerate} />
+          )}
           {qr && !inputsDisabled && (
             <QuickReplyMenu
               items={qrItems}
@@ -890,8 +917,8 @@ export function MessageComposer({
                             e.preventDefault();
                             void requestRewrite();
                           }}
-                          title="Revisar com IA (corrigir e sugerir tons)"
-                          aria-label="Revisar texto com IA"
+                          title="Revisar com o Acordito (corrigir e sugerir tons)"
+                          aria-label="Revisar texto com o Acordito"
                           className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground sm:size-8 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                         />
                       }
@@ -904,7 +931,7 @@ export function MessageComposer({
                     </PopoverTrigger>
                     <PopoverContent align="start" side="top" className="w-[360px] max-w-[calc(100vw-2rem)] gap-1.5 p-2">
                       <p className="px-1.5 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                        Sugestões da IA · escolha para editar
+                        O Acordito sugere · escolha para editar
                       </p>
                       {rewriteOptions.map((opt) => (
                         <button

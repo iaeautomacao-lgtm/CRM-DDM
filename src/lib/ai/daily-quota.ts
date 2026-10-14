@@ -5,12 +5,13 @@
 //   - FAIL-OPEN: sem a migration (RPC ausente) ou com falha de leitura, a IA segue como antes. A cota é uma proteção de custo,
 //     não pode derrubar o atendimento por falha da própria proteção.
 
-export type AiQuotaKind = 'stt' | 'tag_suggest'
+export type AiQuotaKind = 'stt' | 'tag_suggest' | 'copilot'
 
 /** Padrão por conta e por dia. Uso humano normal fica muito abaixo; é só o freio contra laço/abuso. */
 export const DEFAULT_AI_DAILY_LIMITS: Readonly<Record<AiQuotaKind, number>> = {
   stt: 10_000,
   tag_suggest: 5_000,
+  copilot: 3_000,
 }
 
 export interface AiQuotaResult {

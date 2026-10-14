@@ -23,7 +23,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 //   agent      → /inbox, /historico, /respostas-rapidas
 //   viewer     → /dashboard
 //   todos      → /perfil (Perfil, Segurança e Aparência) e /seguranca
-// /canais, /contacts, /pipelines, /ajuda e /lead-extractor: proprietário e admin
+// /canais, /contacts, /pipelines e /ajuda: proprietário e admin
 // (as APIs e o RLS dessas telas já aceitam o admin). /historico: quem atende
 // conversas. Para cargo personalizado, "pages" em /api/me/permissions sai da
 // permissão de cada tela (PAGE_MATRIX), não deste papel de compatibilidade.

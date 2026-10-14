@@ -79,7 +79,6 @@ vi.mock("@/lib/auth/account", async () => {
 // Qualquer toque no service role depois do guard é um bug nestes testes.
 vi.mock("@/lib/flows/admin-client", () => ({ supabaseAdmin: () => state.adminProxy() }));
 vi.mock("@/lib/disparador/admin-client", () => ({ supabaseAdmin: () => state.adminProxy() }));
-vi.mock("@/lib/automations/admin-client", () => ({ supabaseAdmin: () => state.adminProxy() }));
 vi.mock("@/lib/relatorios/admin-client", () => ({ supabaseAdmin: () => state.adminProxy() }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => {
@@ -99,10 +98,6 @@ import { POST as wahaStop } from "../whatsapp/waha/stop/route";
 import { GET as wahaQr } from "../whatsapp/waha/qr/route";
 import { POST as wahaPairing } from "../whatsapp/waha/pairing-code/route";
 import { GET as aiGet, POST as aiPost } from "../account/ai-config/route";
-import { POST as autoPost, GET as autoList } from "../automations/route";
-import { PATCH as autoPatch, DELETE as autoDelete, GET as autoGet } from "../automations/[id]/route";
-import { POST as autoDuplicate } from "../automations/[id]/duplicate/route";
-import { POST as autoEngine } from "../automations/engine/route";
 import { POST as exportsPost, DELETE as exportsDelete } from "../relatorios/exports/route";
 import { POST as tplSubmit } from "../whatsapp/templates/submit/route";
 import { POST as tplSync } from "../whatsapp/templates/sync/route";
@@ -148,11 +143,6 @@ const ADMIN_ONLY: Case[] = [
   ["POST waha/pairing-code", () => wahaPairing(req())],
   ["GET account/ai-config", () => aiGet()],
   ["POST account/ai-config", () => aiPost(req())],
-  ["POST /api/automations", () => autoPost(req())],
-  ["PATCH /api/automations/[id]", () => autoPatch(req("PATCH"), idParams)],
-  ["DELETE /api/automations/[id]", () => autoDelete(req("DELETE"), idParams)],
-  ["POST /api/automations/[id]/duplicate", () => autoDuplicate(req(), idParams)],
-  ["POST /api/automations/engine", () => autoEngine(req())],
   ["DELETE relatorios/exports", () => exportsDelete(req("DELETE"))],
   ["POST templates/submit", () => tplSubmit(req())],
   ["POST templates/sync", () => tplSync()],
@@ -175,8 +165,6 @@ describe("papel mínimo nas rotas (service role só depois do guard)", () => {
   });
 
   const AGENT_ONLY: Case[] = [
-    ["GET automations", () => autoList()],
-    ["GET automations/[id]", () => autoGet(req("GET"), idParams)],
     ["POST whatsapp/send", () => send(req())],
     ["POST whatsapp/react", () => react(req())],
     ["POST sentiment", () => sentiment(req(), idParams)],
