@@ -34,8 +34,8 @@ describe("supervisor (migrations 139/140)", () => {
 });
 
 describe("acesso por papel (decisões do dono de 13/10)", () => {
-  it("Canais, Contatos, Funis, Ajuda e Extrator de leads: proprietário e admin", () => {
-    for (const path of ["/canais", "/contacts", "/pipelines", "/ajuda", "/lead-extractor"]) {
+  it("Canais, Contatos, Funis e Ajuda: proprietário e admin", () => {
+    for (const path of ["/canais", "/contacts", "/pipelines", "/ajuda"]) {
       expect(canAccessRoute("owner", path), path).toBe(true);
       expect(canAccessRoute("admin", path), path).toBe(true);
       for (const role of ["supervisor", "agent", "viewer"] as const) expect(canAccessRoute(role, path), `${role} ${path}`).toBe(false);

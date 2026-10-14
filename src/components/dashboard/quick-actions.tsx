@@ -9,7 +9,6 @@ import type { Permission } from '@/lib/auth/permissions'
 // criar; o servidor continua bloqueando a criação de qualquer forma.
 const ACTIONS: ReadonlyArray<{ label: string; href: string; permission: Permission }> = [
   { label: 'Novo contato', href: '/contacts', permission: 'contacts.edit' },
-  { label: 'Nova automação', href: '/automations/new', permission: 'automations.edit' },
 ]
 
 export function QuickActions() {

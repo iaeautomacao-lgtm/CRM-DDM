@@ -41,7 +41,6 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Contatos", group: "Clientes", href: "/contacts", keywords: "clientes" },
   { label: "Contatos · Importações", group: "Clientes", href: "/disparador/contatos", keywords: "importar lista planilha contatos do disparador" },
   { label: "Funis", group: "Clientes", href: "/pipelines", keywords: "pipelines negocios" },
-  { label: "Extrator de leads", group: "Clientes", href: "/lead-extractor" },
 
   { label: "Campanhas", group: "Campanhas", href: "/disparador/campanhas", keywords: "disparador envio em lote envio em massa" },
   { label: "Campanhas · Monitor de envios", group: "Campanhas", href: "/disparador/monitor", keywords: "disparador fila monitor" },
@@ -54,7 +53,6 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Régua de cobrança", group: "Campanhas", href: "/regua", keywords: "cobranca vencimento inscricoes dunning" },
 
   { label: "Fluxos", group: "Automação e IA", href: "/flows", keywords: "flow builder conversa guiada" },
-  { label: "Automações", group: "Automação e IA", href: "/automations", permission: "automations.view", keywords: "regras gatilhos" },
   { label: "Agentes de IA", group: "Automação e IA", href: "/settings?tab=agents", settingsSection: "agents" },
   { label: "Ferramentas dos agentes", group: "Automação e IA", href: "/settings?tab=tools", settingsSection: "tools" },
   { label: "Provedores de IA", group: "Automação e IA", href: "/settings?tab=ai", settingsSection: "ai", keywords: "openai chave modelo" },
