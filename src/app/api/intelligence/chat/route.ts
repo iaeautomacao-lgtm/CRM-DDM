@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { resolveActiveApiKey } from '@/lib/ai/llm-shared'
+import { sanitizeHistory } from '@/lib/ai/acordito/history'
+import { ACORDITO_ERROR_MESSAGE, ACORDITO_UNAVAILABLE_MESSAGE } from '@/lib/ai/acordito/persona'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { createToolExecutor } from '@/lib/intelligence/chat/execute'
 import type { ChatStreamEvent } from '@/lib/intelligence/chat/labels'
@@ -38,7 +40,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Perguntas por minuto por usuário (cada uma pode gerar até 6 rodadas de ferramenta).
 const CHAT_RATE = { limit: 10, windowMs: 60_000 }
 
-const GENERIC_FAILURE = 'Não consegui concluir a análise agora. Tente de novo em instantes.'
+// Mensagem ao usuário com o nome do Acordito; o detalhe do erro fica só no log.
+const GENERIC_FAILURE = ACORDITO_ERROR_MESSAGE
 
 function parseBody(raw: string): { message: string; chatId: string | null } {
   let body: unknown
@@ -106,7 +109,7 @@ export async function POST(request: Request) {
     apiKey = await resolveOpenAiKey(scope.accountId)
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'O DDM Intelligence ainda não está configurado (chave da OpenAI ausente). Fale com o administrador.' },
+        { error: ACORDITO_UNAVAILABLE_MESSAGE, code: 'not_configured' },
         { status: 503 },
       )
     }
@@ -148,7 +151,7 @@ export async function POST(request: Request) {
         const result = await runChatLoop({
           llm,
           systemPrompt: buildSystemPrompt({ scopeLabel: scopeLabel(scope, names) }),
-          history,
+          history: sanitizeHistory(history),
           userMessage: input.message,
           tools: chatToolDefinitions(),
           execute: createToolExecutor(scope),

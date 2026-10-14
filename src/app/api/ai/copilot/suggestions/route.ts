@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
-import { COPILOT_ERROR_STATUS, getCopilotSuggestions } from '@/lib/ai/copilot'
+import { COPILOT_ERROR_MESSAGE, COPILOT_ERROR_STATUS, getCopilotSuggestions } from '@/lib/ai/copilot'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -36,10 +36,10 @@ export async function POST(request: Request) {
       conversationId,
       force: body?.force === true,
     })
-    if (!outcome.ok) return NextResponse.json({ error: outcome.code, code: outcome.code }, { status: COPILOT_ERROR_STATUS[outcome.code] })
+    if (!outcome.ok) return NextResponse.json({ error: COPILOT_ERROR_MESSAGE[outcome.code], code: outcome.code }, { status: COPILOT_ERROR_STATUS[outcome.code] })
     return NextResponse.json({ suggestions: outcome.suggestions, basedOnMessageId: outcome.basedOnMessageId, cached: outcome.cached })
   } catch (err) {
     console.error('[ai/copilot] suggestions falhou:', err instanceof Error ? err.message.slice(0, 160) : 'erro')
-    return NextResponse.json({ error: 'Falha ao gerar as sugestões' }, { status: 500 })
+    return NextResponse.json({ error: COPILOT_ERROR_MESSAGE.ai_failed }, { status: 500 })
   }
 }
