@@ -139,10 +139,12 @@ export function parseCopilotResponse(raw: string): string[] {
 
 export async function loadCopilotConfig(db: Db, accountId: string): Promise<CopilotConfig> {
   const { data, error } = await db.from('copilot_config').select('enabled, guidance').eq('account_id', accountId).maybeSingle()
-  // Sem a migration 354 (tabela ausente) ou sem linha: o Acordito fica desligado.
-  if (error || !data) return { enabled: false, guidance: '' }
+  // Sem a migration 354 (tabela ausente): desligado, não há onde guardar as sugestões.
+  if (error) return { enabled: false, guidance: '' }
+  // Sem linha: a conta nunca mexeu na configuração → o Acordito nasce LIGADO (decisão do dono, 14/10).
+  if (!data) return { enabled: true, guidance: '' }
   const row = data as { enabled?: boolean | null; guidance?: string | null }
-  return { enabled: row.enabled === true, guidance: row.guidance ?? '' }
+  return { enabled: row.enabled !== false, guidance: row.guidance ?? '' }
 }
 
 export interface CopilotDeps {
