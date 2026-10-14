@@ -61,6 +61,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { normalizeForSearch } from '@/lib/utils';
+import { ContactTrackingBadge } from '@/components/utmpay/tracking-badge';
 import { normalizePhone } from '@/lib/whatsapp/phone-utils';
 import {
   TagPickerBox,
@@ -1390,6 +1391,7 @@ export function ContactDetailView({
                 </PopoverContent>
               </Popover>
             </div>
+            <ContactTrackingBadge contactId={contact.id} />
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">{actionButtons}</div>
         </section>
