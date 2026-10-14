@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeAttribution, type AttributionMessage } from "@/lib/utmpay/attribution";
 import { withinAttributionWindow, type UtmpayEvent } from "@/lib/utmpay/events";
 import type { DdmSituation } from "@/lib/billing/ddm-source";
+import { reportUnknownSituacao } from "@/lib/billing/ddm-situacao";
 
 type Db = Pick<SupabaseClient, "from">;
 
@@ -158,4 +159,117 @@ export async function recheckPendingPayments(db: Db, deps: EnrichDeps, options: 
     }
   }
   return { checked, confirmed };
+}
+
+// ---------- Detecção POR CONSULTA À API DDM (fechou/pagou sem depender do webhook) ----------
+// Achado na VPS (14/10): o UTMpay recebeu 262 eventos de funil, TODOS `click` — o DDMPay não manda cpf_view/payment_start/paid. Então "fechou" e
+// "pagou" também saem de uma consulta à DDM, no cron de reconferência: para os links rastreados DENTRO DA JANELA que já CLICARAM e ainda não têm
+// `pagou_em`, consulta `situacao_acordo` do CPF e marca pelo mapeamento único (billing/ddm-situacao.ts):
+//   agreement ⇒ `fechou_em` (se vazio); paid ⇒ `pagou_em` (e `fechou_em` se vazio); none/unknown ⇒ não marca (unknown é logado 1x).
+// A atribuição vem da conversa entre o envio e o MOMENTO DA DETECÇÃO. O webhook do UTMpay continua valendo: se um dia o DDMPay mandar o funil, ele
+// marca antes e aqui `fechou_em`/`pagou_em` já preenchidos não são sobrescritos.
+export const DETECT_DEFAULT_LIMIT = 50;
+/** Um link já verificado há menos que isto não é consultado de novo (o lote gira entre os links em vez de repetir os mesmos). */
+export const DETECT_RECHECK_MINUTES = 60;
+const DETECT_MAX_AGE_DAYS = 90;
+
+export interface DetectResult {
+  /** CPFs consultados na DDM (no máximo um por CPF na execução). */
+  checked: number;
+  fechou: number;
+  pagou: number;
+  /** Consultas em que a situação não é conhecida (nada marcado). */
+  unknown: number;
+}
+
+interface CandidateRow extends LinkRow {
+  verificado_em: string | null;
+}
+
+export async function detectFromDdm(
+  db: Db,
+  deps: EnrichDeps & { windowDays?: (accountId: string) => Promise<number> },
+  options: { limit?: number; now?: Date; recheckMinutes?: number } = {},
+): Promise<DetectResult> {
+  const result: DetectResult = { checked: 0, fechou: 0, pagou: 0, unknown: 0 };
+  const now = options.now ?? new Date();
+  const limit = options.limit ?? DETECT_DEFAULT_LIMIT;
+  const since = new Date(now.getTime() - DETECT_MAX_AGE_DAYS * 86_400_000).toISOString();
+  const cooldown = new Date(now.getTime() - (options.recheckMinutes ?? DETECT_RECHECK_MINUTES) * 60_000).toISOString();
+
+  const { data } = await db
+    .from("utmpay_links")
+    .select(`${LINK_COLUMNS}, verificado_em`)
+    .not("clicou_em", "is", null)
+    .is("pagou_em", null)
+    .gt("created_at", since)
+    .or(`verificado_em.is.null,verificado_em.lt.${cooldown}`)
+    .order("clicou_em", { ascending: false })
+    .limit(limit * 4);
+  const candidates = (data ?? []) as CandidateRow[];
+  if (candidates.length === 0) return result;
+
+  // Janela de atribuição por conta (padrão 7 dias): só quem ainda está dentro dela.
+  const windows = new Map<string, number>();
+  const inWindow: CandidateRow[] = [];
+  for (const c of candidates) {
+    if (!windows.has(c.account_id)) windows.set(c.account_id, deps.windowDays ? await deps.windowDays(c.account_id) : 7);
+    if (withinAttributionWindow(new Date(c.created_at), now, windows.get(c.account_id) ?? 7)) inWindow.push(c);
+  }
+
+  // CPF de cada contato; um link por CPF por execução (o de clique mais recente, que já vem primeiro).
+  const contactIds = [...new Set(inWindow.map((c) => c.contact_id).filter((id): id is string => !!id))];
+  const cpfByContact = new Map<string, string>();
+  if (contactIds.length > 0) {
+    const { data: contacts } = await db.from("contacts").select("id, cpf").in("id", contactIds);
+    for (const row of (contacts ?? []) as { id: string; cpf: string | null }[]) {
+      const digits = String(row.cpf ?? "").replace(/\D/g, "");
+      if (digits.length === 11) cpfByContact.set(row.id, digits);
+    }
+  }
+  const seen = new Set<string>();
+  const batch: Array<{ link: CandidateRow; cpf: string }> = [];
+  for (const link of inWindow) {
+    const cpf = link.contact_id ? cpfByContact.get(link.contact_id) : undefined;
+    if (!cpf || seen.has(cpf)) continue;
+    seen.add(cpf);
+    batch.push({ link, cpf });
+    if (batch.length >= limit) break;
+  }
+
+  for (const { link, cpf } of batch) {
+    let situation: DdmSituation;
+    try {
+      situation = await deps.situation(cpf);
+    } catch (err) {
+      console.warn("[utmpay] detecção: não foi possível consultar a API DDM:", err instanceof Error ? err.message.slice(0, 100) : "erro");
+      continue; // DDM fora do ar / limite: tenta na próxima rodada
+    }
+    result.checked++;
+    const patch: Record<string, unknown> = {
+      situacao_acordo: situation.situacao_acordo,
+      valor_em_aberto: situation.valor_em_aberto,
+      instituicao: situation.instituicao,
+      verificado_em: now.toISOString(),
+    };
+    if (situation.stage === "agreement" || situation.stage === "paid") {
+      const attribution = computeAttribution(await conversationMessages(db, link, now), new Date(link.created_at), now);
+      patch.atribuicao = attribution.atribuicao;
+      patch.atendente_id = attribution.atendenteId;
+      if (!link.fechou_em) {
+        patch.fechou_em = now.toISOString();
+        result.fechou++;
+      }
+      if (situation.stage === "paid") {
+        patch.pagou_em = link.pagou_evento_em ?? now.toISOString();
+        result.pagou++;
+      }
+    } else if (situation.stage === "unknown") {
+      result.unknown++;
+      for (const value of situation.unknown_values.length > 0 ? situation.unknown_values : [situation.situacao_acordo]) reportUnknownSituacao(value);
+    }
+    const { error } = await db.from("utmpay_links").update(patch).eq("tid", link.tid);
+    if (error) throw new Error(`utmpay: gravação da detecção falhou (${error.code ?? "erro"})`);
+  }
+  return result;
 }
