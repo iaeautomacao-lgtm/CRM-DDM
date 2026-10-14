@@ -56,3 +56,8 @@ tests/stress/data/
 tests/stress/results/
 # stress test session cookie (see tests/stress/README.md) — a live credential
 tests/stress/.session-token
+
+# e2e das telas (Playwright): sessões logadas são credenciais; relatórios são gerados
+e2e/.auth/
+e2e/report/
+e2e/test-results/
