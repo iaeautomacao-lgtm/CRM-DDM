@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
-import { AcorditoMark } from "@/components/ddm/acordito";
+import { AcorditoMark, AcorditoMascote } from "@/components/ddm/acordito";
 import { ErrorState } from "@/components/ddm/states";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,7 +85,8 @@ export function AcorditoSettingsSection() {
       className="max-w-3xl"
     >
       <Card>
-        <CardHeader>
+        <CardHeader className="relative sm:pr-28">
+          <AcorditoMascote width={72} className="absolute right-5 top-3 hidden sm:block" />
           <CardTitle className="flex items-center gap-2 text-foreground">
             <AcorditoMark size="md">Acordito no atendimento</AcorditoMark>
           </CardTitle>
