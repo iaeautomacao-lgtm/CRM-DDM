@@ -9,6 +9,7 @@ import {
   BookOpen,
   Plug,
   Webhook,
+  Link2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -39,6 +40,7 @@ export const SETTINGS_SECTIONS = [
   'agents',
   'integrations',
   'webhooks',
+  'utmpay',
   'api-docs',
   'ai',
 ] as const;
@@ -91,6 +93,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   integrations: { id: 'integrations', label: 'Integrações', icon: Plug, group: 'workspace' },
   webhooks: { id: 'webhooks', label: 'Webhooks de saída', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
+  utmpay: { id: 'utmpay', label: 'Rastreamento (UTMpay)', icon: Link2, group: 'workspace', minRole: 'admin', integrationTab: true },
   'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor', integrationTab: true },
   ai: { id: 'ai', label: 'Provedores de IA', icon: Bot, group: 'workspace', ownerOnly: true, integrationTab: true },
 };
@@ -109,7 +112,7 @@ export function canSeeSection(section: SettingsSection, role: AccountRole | null
 }
 
 /** Abas da página Integrações, na ordem do protótipo. */
-export const INTEGRATION_TABS = ['api', 'secrets', 'tools', 'webhooks', 'ai', 'api-docs'] as const satisfies readonly SettingsSection[];
+export const INTEGRATION_TABS = ['api', 'secrets', 'tools', 'webhooks', 'utmpay', 'ai', 'api-docs'] as const satisfies readonly SettingsSection[];
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number];
 
 export function isIntegrationTab(section: SettingsSection): section is IntegrationTab {
