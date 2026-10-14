@@ -45,6 +45,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:utmpay-local": "vitest run --config vitest.utmpay-local.config.ts",
     "stress:generate": "tsx tests/stress/generate-csv.ts",
     "stress:import": "tsx tests/stress/test-import.ts",
     "stress:queue": "tsx tests/stress/test-queue.ts",

@@ -45,3 +45,29 @@ Cabeçalhos `X-UTMpay-Timestamp` (unix s) e `X-UTMpay-Signature: sha256=hex(HMAC
 - O UTMpay só aceita destino `https` em domínio de `UTM_DESTINOS_PERMITIDOS`; fora da lista o link não é gerado e o envio não sai (erro no item).
 - Contato sem CPF vai ao UTMpay como `crm-<id do contato>` (o checkout não pré-preenche o CPF) e não tem confirmação na DDM (sem CPF não há consulta): o `paid` dele fica pendente.
 - A DDM não distingue com certeza "paga" de "removida": hoje "lista vazia" ou `situacao_acordo` paga/quitada contam como quitada (premissa do dono, a confirmar com a DDM).
+
+## Teste local (UTMpay ↔ CRM, ponta a ponta)
+
+Um comando sobe o UTMpay real em modo arquivo e exercita o CRM de verdade, **sem MySQL, sem Supabase remoto e sem rede externa**. **Não entra no CI dos PRs** (config própria; o `vitest` padrão só pega `src/**/*.test.ts`). Serve para conferir a integração na máquina antes de mexer em produção.
+
+```bash
+npm run test:utmpay-local
+```
+
+**Pré-requisitos** (nesta máquina já estão nos padrões; senão defina as variáveis):
+
+| Variável | Padrão | O que é |
+|---|---|---|
+| `UTMPAY_PYTHON` | `C:/Users/Arthur.Henriques/py312/python.exe` | Python 3.12 portátil com Flask e `mysql-connector` instalados |
+| `UTMPAY_DIR` | `C:/Users/Arthur.Henriques/utmpay-v2` | repositório do UTMpay (commit `0848489` ou mais novo) |
+
+Se faltar algum, o teste falha com a mensagem do que falta (não passa "em branco"). Pelo `git bash` use o Node do projeto no `PATH`; a trava de memória da máquina vale como sempre (`bash test-lock.sh Cinzel npm run test:utmpay-local`).
+
+**Como funciona** (`scripts/utmpay-local/`):
+- `utmpay-process.ts` sobe o UTMpay com `python -c "import sys; sys.path.insert(0, DIR); from app import app; app.run(...)"`, sem `MYSQL_*` (modo arquivo), com `DDMPAY_DATA_DIR` temporário, `UTM_API_KEY` e `CRM_EVENTS_SECRET` de teste e `CRM_EVENTS_URL` apontando para o servidor HTTP do próprio teste. No fim derruba o processo e apaga o diretório temporário.
+- `pglite-supabase.ts` é um adaptador mínimo "supabase-js sobre PGlite" (só o subconjunto que as libs usam), para rodar o código **real** do CRM contra a migration **real** 356.
+- `utmpay-local.e2e.ts`: o servidor HTTP do teste repassa cada aviso do UTMpay ao handler **real** de `POST /api/integrations/utmpay/events` (assinatura, relógio, idempotência) e executa o trabalho pós-resposta (`after()`); a API DDM é simulada (a situação do CPF muda conforme o cenário).
+
+**Cenários (13)**: geração em lote pelo `client.ts` real (1 chamada, 1 link por envio, destino preservado); destino fora da lista ⇒ link não gerado e link cru não sai; prévia do WhatsApp e `HEAD` não contam clique, clique de celular conta 1; avisos assinados e sem CPF; cliques dos 3 contatos; `funil-evento` com `tid` falso (404) e etapa inválida (400); atribuição em 3 conversas (sem mensagem do contato = `direto`; só IA respondeu = `ia`; atendente respondeu = `humano` com `atendente_id`; conversa anterior ao envio ignorada); `paid` só vira `pagou_em` quando a DDM confirma (depois pelo cron de conferência); reenvio do UTMpay com o mesmo `event_id` não duplica; assinatura errada, relógio velho e cabeçalho ausente ⇒ 401; `utmpay_funnel` e `loadCampaignFunnel` com os números certos; contagem final de eventos (10, sem perda nem duplicata).
+
+**Limites:** não cobre MySQL de verdade, o JavaScript do DDMPay mandando o funil, o Apache/Passenger da VPS nem a API DDM real (simulada). O `CHECK` de `base_url` (https) é removido só na cópia do PGlite do teste, porque o UTMpay local fala `http://127.0.0.1`.
