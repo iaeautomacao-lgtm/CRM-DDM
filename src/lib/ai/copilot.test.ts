@@ -145,8 +145,15 @@ describe('buildCopilotPrompt', () => {
 })
 
 describe('loadCopilotConfig', () => {
-  it('sem linha ou sem a tabela: desligado', async () => {
-    expect(await loadCopilotConfig(fakeDb({ copilot_config: () => ({ data: null }) }).db, ACC)).toEqual({ enabled: false, guidance: '' })
+  it('sem linha: nasce ligado (decisão do dono, 14/10)', async () => {
+    expect(await loadCopilotConfig(fakeDb({ copilot_config: () => ({ data: null }) }).db, ACC)).toEqual({ enabled: true, guidance: '' })
+  })
+
+  it('desligado pela conta: continua desligado', async () => {
+    expect(await loadCopilotConfig(fakeDb({ copilot_config: () => ({ data: { enabled: false, guidance: 'x' } }) }).db, ACC)).toEqual({ enabled: false, guidance: 'x' })
+  })
+
+  it('sem a tabela (migration 354 não aplicada): desligado', async () => {
     expect(await loadCopilotConfig(fakeDb({ copilot_config: () => ({ error: { code: '42P01' } }) }).db, ACC)).toEqual({ enabled: false, guidance: '' })
   })
 })
@@ -183,13 +190,17 @@ describe('getCopilotSuggestions', () => {
     expect(prompt).toContain('Boas-vindas')
   })
 
-  it('desligado (ou sem a migration): copilot_disabled, sem tocar na conversa nem na IA', async () => {
-    for (const config of [{ enabled: false }, null]) {
-      const t = setup({ config })
-      expect(await t.run()).toEqual({ ok: false, code: 'copilot_disabled' })
-      expect(t.user.calls).toHaveLength(0)
-      expect(t.call).not.toHaveBeenCalled()
-    }
+  it('desligado pela conta: copilot_disabled, sem tocar na conversa nem na IA', async () => {
+    const t = setup({ config: { enabled: false } })
+    expect(await t.run()).toEqual({ ok: false, code: 'copilot_disabled' })
+    expect(t.user.calls).toHaveLength(0)
+    expect(t.call).not.toHaveBeenCalled()
+  })
+
+  it('conta que nunca configurou: o Acordito já sugere (nasce ligado)', async () => {
+    const t = setup({ config: null })
+    const r = await t.run()
+    expect(r.ok).toBe(true)
   })
 
   it('conversa fora do escopo do usuário (RLS devolve nada): forbidden, sem IA e sem cota', async () => {
