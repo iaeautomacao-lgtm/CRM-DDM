@@ -22,9 +22,7 @@ import {
   Users,
   UsersRound,
   Wifi,
-  UserSearch,
   Workflow,
-  Zap,
 } from "lucide-react";
 
 import type { Permission } from "@/lib/auth/permissions";
@@ -68,14 +66,12 @@ export const navItems: NavItem[] = [
 
   { href: "/contacts", label: "Contatos", icon: Users, group: "clients" },
   { href: "/pipelines", label: "Funis", icon: Kanban, group: "clients" },
-  { href: "/lead-extractor", label: "Extrator de leads", icon: UserSearch, group: "clients" },
 
   { href: "/disparador", label: "Campanhas", icon: Megaphone, group: "campaigns" },
   { href: "/templates", label: "Templates", icon: LayoutTemplate, group: "campaigns" },
   { href: "/regua", label: "Régua de cobrança", icon: CalendarClock, group: "campaigns" },
 
   { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation" },
-  { href: "/automations", label: "Automações", icon: Zap, group: "automation", permission: "automations.view" },
   { href: "/settings?tab=agents", label: "Agentes de IA", icon: Bot, group: "automation" },
   { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "automation" },
 
@@ -119,8 +115,6 @@ const extraTitles: Record<string, string> = {
   "/seguranca": "Segurança",
   "/historico": "Histórico",
   "/pipelines": "Funis",
-  "/automations": "Automações",
-  "/lead-extractor": "Extrator de leads",
   "/membros": "Usuários",
   "/unauthorized": "Acesso negado",
   "/ddm-logs": "Logs do sistema",
@@ -200,12 +194,6 @@ export function getBreadcrumbs(pathname: string): Crumb[] {
     const flows: Crumb = { label: "Fluxos", href: "/flows" };
     if (!b) return [flows, { label: "Editor de fluxo" }];
     if (b === "runs") return [flows, { label: "Fluxo", href: `/flows/${a}` }, { label: "Execuções" }];
-  }
-  if (root === "automations" && a) {
-    const automations: Crumb = { label: "Automações", href: "/automations" };
-    if (a === "new") return [automations, { label: "Nova automação" }];
-    if (b === "edit") return [automations, { label: "Editar automação" }];
-    if (b === "logs") return [automations, { label: "Logs de execução" }];
   }
   if (root === "equipes" && a && !b) return [{ label: "Equipes", href: "/equipes" }, { label: "Equipe" }];
   if (root === "contacts" && a && !b) return [{ label: "Contatos", href: "/contacts" }, { label: "Contato" }];

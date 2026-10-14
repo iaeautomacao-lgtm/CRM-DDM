@@ -84,7 +84,7 @@ describe("sem regras ou títulos órfãos", () => {
   });
 
   it("a trilha de cada rota com mais de um nível só tem links para páginas reais", () => {
-    const samples = ["/flows/abc", "/flows/abc/runs", "/automations/new", "/automations/x1/edit", "/automations/x1/logs", "/equipes/t1", "/contacts/c1", "/disparador/campanhas/k1", "/inteligencia/chaves"];
+    const samples = ["/flows/abc", "/flows/abc/runs", "/equipes/t1", "/contacts/c1", "/disparador/campanhas/k1", "/inteligencia/chaves"];
     for (const s of samples) {
       for (const c of getBreadcrumbs(s)) if (c.href) expect(routeExists(pathOf(c.href)), `${s}: ${c.href}`).toBe(true);
     }

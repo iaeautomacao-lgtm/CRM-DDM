@@ -16,12 +16,6 @@ describe("getBreadcrumbs", () => {
     ]);
   });
 
-  it("monta a trilha de Automações", () => {
-    expect(getBreadcrumbs("/automations/new")[1]).toEqual({ label: "Nova automação" });
-    expect(getBreadcrumbs("/automations/x1/edit")[1]).toEqual({ label: "Editar automação" });
-    expect(getBreadcrumbs("/automations/x1/logs")[1]).toEqual({ label: "Logs de execução" });
-  });
-
   it("cobre detalhes de equipe, contato, campanha e chaves do Intelligence", () => {
     expect(getBreadcrumbs("/equipes/t1").map((c) => c.label)).toEqual(["Equipes", "Equipe"]);
     expect(getBreadcrumbs("/contacts/c1").map((c) => c.label)).toEqual(["Contatos", "Contato"]);
@@ -37,7 +31,6 @@ describe("getBreadcrumbs", () => {
 describe("getPageTitle", () => {
   it("une a trilha com ponto médio e mantém o título simples nas demais", () => {
     expect(getPageTitle("/flows/abc/runs")).toBe("Fluxos · Fluxo · Execuções");
-    expect(getPageTitle("/automations/new")).toBe("Automações · Nova automação");
     expect(getPageTitle("/dashboard")).toBe("Painel");
   });
 

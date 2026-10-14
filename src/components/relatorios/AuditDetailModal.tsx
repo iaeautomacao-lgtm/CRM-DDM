@@ -43,8 +43,6 @@ function resourceHref(log: AuditLog): string | null {
       return `/inbox?c=${log.resource_id}`;
     case "flow":
       return `/flows/${log.resource_id}`;
-    case "automation":
-      return `/automations/${log.resource_id}/edit`;
     default:
       return null;
   }
