@@ -76,7 +76,6 @@ vi.mock('@/lib/contacts/dedupe', () => ({
   findExistingContact: (...a: unknown[]) => findExistingContact(...a),
   isUniqueViolation: () => false,
 }))
-vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: async () => {} }))
 vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows: (...a: unknown[]) => (dispatchInboundToFlows as unknown as (...x: unknown[]) => unknown)(...a) }))
 vi.mock('@/lib/ai/sentiment-trigger', () => ({ maybeScheduleSentiment: () => {} }))
 vi.mock('@/lib/disparador/reply-tracker', () => ({ recordCampaignReply: async () => {} }))

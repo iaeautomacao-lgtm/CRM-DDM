@@ -159,7 +159,7 @@ describe('middleware', () => {
     expect(res.headers.get('location')).toBeNull();
   });
 
-  it.each(['/api/v1/contacts', '/api/whatsapp/webhook', '/api/disparador/cron', '/w/abc123', '/api/automations/cron'])(
+  it.each(['/api/v1/contacts', '/api/whatsapp/webhook', '/api/disparador/cron', '/w/abc123', '/api/flows/cron'])(
     'rota isenta %s não é desviada para o 2FA',
     async (path) => {
       const res = await run(path, false);

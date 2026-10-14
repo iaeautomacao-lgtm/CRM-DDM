@@ -12,7 +12,6 @@ vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows: async () => ({ co
 vi.mock('@/lib/ai/sentiment-trigger', () => ({ maybeScheduleSentiment: () => undefined }))
 vi.mock('@/lib/disparador/reply-tracker', () => ({ recordCampaignReply: async () => undefined }))
 vi.mock('@/lib/webchat/campaign', () => ({ maybeStartCampaignWebchat: async () => false }))
-vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: async () => undefined }))
 
 import { POST } from './route'
 import { __resetLegacyWahaReportsForTests, wahaChannelWebhookSecret } from '@/lib/whatsapp/waha-webhook-auth'

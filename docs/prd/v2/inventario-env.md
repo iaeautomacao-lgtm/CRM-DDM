@@ -22,7 +22,6 @@ Colunas: `variável | arquivos que leem (até 3) | tem valor padrão no código?
 | `DISPARADOR_URL` | `src/app/api/whatsapp/external-urls/route.ts` | sim: '' | URL externa do serviço disparador exposta na rota /api/whatsapp/external-urls | não | **INFRA** |
 | `DISPATCH_SINGLE_ACCOUNT_ID` | .env.local.example | não (definido em .env.local.example) | ID da conta única do CRM atendida pelo backend legado de disparo (disparador/) | não | **INFRA** |
 | `ENCRYPTION_KEY` | `src/lib/channels/oauth.ts`, `src/lib/whatsapp/encryption.ts`, `scripts/encrypt-plaintext-app-secrets.mjs` | não | Chave AES-256-GCM de 64 caracteres hexadecimais para criptografia de tokens e credenciais | sim | **INFRA** |
-| `LEAD_EXTRACTOR_URL` | `src/app/api/whatsapp/external-urls/route.ts` | sim: 'https://grupoddmlead.lovable.app' | URL do extrator de leads exposta para redirecionamento no frontend | não | **INFRA** |
 | `LOAD_ACCOUNT_ID` | `scripts/loadtest/lib/load-metrics.mjs` | não | ID da conta do CRM usada para receber dados gerados na bancada de carga | não | **INFRA** |
 | `LOAD_APP_SECRET` | `scripts/loadtest/load.mjs` | não | Segredo do app usado para autenticar scripts de teste de carga contra a API | sim | **INFRA** |
 | `LOAD_APP_URL` | `scripts/loadtest/lib/load-metrics.mjs` | não | URL base da instância do aplicativo sob teste de carga | não | **INFRA** |

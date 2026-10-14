@@ -2,7 +2,6 @@
   "_doc": "FONTE ÚNICA dos módulos que só podem rodar no servidor (PRD 14, 14.12). Cada arquivo listado tem `import \"server-only\"` (o build do Next falha se um client component o alcançar); o client-scan e a regra de ESLint leem ESTA lista. Para incluir um módulo: adicione aqui e rode `node scripts/ci/server-only-modules.mjs --apply`.",
   "modules": [
     "src/lib/account/admin-client.ts",
-    "src/lib/automations/admin-client.ts",
     "src/lib/disparador/admin-client.ts",
     "src/lib/flows/admin-client.ts",
     "src/lib/relatorios/admin-client.ts",

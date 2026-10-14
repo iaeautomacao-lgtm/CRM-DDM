@@ -9,7 +9,6 @@ import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import type { WebhookContact } from '@/lib/whatsapp/webhook-contacts'
-import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { reopenConversationFields } from '@/lib/conversations/reopen'
@@ -587,59 +586,6 @@ export async function processMessage(
     { text: contentText, flowConsumed, isInteractiveReply: Boolean(interactiveReplyId) || Boolean(flowResponse) },
   )
 
-  // Fire any automations that react to this webhook event. All dispatches
-  // run here (not earlier) so the contact, conversation, and inbound
-  // message all exist before any step — including send_message — runs.
-  // Fire-and-forget: a slow or failing automation must not block the
-  // webhook's 200 OK response to Meta.
-  const inboundText = contentText ?? message.text?.body ?? ''
-  const automationTriggers: (
-    | 'new_contact_created'
-    | 'first_inbound_message'
-    | 'new_message_received'
-    | 'keyword_match'
-  )[] = []
-  // Content-level triggers are suppressed when a flow consumed the
-  // message — see the comment block above.
-  if (!flowConsumed) {
-    automationTriggers.push('new_message_received', 'keyword_match')
-  }
-  // new_contact_created fires only when the webhook just auto-created the
-  // contact row. first_inbound_message fires whenever this is the contact's
-  // first-ever customer-sent message — a superset that also catches
-  // manually-imported contacts sending for the first time. We dispatch both
-  // so users can pick whichever semantic they want; an automation that
-  // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated)
-    automationTriggers.unshift('new_contact_created')
-  if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
-  for (const triggerType of automationTriggers) {
-    runAutomationsForTrigger({
-      accountId,
-      triggerType,
-      contactId: contactRecord.id,
-      // Automação por linha (automations.line_ids, migration 128).
-      lineId: configId ?? null,
-      context: {
-        message_text: inboundText,
-        conversation_id: conversation.id,
-      },
-    }).catch((err) => {
-      console.error('[automations] dispatch failed:', err)
-      void writeLog({
-        account_id: accountId,
-        level: 'error',
-        source: 'automations',
-        event: 'automation_dispatch_error',
-        message: `Falha ao disparar automações para o trigger "${triggerType}"`,
-        payload: {
-          contact_id: contactRecord.id,
-          trigger_type: triggerType,
-          erro: err instanceof Error ? err.message : String(err),
-        },
-      })
-    })
-  }
   return "processed"
 }
 

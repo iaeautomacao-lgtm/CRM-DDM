@@ -10,12 +10,10 @@
 //     https arbitrário → img-src https:;
 //   - VoIP pelo proxy /api/calls (mesma origem); gravação de áudio com Worker em /opus + AudioWorklet em /worklets (worker-src 'self' blob:,
 //     WebAssembly → 'wasm-unsafe-eval');
-//   - iframes: o Extrator de Leads (LEAD_EXTRACTOR_URL, padrão lovable.app) e pré-visualização de arquivo do chat (mesma origem/Supabase);
+//   - iframes: só pré-visualização de arquivo do chat (mesma origem/Supabase); o Extrator de Leads saiu (14/10);
 //   - fontes: next/font/google já é auto-hospedada no build → 'self'.
 // 'unsafe-eval' SÓ em desenvolvimento (React/Turbopack dev). Em produção nunca.
 
-/** Origem do Extrator de Leads quando LEAD_EXTRACTOR_URL não está definida (mesmo padrão de /api/whatsapp/external-urls). */
-export const DEFAULT_LEAD_EXTRACTOR_URL = "https://grupoddmlead.lovable.app";
 
 /** Endpoint que recebe as violações (POST). */
 export const CSP_REPORT_PATH = "/api/security/csp-report";
@@ -23,8 +21,6 @@ export const CSP_REPORT_PATH = "/api/security/csp-report";
 export interface CspOptions {
   /** Desenvolvimento: libera 'unsafe-eval' e o websocket do HMR. */
   isDev?: boolean;
-  /** URL do Extrator de Leads (vira frame-src). */
-  leadExtractorUrl?: string | null;
   /** Passo 2: nonce por requisição — troca 'unsafe-inline' por 'nonce-…' + 'strict-dynamic' em script-src. */
   nonce?: string;
   /** Endereço para onde o navegador manda as violações. */
@@ -44,7 +40,6 @@ export function originOf(url: string | null | undefined): string | null {
 
 export function buildContentSecurityPolicy(options: CspOptions = {}): string {
   const { isDev = false, nonce, reportUri = CSP_REPORT_PATH } = options;
-  const leadOrigin = originOf(options.leadExtractorUrl ?? DEFAULT_LEAD_EXTRACTOR_URL);
 
   const scriptSrc = ["'self'"];
   if (nonce) scriptSrc.push(`'nonce-${nonce}'`, "'strict-dynamic'");
@@ -56,7 +51,6 @@ export function buildContentSecurityPolicy(options: CspOptions = {}): string {
   if (isDev) connectSrc.push("ws://localhost:*", "ws://127.0.0.1:*");
 
   const frameSrc = ["'self'", "https://*.supabase.co"];
-  if (leadOrigin) frameSrc.push(leadOrigin);
 
   const directives: Array<[string, string[]]> = [
     ["default-src", ["'self'"]],

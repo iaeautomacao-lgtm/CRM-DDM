@@ -20,7 +20,7 @@ Regras gerais:
 | `ENCRYPTION_KEY` | AES-256-GCM dos segredos gravados no banco | 64 caracteres hex; trocar orfana o que foi cifrado antes |
 | `NEXT_PUBLIC_APP_URL` | URL pública do app (esquema + host, sem barra final) | única origem do host dos **links de convite** e do webhook WAHA; ver seção 5 |
 | `CRON_SECRET` | protege os crons do Disparador (`/api/disparador/*`) | `openssl rand -hex 32` |
-| `AUTOMATION_CRON_SECRET` | protege `/api/automations/cron` e `/api/flows/cron` | |
+| `AUTOMATION_CRON_SECRET` | protege `/api/flows/cron` | |
 | `AUDIT_HEADER_SECRET` | assina os headers de auditoria | ≥ 32 caracteres; mesmo valor de `wacrm.audit_secrets` |
 | `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` | app da Meta **da plataforma** (Instagram/Messenger, verificação) | o WhatsApp de cada cliente usa o `app_secret` do **próprio canal** (cifrado no banco) |
 
@@ -81,7 +81,6 @@ O cabeçalho `Host`/`X-Forwarded-Host` da requisição e o domínio `wacrm.tech`
 | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_API_KEY`/`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `DISPARADOR_OPENAI_API_KEY` | cofre da conta (chave de provedor) |
 | `DDM_ACORDOS_API_TOKEN` (aliases `DDM_TOKEN`, `DDM_API_KEY`) | cofre da conta; o **nome** do marcador `{{secret.DDM_TOKEN}}` permanece |
 | `UTM_API_KEY` | cofre da conta |
-| `LEAD_EXTRACTOR_URL` | configuração da conta |
 | Ajustes de desempenho (`DISPATCH_PROCESS_CONCURRENCY`, `DISPARADOR_AUTO_PAUSE*`, `AI_LLM_*`, `AI_STALL_*`, `META/WAHA_TIMEOUT_MS`…) | `platform_config` (banco, auditado) — fase 19.2 do PRD 19; até lá continuam lidas do `.env` |
 
 Enquanto a migração por conta não termina (fases 19.3–19.4 do PRD 19), as variáveis de cliente acima ainda funcionam como

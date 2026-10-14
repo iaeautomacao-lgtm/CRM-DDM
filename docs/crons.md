@@ -13,7 +13,7 @@ cPanel/EasyPanel, ou outro pinger). Este documento lista todas as rotas desse ti
 | Variável | Header | Rotas |
 |---|---|---|
 | `CRON_SECRET` | `x-cron-secret` | `/api/disparador/cron`, `/api/disparador/prepare/cron`, `/api/disparador/health/cron` |
-| `AUTOMATION_CRON_SECRET` | `x-cron-secret` | `/api/automations/cron`, `/api/flows/cron`, `/api/channels/refresh-tokens`, `/api/conversations/retry-assignment` |
+| `AUTOMATION_CRON_SECRET` | `x-cron-secret` | `/api/flows/cron`, `/api/channels/refresh-tokens`, `/api/conversations/retry-assignment` |
 | `STRESS_RUN_SECRET` | `x-stress-secret` | `/api/stress/run` (manual, não é cron) |
 
 Todas respondem **503** se a variável não estiver configurada (fail-closed) e **401** se o
@@ -27,7 +27,6 @@ segredo não bater (comparação em tempo constante). O segredo vai no header, n
 | `/api/disparador/prepare/cron` | `POST` | `CRON_SECRET` | 1 min | `maxDuration` 300 s; orçamento 240 s (`DISPARADOR_PREPARE_BUDGET_MS`); lock `disparador_prepare` | Campanhas **agendadas** não são preparadas no horário (ficam em `agendado`). Enquanto `DISPARADOR_PREPARE_IN_TICK` não for `false`, o tick de envio ainda faz o preparo como fallback. |
 | `/api/disparador/health/cron` | `POST` | `CRON_SECRET` | 5–10 min | `maxDuration` 120 s; orçamento 90 s; lock `disparador_health` | Qualidade/tier dos números Meta só atualiza pelo webhook `phone_number_quality_update` (pode atrasar ou não chegar): limite/s automático desatualiza. |
 | `/api/disparador/exports/cron` | `POST` | `CRON_SECRET` | 1 min | um job por vez com lease de 120 s; processa em blocos até o teto de 100 mil linhas; limpa arquivos vencidos (24 h) | Exportações grandes da fila do disparador ficam em "pendente" e o link nunca chega. As pequenas (até 10 mil linhas) continuam síncronas. |
-| `/api/automations/cron` | `POST` (executa); `GET` só diagnóstico | `AUTOMATION_CRON_SECRET` | 1 min | até 50 execuções pendentes por chamada | Automações com espera (`automation_pending_executions`) não retomam. |
 | `/api/flows/cron` | `POST` (executa); `GET` só diagnóstico | `AUTOMATION_CRON_SECRET` | 5 min (1 h seria tolerável para volume baixo) | até 200 runs varridos por chamada | **Não é opcional**: runs abandonados ficam `active` e bloqueiam novos gatilhos do contato; `smart_delay` não acorda; vigia de IA travada (conversa sem resposta há >180 s) não age. |
 | `/api/channels/refresh-tokens` | `POST` | `AUTOMATION_CRON_SECRET` | 1 vez por dia | lote de 50 canais; renova tokens do Instagram que vencem em até 10 dias | Tokens longos do Instagram (60 dias) expiram e o canal vai para `error`. |
 | `/api/conversations/retry-assignment` | `POST` | `AUTOMATION_CRON_SECRET` | 5 min | sem lote próprio documentado; olha conversas `pending` sem agente há ≥5 min | Conversas sem agente não são redistribuídas automaticamente. |
@@ -37,7 +36,7 @@ segredo não bater (comparação em tempo constante). O segredo vai no header, n
 
 Observações:
 
-- `GET` em `/api/disparador/cron`, `/api/automations/cron` e `/api/flows/cron` **não executa nada**:
+- `GET` em `/api/disparador/cron` e `/api/flows/cron` **não executa nada**:
   só confere segredo e saúde da tabela. Agendadores devem usar `POST`.
 - **Tick encadeado** (`DISPARADOR_TICK_CHAIN`): quando ligado, um tick que processou trabalho dispara
   o próximo (`x-cron-hop`) sem esperar o minuto; o cron externo continua obrigatório (hop 0).

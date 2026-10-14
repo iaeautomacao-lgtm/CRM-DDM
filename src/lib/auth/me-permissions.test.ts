@@ -162,7 +162,7 @@ describe("pages do cargo personalizado saem da permissão (PAGE_MATRIX, decisão
 
   it("papéis de sistema: admin abre as telas de gestão; supervisor abre /settings e /historico; operador não", () => {
     const pages = (r: AccountRole) => buildMePermissions(ctxFor(r)).pages;
-    for (const p of ["/canais", "/contacts", "/pipelines", "/ajuda", "/lead-extractor"]) {
+    for (const p of ["/canais", "/contacts", "/pipelines", "/ajuda"]) {
       expect(pages("admin"), p).toContain(p);
       expect(pages("supervisor"), p).not.toContain(p);
       expect(pages("agent"), p).not.toContain(p);

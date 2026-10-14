@@ -19,7 +19,6 @@ import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
-import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { writeLog, maskPhone } from '@/lib/logger'
 import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import { readCappedBody } from '@/lib/security/webhook-body'
@@ -794,37 +793,6 @@ export async function POST(request: Request) {
           isFirstInboundMessage,
         })
         flowConsumed = flowResult.consumed
-
-        // Automações — mesmos gatilhos e mesma precedência do webhook Meta
-        // (conteúdo só quando nenhum fluxo consumiu), filtradas pela linha.
-        const automationTriggers: (
-          | 'new_contact_created'
-          | 'first_inbound_message'
-          | 'new_message_received'
-          | 'keyword_match'
-        )[] = []
-        if (!flowConsumed) automationTriggers.push('new_message_received', 'keyword_match')
-        if (contactWasCreated) automationTriggers.unshift('new_contact_created')
-        if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
-        for (const triggerType of automationTriggers) {
-          runAutomationsForTrigger({
-            accountId,
-            triggerType,
-            contactId,
-            lineId: config.id,
-            context: { message_text: contentText ?? '', conversation_id: conversationId },
-          }).catch((err) => {
-            console.error('[automations] dispatch failed (waha):', err)
-            void writeLog({
-              account_id: accountId,
-              level: 'error',
-              source: 'automations',
-              event: 'automation_dispatch_error',
-              message: `Falha ao disparar automações para o trigger "${triggerType}" (WAHA)`,
-              payload: { contact_id: contactId, trigger_type: triggerType, erro: err instanceof Error ? err.message : String(err) },
-            })
-          })
-        }
       }
 
       // Suppress AI auto-response / sentiment / auto-tagging when the

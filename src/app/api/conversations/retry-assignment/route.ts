@@ -6,7 +6,7 @@ import { selectAgentForTeam, selectAnyAgentForAccount } from "@/lib/flows/engine
 
 async function handlePost(request: Request) {
   // Auth: reutiliza AUTOMATION_CRON_SECRET (mesmo padrão de
-  // /api/flows/cron e /api/automations/cron)
+  // /api/flows/cron)
   const secret = process.env.AUTOMATION_CRON_SECRET ?? "";
   const supplied = request.headers.get("x-cron-secret") ?? "";
   if (

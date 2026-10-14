@@ -131,7 +131,6 @@ describe("rotas quentes NÃO chamam o limitador (custo: 1 RPC por chamada limita
     "app/api/disparador/cron/route.ts",
     "app/api/disparador/prepare/cron/route.ts",
     "app/api/disparador/health/cron/route.ts",
-    "app/api/automations/cron/route.ts",
     "app/api/flows/cron/route.ts",
     "app/api/whatsapp/webhook/waha/route.ts",
     "app/api/meta/webhook/route.ts",
