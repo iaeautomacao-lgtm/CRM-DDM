@@ -15,12 +15,12 @@ import type { AccountRole } from "@/lib/auth/roles";
 // canAccessRoute antes de a tabela ser consultada). Decisões do dono de 13/10/2026:
 //   admin      → tudo de /settings, /equipes, /usuarios, /flows, /disparador,
 //                /templates, /tabulacoes, /relatorios, /canais, /contacts,
-//                /pipelines, /ajuda, /lead-extractor, /perfil, /historico
+//                /pipelines, /ajuda, /perfil, /historico
 //   supervisor → /dashboard, /monitoramento, /inbox, /historico, /inteligencia,
 //                /regua, /settings (as abas filtram: Agentes e Ferramentas só
 //                leitura) e os relatórios de Atendimentos/Conversas/Tabulações/
 //                Agentes (dados só das suas equipes — RLS da 140 e RPCs da 143)
-//   agent      → /inbox, /historico, /automations, /respostas-rapidas
+//   agent      → /inbox, /historico, /respostas-rapidas
 //   viewer     → /dashboard
 //   todos      → /perfil (Perfil, Segurança e Aparência) e /seguranca
 // /canais, /contacts, /pipelines, /ajuda e /lead-extractor: proprietário e admin
@@ -57,12 +57,9 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/canais": ["owner", "admin"],
   "/contacts": ["owner", "admin"],
   "/pipelines": ["owner", "admin"],
-  "/lead-extractor": ["owner", "admin"],
   // Histórico de conversas encerradas: quem atende conversas (o RLS escopa o que cada um lê).
   "/historico": ["owner", "admin", "supervisor", "agent"],
   "/flows": ["owner", "admin"],
-  // Decisão do dono (13/10, item 9): o visualizador NÃO vê /automations (o mesmo conjunto de automations.view).
-  "/automations": ["owner", "admin", "supervisor", "agent"],
   "/disparador": ["owner", "admin"],
   // Régua de cobrança (PRD 17): ver = billing.view (supervisor+); editar = billing.manage (admin+, conferido na tela e nas rotas).
   "/regua": ["owner", "admin", "supervisor"],
