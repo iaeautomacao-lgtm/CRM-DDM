@@ -3,7 +3,7 @@
 import { Fragment } from "react";
 
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
-import { ATRIBUICAO_LABEL, type Atribuicao, type PorAtendente, type PorAtribuicao } from "@/lib/utmpay/client";
+import { ATRIBUICAO_LABEL, type Atribuicao, type PorAtendente, type PorAtribuicao } from "@/lib/utmpay/api-client";
 import { cn } from "@/lib/utils";
 
 const ORDER: Atribuicao[] = ["direto", "ia", "humano"];

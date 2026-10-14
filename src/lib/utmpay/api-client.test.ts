@@ -15,7 +15,7 @@ import {
   parseRastreio,
   saveConfig,
   testConfig,
-} from "./client";
+} from "./api-client";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 beforeEach(() => apiFetch.mockReset());

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildInput } from "./utmpay-settings";
-import type { UtmpayConfig } from "@/lib/utmpay/client";
+import type { UtmpayConfig } from "@/lib/utmpay/api-client";
 
 const saved: UtmpayConfig = { available: true, configured: true, enabled: false, base_url: "", has_api_key: false, has_webhook_secret: false, janela_dias: 7, send_without_tracking: false, events_url: "" };
 const form = { enabled: false, base_url: "", api_key: "", webhook_secret: "", janela_dias: "7", send_without_tracking: false };

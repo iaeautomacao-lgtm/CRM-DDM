@@ -11,7 +11,7 @@ import {
   fmtMoney,
   type Etapa,
   type Rastreio,
-} from "@/lib/utmpay/client";
+} from "@/lib/utmpay/api-client";
 
 const ETAPA_TONE: Record<Etapa, StatusTone> = { pagou: "ok", fechou: "brand", clicou: "info", enviado: "mute" };
 

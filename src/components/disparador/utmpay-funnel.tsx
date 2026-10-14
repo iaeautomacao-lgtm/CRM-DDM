@@ -3,7 +3,7 @@
 import { AttendantRanking, AttributionBar } from "@/components/utmpay/attribution-card";
 import { ErrorState, Skeleton } from "@/components/ddm/states";
 import { useUtmpayData } from "@/hooks/use-utmpay-data";
-import { fetchFunil, fetchRanking, fmtPercent, type UtmpayFunil } from "@/lib/utmpay/client";
+import { fetchFunil, fetchRanking, fmtPercent, type UtmpayFunil } from "@/lib/utmpay/api-client";
 import { cn } from "@/lib/utils";
 
 interface Step {

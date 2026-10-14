@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { SettingsPanelHead } from "./settings-panel-head";
-import { fetchConfig, saveConfig, testConfig, type UtmpayConfig, type UtmpayConfigInput } from "@/lib/utmpay/client";
+import { fetchConfig, saveConfig, testConfig, type UtmpayConfig, type UtmpayConfigInput } from "@/lib/utmpay/api-client";
 
 interface Form {
   enabled: boolean;
