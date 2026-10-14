@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { KeyRound, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import { KeyRound, Loader2, MessageSquarePlus, Send } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import { AnswerMarkdown } from "@/components/inteligencia/answer-markdown";
 import { SUGGESTED_QUESTIONS, toolLabel, type ChatStreamEvent } from "@/lib/intelligence/chat/labels";
 import { cn } from "@/lib/utils";
 import { ForbiddenState, Skeleton } from "@/components/ddm/states";
+import { AcorditoAvatar } from "@/components/ddm/acordito";
 import { usePermissions } from "@/hooks/use-permission";
 
 // /inteligencia — chat do DDM Intelligence (PRD-04, Fase 2). Owner/admin/
@@ -72,7 +73,7 @@ export default function InteligenciaPage() {
   if (!can("intelligence.use")) {
     return (
       <ForbiddenState
-        title="Você não tem acesso ao DDM Intelligence"
+        title="Você não tem acesso ao Acordito"
         hint="Se precisar dele, peça a um administrador da organização."
       />
     );
@@ -317,7 +318,7 @@ function InteligenciaChat() {
 
       {/* Conversa */}
       <section
-        aria-label="Conversa com o DDM Intelligence"
+        aria-label="Conversa com o Acordito"
         className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-card border bg-card"
       >
         <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto overflow-x-hidden p-4" aria-live="polite">
@@ -328,11 +329,9 @@ function InteligenciaChat() {
             </div>
           ) : messages.length === 0 ? (
             <div className="animate-ddm-fade m-auto flex max-w-[560px] flex-col items-center gap-4 py-6 text-center">
-              <span className="flex size-10 items-center justify-center rounded-field bg-primary-soft text-primary">
-                <Sparkles className="size-5" />
-              </span>
+              <AcorditoAvatar size="lg" />
               <div className="flex flex-col gap-1.5">
-                <h2 className="text-[17px] font-semibold text-foreground">Pergunte sobre o atendimento</h2>
+                <h2 className="text-[17px] font-semibold text-foreground">Oi, eu sou o Acordito. Pergunte sobre o atendimento</h2>
                 <p className="text-[13.5px] leading-relaxed text-foreground-2">
                   As respostas usam só os dados do CRM que você pode ver, sempre com o período e o escopo consultados.
                 </p>
@@ -360,7 +359,8 @@ function InteligenciaChat() {
                   </div>
                 </div>
               ) : (
-                <div key={m.key} className="animate-ddm-fade flex justify-start">
+                <div key={m.key} className="animate-ddm-fade flex items-start justify-start gap-2">
+                  <AcorditoAvatar size="md" className="mt-0.5" />
                   <div
                     className={cn(
                       "flex max-w-[90%] flex-col gap-2 rounded-[10px_10px_10px_2px] border bg-card-2 px-3.5 py-2.5",
@@ -415,7 +415,7 @@ function InteligenciaChat() {
             disabled={streaming || limitReached}
             rows={1}
             className="max-h-40 min-h-10 resize-y text-[13.5px]"
-            aria-label="Pergunta para o DDM Intelligence"
+            aria-label="Pergunta para o Acordito"
           />
           <Button
             type="submit"

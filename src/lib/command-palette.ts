@@ -58,7 +58,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Agentes de IA", group: "Automação e IA", href: "/settings?tab=agents", settingsSection: "agents" },
   { label: "Ferramentas dos agentes", group: "Automação e IA", href: "/settings?tab=tools", settingsSection: "tools" },
   { label: "Provedores de IA", group: "Automação e IA", href: "/settings?tab=ai", settingsSection: "ai", keywords: "openai chave modelo" },
-  { label: "Inteligência", group: "Automação e IA", href: "/inteligencia", keywords: "ddm intelligence assistente" },
+  { label: "Acordito", group: "Automação e IA", href: "/inteligencia", keywords: "inteligência ddm intelligence assistente copiloto" },
   { label: "Chave pessoal do MCP", group: "Automação e IA", href: "/inteligencia/chaves", permission: "intelligence.personal_key" },
 
   { label: "Relatórios · Desempenho do atendimento", group: "Relatórios", href: "/relatorios/atendimentos", keywords: "atendimentos" },

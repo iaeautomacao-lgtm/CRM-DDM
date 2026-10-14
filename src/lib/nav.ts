@@ -77,7 +77,7 @@ export const navItems: NavItem[] = [
   { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation" },
   { href: "/automations", label: "Automações", icon: Zap, group: "automation", permission: "automations.view" },
   { href: "/settings?tab=agents", label: "Agentes de IA", icon: Bot, group: "automation" },
-  { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "automation" },
+  { href: "/inteligencia", label: "Acordito", icon: Gauge, group: "automation" },
 
   { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "reports" },
 
@@ -212,7 +212,7 @@ export function getBreadcrumbs(pathname: string): Crumb[] {
   if (root === "disparador" && a === "campanhas" && b) {
     return [{ label: "Campanhas", href: "/disparador/campanhas" }, { label: "Campanha" }];
   }
-  if (root === "inteligencia" && a === "chaves") return [{ label: "Inteligência", href: "/inteligencia" }, { label: "Chave pessoal do MCP" }];
+  if (root === "inteligencia" && a === "chaves") return [{ label: "Acordito", href: "/inteligencia" }, { label: "Chave pessoal do MCP" }];
 
   return [{ label: baseTitle(path) }];
 }
