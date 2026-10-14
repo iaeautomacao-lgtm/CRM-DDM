@@ -1,0 +1,95 @@
+import { NextResponse } from "next/server";
+
+import { guardPermission } from "@/lib/auth/route-guard";
+import { logAuditEvent } from "@/lib/audit/log-event";
+import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { resolveSecretForWrite } from "@/lib/whatsapp/secret-write";
+import { resetUtmpayConfigCache } from "@/lib/utmpay/config";
+import { utmpayEventsUrl, validateUtmpayConfigBody, viewUtmpayConfig, type UtmpayConfigRow } from "@/lib/utmpay/config-api";
+
+export const dynamic = "force-dynamic";
+
+// GET/PUT /api/account/utmpay-config — configuração do UTMpay por conta (decisões do dono, 14/10). Permissão: settings.account (admin+).
+// Os segredos (api_key e webhook_secret) são WRITE-ONLY: gravados CIFRADOS no servidor (resolveSecretForWrite) e nunca devolvidos (só has_*).
+// Vazio, omitido ou só bolinhas em api_key/webhook_secret = manter o atual. Contrato: prd-v2/contrato-api-utmpay-crm.md.
+const NO_STORE = { "Cache-Control": "no-store" };
+const COLUMNS = "enabled, base_url, api_key_enc, webhook_secret_enc, janela_dias, send_without_tracking";
+
+const isMissingTable = (code: string | undefined) => code === "42P01" || code === "PGRST205";
+
+export async function GET() {
+  const auth = await guardPermission("settings.account");
+  if (!auth.ok) return auth.response;
+  const { data, error } = await supabaseAdmin().from("utmpay_config").select(COLUMNS).eq("account_id", auth.ctx.accountId).maybeSingle();
+  if (error) {
+    if (isMissingTable(error.code)) return NextResponse.json(viewUtmpayConfig(null, false, utmpayEventsUrl()), { headers: NO_STORE });
+    console.error("[utmpay-config] GET falhou:", error.code ?? "erro");
+    return NextResponse.json({ error: "Falha ao carregar a configuração do UTMpay" }, { status: 500, headers: NO_STORE });
+  }
+  return NextResponse.json(viewUtmpayConfig((data ?? null) as UtmpayConfigRow | null, true, utmpayEventsUrl()), { headers: NO_STORE });
+}
+
+export async function PUT(request: Request) {
+  const auth = await guardPermission("settings.account");
+  if (!auth.ok) return auth.response;
+  const { accountId, userId } = auth.ctx;
+
+  const raw = (await request.json().catch(() => null)) as unknown;
+  const db = supabaseAdmin();
+  const { data: existing, error: readError } = await db.from("utmpay_config").select(COLUMNS).eq("account_id", accountId).maybeSingle();
+  if (readError) {
+    if (isMissingTable(readError.code)) return NextResponse.json({ error: "UTMpay indisponível neste ambiente (falta a migration 356).", code: "utmpay_unavailable" }, { status: 409, headers: NO_STORE });
+    return NextResponse.json({ error: "Falha ao carregar a configuração do UTMpay" }, { status: 500, headers: NO_STORE });
+  }
+  const current = (existing ?? null) as UtmpayConfigRow | null;
+
+  const checked = validateUtmpayConfigBody(raw, current);
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 422, headers: NO_STORE });
+  const body = checked.value;
+
+  let apiKey: ReturnType<typeof resolveSecretForWrite>;
+  let webhookSecret: ReturnType<typeof resolveSecretForWrite>;
+  try {
+    apiKey = resolveSecretForWrite(body.api_key, current?.api_key_enc);
+    webhookSecret = resolveSecretForWrite(body.webhook_secret, current?.webhook_secret_enc);
+  } catch {
+    return NextResponse.json({ error: "Não foi possível cifrar o segredo (ENCRYPTION_KEY inválida)" }, { status: 500, headers: NO_STORE });
+  }
+  if (!apiKey.ok || !webhookSecret.ok) return NextResponse.json({ error: "Segredo deve ser texto" }, { status: 422, headers: NO_STORE });
+
+  const row = {
+    account_id: accountId,
+    enabled: body.enabled,
+    base_url: body.base_url,
+    api_key_enc: apiKey.value,
+    webhook_secret_enc: webhookSecret.value,
+    janela_dias: body.janela_dias,
+    send_without_tracking: body.send_without_tracking,
+    updated_at: new Date().toISOString(),
+    updated_by: userId,
+  };
+  const { error } = await db.from("utmpay_config").upsert(row, { onConflict: "account_id" });
+  if (error) {
+    console.error("[utmpay-config] PUT falhou:", error.code ?? "erro");
+    return NextResponse.json({ error: "Falha ao salvar a configuração do UTMpay" }, { status: 500, headers: NO_STORE });
+  }
+  resetUtmpayConfigCache(accountId);
+
+  // Auditoria SEM segredos: só o que mudou (ligado, endereço, janela, política) e se as chaves foram trocadas.
+  await logAuditEvent({
+    accountId,
+    eventType: "updated",
+    resourceType: "utmpay_config",
+    resourceId: accountId,
+    resourceLabel: "UTMpay",
+    action: "utmpay.config_updated",
+    summary: `Configuração do UTMpay ${current ? "alterada" : "criada"}${body.enabled ? "" : " (desligado)"}`,
+    changes: {
+      enabled: { before: current?.enabled ?? null, after: body.enabled },
+      janela_dias: { before: current?.janela_dias ?? null, after: body.janela_dias },
+      send_without_tracking: { before: current?.send_without_tracking ?? null, after: body.send_without_tracking },
+    },
+    metadata: { api_key_changed: apiKey.value !== (current?.api_key_enc ?? null), webhook_secret_changed: webhookSecret.value !== (current?.webhook_secret_enc ?? null) },
+  });
+  return NextResponse.json(viewUtmpayConfig(row as UtmpayConfigRow, true, utmpayEventsUrl()), { headers: NO_STORE });
+}

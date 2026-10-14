@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   // D-02: resposta do compare-and-set do marcador "chamada ao provedor iniciada" (UPDATE ... RETURNING id em disp_message_queue).
   marker: { rows: [{ id: 'item' }] as Array<{ id: string }> | null, error: null as null | { code?: string; message: string } },
   updatesWithFilters: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  // UTMpay (migration 356): resultado da troca de link por envio (padrão: sem rastreio).
+  trackText: vi.fn(),
+  trackVars: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -72,6 +75,11 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   sendTextMessage: mocks.send,
 }));
 vi.mock('@/lib/disparador/dispatch-ai', () => ({ generateDispatchAiText: mocks.ai }));
+vi.mock('@/lib/utmpay/dispatch', () => ({
+  trackDispatchText: mocks.trackText,
+  trackDispatchVariables: mocks.trackVars,
+  UTMPAY_UNAVAILABLE_ERROR: 'Rastreamento (UTMpay) indisponível; nada foi enviado ao cliente e o item será tentado novamente',
+}));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
 import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
@@ -98,6 +106,8 @@ describe('queue provider outcomes', () => {
     mocks.claimed = true;
     mocks.confirmationError = null;
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
     mocks.autoBlacklist
       .mockReset()
@@ -141,6 +151,32 @@ describe('queue provider outcomes', () => {
     const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
     expect(result).toMatchObject({ outcome: 'sent' });
     expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
+  it('UTMpay: texto livre sai com o link rastreado (a URL da operação vira o destino) e o log guarda o texto que saiu', async () => {
+    mocks.trackText.mockResolvedValue({ kind: 'tracked', text: 'Pague em https://utm.exemplo.com/s/item' });
+    const linked: QueueItem = { ...item, contact_id: 'contact', mensagem_final: 'Pague em https://ddmacordos.com/p', contacts: { phone: '5511999999999' } };
+    const result = await processQueueItem(linked, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.trackText).toHaveBeenCalledWith(expect.anything(), undefined, expect.objectContaining({ id: 'item' }), 'Pague em https://ddmacordos.com/p');
+    expect(mocks.trackVars).not.toHaveBeenCalled();
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ text: 'Pague em https://utm.exemplo.com/s/item' }));
+    expect(mocks.rpc).toHaveBeenCalledWith(expect.stringMatching(/confirm_dispatch_item_sent|mark_queue_item_sent/), expect.objectContaining({ p_mensagem: 'Pague em https://utm.exemplo.com/s/item' }));
+  });
+  it('UTMpay fora do ar: o link cru NÃO sai; o item volta com erro retentável e claro (nada enviado)', async () => {
+    mocks.trackText.mockResolvedValue({ kind: 'failed' });
+    const linked: QueueItem = { ...item, contact_id: 'contact', mensagem_final: 'Pague em https://ddmacordos.com/p', contacts: { phone: '5511999999999' } };
+    const result = await processQueueItem(linked, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toEqual({ outcome: 'deferred', reason: 'utmpay_unavailable' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && /UTMpay/.test(String(u.erro)))).toBe(true);
+  });
+  it('UTMpay: template Meta usa o caminho das VARIÁVEIS (não o do texto) — caminhos separados', async () => {
+    mocks.trackVars.mockResolvedValue({ kind: 'failed' });
+    const tpl: QueueItem = { ...item, contact_id: 'contact', contacts: { phone: '5511999999999' }, template_name: 'cobranca', template_variables: ['Maria', 'https://ddmacordos.com/p'] };
+    const result = await processQueueItem(tpl, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toEqual({ outcome: 'deferred', reason: 'utmpay_unavailable' });
+    expect(mocks.trackVars).toHaveBeenCalledWith(expect.anything(), undefined, expect.objectContaining({ id: 'item' }), ['Maria', 'https://ddmacordos.com/p']);
+    expect(mocks.trackText).not.toHaveBeenCalled();
   });
   it('falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout): a mensagem não saiu → transitório com retry (P0-3)', async () => {
     for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']) {
@@ -359,6 +395,8 @@ describe('janela de 24h (131047)', () => {
   beforeEach(() => {
     mocks.claimed = true;
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name === 'claim_dispatch_item' ? true : null,
       error: null,
@@ -385,6 +423,8 @@ describe('janela de envio: sem rajada na reabertura (relógio de janela)', () =>
   };
   beforeEach(() => {
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name === 'claim_dispatch_item' ? true : null,
@@ -437,6 +477,8 @@ describe('opções do agendador do cron', () => {
   const campaign = { id: 'campaign', status: 'em_execucao' };
   beforeEach(() => {
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name.startsWith('claim_dispatch_item') ? true : null,
@@ -493,10 +535,14 @@ describe('opções do agendador do cron', () => {
 
   it('F8: outro erro transitório continua consumindo tentativa e vira permanente no limite', async () => {
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     mocks.send.mockReset().mockRejectedValue(new MetaApiError('param (code 99999)', 99999, 400));
     await processQueueItem({ ...item, tentativas: 1 }, campaign);
     expect(mocks.updates.some((u) => u.status === 'erro' && u.tentativas === 2)).toBe(true);
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     await processQueueItem({ ...item, tentativas: 4 }, campaign);
     expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.tentativas === 5)).toBe(true);
   });
@@ -596,6 +642,8 @@ describe('D-02: marcador "chamada ao provedor iniciada" (migration 332)', () => 
     mocks.marker.error = null;
     mocks.updatesWithFilters.length = 0;
     mocks.updates.length = 0;
+    mocks.trackText.mockReset().mockResolvedValue({ kind: 'unchanged' });
+    mocks.trackVars.mockReset().mockResolvedValue({ kind: 'unchanged' });
     resetProviderCallMarkerState();
     resetShutdownGate();
     mocks.claimed = true;

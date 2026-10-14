@@ -13,7 +13,7 @@ import "server-only";
 // Segurança: a URL leva token + CPF — NUNCA vai para log, erro ou resposta; erros são genéricos.
 import { checkRateLimit } from "@/lib/rate-limit";
 
-import { DebtSourceError, normalizeDocument, type DebtLookup, type DebtSource, type DebtStatus } from "./debt-source";
+import { DebtSourceError, normalizeDocument, parseMoneyToCents, type DebtLookup, type DebtSource, type DebtStatus } from "./debt-source";
 
 export const DDM_LOCALIZA_URL = "https://www.ddmacordos.com/calc/localiza_dev.php";
 export const DDM_TIMEOUT_MS = 10_000;
@@ -119,4 +119,48 @@ export async function listDdmDebts(cpf: unknown, options: DdmSourceOptions = {})
 /** Teto de consultas à DDM por conta (compartilhado entre processos pelo rate limiter): 120/min por padrão. */
 export function ddmAllowance(accountId: string, perMinute = 120): () => Promise<boolean> {
   return async () => (await checkRateLimit(`billing:ddm:${accountId}`, { limit: perMinute, windowMs: 60_000 })).success;
+}
+
+// ---------- Situação do acordo (métrica "fechou/pagou" do UTMpay, 14/10) ----------
+export interface DdmSituation {
+  /** Texto da situação como a DDM devolve (primeiro preenchido). */
+  situacao_acordo: string | null;
+  /** Soma do valor em aberto das dívidas ativas (reais); null se a DDM não informou. */
+  valor_em_aberto: number | null;
+  instituicao: string | null;
+  /** A DDM confirma que NÃO há mais nada a pagar (lista vazia, ou toda dívida listada com situação paga/quitada). */
+  settled: boolean;
+}
+
+const SETTLED_PATTERN = /\b(pag[oa]s?|quitad[oa]s?|liquidad[oa]s?)\b/i;
+
+/**
+ * Função pura: resposta de `localiza_dev` → situação do CPF. Campos lidos: `situacao_acordo`, `valor_em_aberto`, `instituicao`
+ * (cai em `apelido`/`sistema`). Lista vazia = sem dívida ativa = quitada (a mesma premissa do dono usada pela régua; A CONFIRMAR com a DDM).
+ */
+export function interpretSituation(body: unknown): DdmSituation {
+  if (!Array.isArray(body)) throw new DebtSourceError("Resposta inesperada da DDM", false);
+  if (body.length === 0) return { situacao_acordo: null, valor_em_aberto: 0, instituicao: null, settled: true };
+  const rows = body.filter((d): d is Record<string, unknown> => !!d && typeof d === "object");
+  const text = (v: unknown) => {
+    const s = String(v ?? "").trim();
+    return s ? s : null;
+  };
+  const situacoes = rows.map((r) => text(r.situacao_acordo));
+  let cents: number | null = null;
+  for (const r of rows) {
+    const c = parseMoneyToCents(r.valor_em_aberto);
+    if (c !== null) cents = (cents ?? 0) + c;
+  }
+  return {
+    situacao_acordo: situacoes.find((s) => s !== null) ?? null,
+    valor_em_aberto: cents === null ? null : cents / 100,
+    instituicao: rows.map((r) => text(r.instituicao) ?? text(r.apelido) ?? text(r.Apelido) ?? text(r.sistema)).find((s) => s !== null) ?? null,
+    settled: situacoes.length > 0 && situacoes.every((s) => s !== null && SETTLED_PATTERN.test(s)),
+  };
+}
+
+/** Consulta pontual (a mesma da régua e da IA) e devolve a situação do CPF. Erros genéricos, sem URL/token/CPF. */
+export async function fetchDdmSituation(cpf: unknown, options: DdmSourceOptions = {}): Promise<DdmSituation> {
+  return interpretSituation(await fetchLocaliza(cpf, options));
 }

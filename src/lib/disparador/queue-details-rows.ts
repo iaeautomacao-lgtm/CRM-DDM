@@ -2,6 +2,7 @@
 // exportação assíncrona (export-jobs.ts). Movido da rota SEM mudar regra.
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
+import { loadItemResults, type ItemResult } from "@/lib/utmpay/stats";
 
 export interface QueueDetailRow {
   id: string;
@@ -20,6 +21,11 @@ export interface QueueDetailRow {
   // caminhos de escrita (ver processQueue.ts), então fica parado no
   // valor de inserção da linha e não serve pra "quando isso aconteceu".
   data_hora: string | null;
+  /** UTMpay (migration 356) — só quando o envio tem link rastreado. `pagou` só depois da confirmação na API DDM. */
+  clicou?: boolean;
+  fechou?: boolean;
+  pagou?: boolean;
+  rastreio?: ItemResult["rastreio"];
 }
 
 export type QueueRow = {
@@ -106,3 +112,21 @@ export const SELECT_COLUMNS =
 // seguem funcionando mesmo sem a coluna.
 export const SELECT_COLUMNS_REPLIED = `${SELECT_COLUMNS}, replied_at`;
 
+
+/**
+ * UTMpay (migration 356): acrescenta `clicou`/`fechou`/`pagou` e `rastreio` às linhas cujo envio tem link rastreado (tid = id do item).
+ * Sem a migration, sem link ou em qualquer falha, as linhas voltam como estavam (nunca derruba o detalhamento).
+ */
+export async function attachUtmpayResults(rows: QueueDetailRow[], accountId: string): Promise<QueueDetailRow[]> {
+  if (rows.length === 0) return rows;
+  try {
+    const results = await loadItemResults(supabaseAdmin(), accountId, rows.map((r) => r.id));
+    if (results.size === 0) return rows;
+    return rows.map((r) => {
+      const res = results.get(r.id);
+      return res ? { ...r, clicou: res.clicou, fechou: res.fechou, pagou: res.pagou, rastreio: res.rastreio } : r;
+    });
+  } catch {
+    return rows;
+  }
+}
