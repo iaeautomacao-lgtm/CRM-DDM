@@ -18,7 +18,7 @@ export default function MinhasChavesPage() {
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
-        Voltar para o Intelligence
+        Voltar para o Acordito
       </Link>
       <ApiKeysSettings personal />
     </PageBody>

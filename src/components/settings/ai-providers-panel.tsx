@@ -37,7 +37,7 @@ export function AiProvidersPanel() {
       <SettingsPanelHead
         className="mb-0"
         title="Provedores de IA"
-        description="Liga ou desliga a IA da conta e define o provedor e a chave usados pelos agentes, pelas respostas automáticas e pelo DDM Intelligence. Só o proprietário da conta altera."
+        description="Liga ou desliga a IA da conta e define o provedor e a chave usados pelos agentes, pelas respostas automáticas e pelo Acordito. Só o proprietário da conta altera."
       />
 
       <form

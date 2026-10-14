@@ -14,6 +14,7 @@ import { ToolsSettings } from '@/components/settings/tools-settings';
 import { AiProvidersPanel } from '@/components/settings/ai-providers-panel';
 import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
 import { SECTION_META, type IntegrationTab } from '@/components/settings/settings-sections';
+import { AcorditoSettingsSection } from '@/components/settings/acordito-settings-section';
 import { WebhooksSettings } from './webhooks-settings';
 
 const PANELS: Record<IntegrationTab, () => ReactNode> = {
@@ -21,7 +22,14 @@ const PANELS: Record<IntegrationTab, () => ReactNode> = {
   secrets: () => <SecretsSettings />,
   tools: () => <ToolsSettings />,
   webhooks: () => <WebhooksSettings />,
-  ai: () => <AiProvidersPanel />,
+  ai: () => (
+    <>
+      <AiProvidersPanel />
+      <div className="mt-8">
+        <AcorditoSettingsSection />
+      </div>
+    </>
+  ),
   'api-docs': () => <ApiDocsPanel />,
 };
 

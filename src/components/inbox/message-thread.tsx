@@ -397,6 +397,12 @@ export function MessageThread({
     [transferConvId, transferAgentId, transferTeamId],
   );
 
+  // Id da última mensagem do cliente: o Acordito pede sugestões novas quando ele muda.
+  const lastCustomerMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].sender_type === "customer") return messages[i].id;
+    return null;
+  }, [messages]);
+
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
     // Webchat não tem janela de 24h da Meta: o atendente responde quando
@@ -1916,6 +1922,7 @@ export function MessageThread({
         onClearReply={() => setReplyTo(null)}
         recall={recall}
         onRecallHandled={handleRecallHandled}
+        lastCustomerMessageId={lastCustomerMessageId}
       />
 
       <TemplatePicker
