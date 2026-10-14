@@ -1,0 +1,73 @@
+name: E2E das telas
+
+# SÓ MANUAL (Actions → "E2E das telas" → Run workflow). Não roda em PR nem em push.
+# Abre as telas principais com cada papel contra o ambiente da V2 e falha se alguma quebrar ou se o acesso por papel divergir.
+# Somente leitura. Credenciais e alvo vêm de GitHub Secrets (ver docs/e2e-telas.md); nada é gravado no repositório.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL do ambiente (vazio = secret E2E_BASE_URL, ex.: https://omnicrmv2dev.grupoddm.ia.br)"
+        required: false
+        default: ""
+      roles:
+        description: "Papéis a testar, separados por vírgula (vazio = todos): proprietario,admin,supervisor,operador"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-telas
+  cancel-in-progress: false
+
+jobs:
+  telas:
+    name: Telas por papel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || secrets.E2E_BASE_URL }}
+      E2E_ROLES: ${{ inputs.roles }}
+      E2E_PROPRIETARIO_EMAIL: ${{ secrets.E2E_PROPRIETARIO_EMAIL }}
+      E2E_PROPRIETARIO_PASSWORD: ${{ secrets.E2E_PROPRIETARIO_PASSWORD }}
+      E2E_PROPRIETARIO_TOTP_SECRET: ${{ secrets.E2E_PROPRIETARIO_TOTP_SECRET }}
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      E2E_ADMIN_TOTP_SECRET: ${{ secrets.E2E_ADMIN_TOTP_SECRET }}
+      E2E_SUPERVISOR_EMAIL: ${{ secrets.E2E_SUPERVISOR_EMAIL }}
+      E2E_SUPERVISOR_PASSWORD: ${{ secrets.E2E_SUPERVISOR_PASSWORD }}
+      E2E_SUPERVISOR_TOTP_SECRET: ${{ secrets.E2E_SUPERVISOR_TOTP_SECRET }}
+      E2E_OPERADOR_EMAIL: ${{ secrets.E2E_OPERADOR_EMAIL }}
+      E2E_OPERADOR_PASSWORD: ${{ secrets.E2E_OPERADOR_PASSWORD }}
+      E2E_OPERADOR_TOTP_SECRET: ${{ secrets.E2E_OPERADOR_TOTP_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Instalar o Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Rodar as telas
+        run: npm run e2e:telas
+
+      - name: Relatório HTML, capturas e traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-telas-relatorio
+          path: |
+            e2e/report
+            e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14
