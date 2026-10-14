@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, RefreshCw } from "lucide-react";
 
-import { AcorditoMark } from "@/components/ddm/acordito";
+import { AcorditoMark, AcorditoMascote } from "@/components/ddm/acordito";
 import type { AcorditoState } from "@/hooks/use-acordito-suggestions";
 import type { AcorditoSuggestion } from "@/lib/acordito/client";
 import { cn } from "@/lib/utils";
@@ -82,7 +82,9 @@ export function AcorditoPanel({
         <div className="mt-1.5" aria-live="polite">
           {state.status === "error" ? (
             <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
-              <span>{state.message}</span>
+              {/* Desligado, sem IA ou sem cota: o mascote acompanha o aviso (não é falha da tela). */}
+              {state.code !== "unknown" && <AcorditoMascote width={40} />}
+              <span className="min-w-0 flex-1">{state.message}</span>
               {state.code === "unknown" && (
                 <button type="button" onClick={onRegenerate} className="font-medium text-primary-text hover:underline">
                   Tentar de novo

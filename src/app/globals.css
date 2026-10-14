@@ -79,6 +79,8 @@
   --color-warning-fill: #e8a100;
   --color-danger-fill: #d8362f;
   --color-info-fill: #1f7ae0;
+  /* Acento da marca do Acordito (laranja do mascote): só preenchimento/anel, nunca texto. */
+  --color-acordito-accent: var(--acordito-accent);
   --color-neutral-soft: var(--neutral-soft);
   --color-bubble-in: var(--bubble-in);
   --color-bubble-in-border: var(--bubble-in-border);
@@ -388,6 +390,34 @@ html[data-mode="light"][data-theme] {
   --primary-soft-2: color-mix(in srgb, var(--primary) 24%, white);
   --bubble-out: color-mix(in srgb, var(--primary) 7%, white);
   --bubble-out-border: color-mix(in srgb, var(--primary) 18%, white);
+}
+
+/* Acordito: laranja do mascote (#FF5706) no claro; um tom mais claro no escuro para o anel não sumir no fundo. */
+:root,
+html[data-mode="dark"][data-theme] {
+  --acordito-accent: #ff7a3d;
+}
+html[data-mode="light"][data-theme] {
+  --acordito-accent: #ff5706;
+}
+
+/* "Acordito está digitando": três pontos que sobem em sequência (parados com movimento reduzido). */
+@keyframes acordito-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+.acordito-typing i {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--acordito-accent);
+  animation: acordito-dot 1.1s ease-in-out infinite;
+}
+.acordito-typing i:nth-child(2) { animation-delay: 0.15s; }
+.acordito-typing i:nth-child(3) { animation-delay: 0.3s; }
+@media (prefers-reduced-motion: reduce) {
+  .acordito-typing i { animation: none; opacity: 0.8; }
 }
 
 html[data-mode="dark"][data-theme="ddm"] {
