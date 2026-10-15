@@ -22,6 +22,7 @@ import { renderMetaTemplateBody } from '@/lib/disparador/campaign-message';
 import { findRedChannels, RED_QUALITY_CODE, redBlockedMessage } from '@/lib/disparador/red-quality-gate';
 import { phoneKey } from '@/lib/disparador/phone-key';
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
+import { ownerForOpen } from '@/lib/api/v1/contact-owner';
 import { isRecipientNotAllowedError, isValidE164, phoneVariants, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
 import { MetaApiError, sendTemplateMessage, sendTextMessage } from '@/lib/whatsapp/meta-api';
 import { sendWahaTextMessage } from '@/lib/whatsapp/waha-api';
@@ -269,6 +270,8 @@ export interface OpenResult {
   conversation: ConversationView;
   created: boolean;
   transferred: boolean;
+  /** `true` quando nenhum atendente/equipe foi pedido e a conversa foi para o DONO do contato (carteira fixa). */
+  via_owner: boolean;
   message: SentMessage | null;
 }
 
@@ -287,6 +290,7 @@ export async function openConversation(
   let conversation: ConversationRow | null = null;
   let created = false;
   let transferred = false;
+  let viaOwner = false;
   const ensure = async (): Promise<string> => {
     if (conversation) return conversation.id;
     conversation = await findOpenConversation(db, a.accountId, contact.id, channel);
@@ -313,11 +317,16 @@ export async function openConversation(
         transferred = result.changed;
       }
     } else {
-      if (input.assigneeId) {
-        const agent = await validateAssignee(db, a.accountId, input.assigneeId);
+      let assignee = input.assigneeId;
+      if (assignee) {
+        const agent = await validateAssignee(db, a.accountId, assignee);
         await guardPausedAssignee(db, agent, input.confirmPaused);
+      } else if (!input.teamId) {
+        // Carteira fixa (fase 1): sem atendente nem equipe pedidos, vai para o dono do contato (ativo e fora de pausa); senão, fila.
+        assignee = await ownerForOpen(db, a.accountId, contact.id);
+        viaOwner = assignee !== null;
       }
-      conversation = await createConversation(db, a.accountId, channel, contact.id, input.assigneeId, input.teamId);
+      conversation = await createConversation(db, a.accountId, channel, contact.id, assignee, input.teamId);
       created = true;
     }
     return conversation.id;
@@ -340,7 +349,7 @@ export async function openConversation(
   }
   const final = conversation as ConversationRow | null;
   if (!final) throw unavailable('abrir a conversa');
-  return { conversation: toConversationView(final), created, transferred, message };
+  return { conversation: toConversationView(final), created, transferred, via_owner: viaOwner, message };
 }
 
 export { loadConversation };

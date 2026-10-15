@@ -59,6 +59,7 @@ export async function POST(request: Request) {
         {
           conversation: { ...result.conversation, created: result.created },
           transferred: result.transferred,
+          via_owner: result.via_owner,
           ...(result.message ? { message: result.message } : {}),
         },
         result.created ? 201 : 200,
