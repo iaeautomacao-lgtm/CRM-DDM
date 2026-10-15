@@ -207,3 +207,69 @@ describe('ConfirmBatcher', () => {
     expect(calls).toEqual(['confirm_dispatch_item_sent', 'mark_queue_item_sent', 'mark_queue_item_sent']);
   });
 });
+
+describe('ChannelClaimer em modo worker (claim_dispatch_batch_rated)', () => {
+  const item = (id: string) => ({ id, campaign_id: 'c1', session_id: 's1' }) as never;
+  const make = (responses: Array<Array<{ item: unknown; outcome: string }>>, extra: Record<string, unknown> = {}) => {
+    const queue = [...responses];
+    const rpc = vi.fn(async (_fn: string, _args: Record<string, unknown>) => ({ data: queue.shift() ?? [{ item: null, outcome: 'empty' }], error: null }));
+    const lost: string[] = [];
+    const claimer = new ChannelClaimer({
+      db: { rpc } as never,
+      defaultMaxInFlight: () => 100,
+      rated: { owner: 'w1', rateFor: (id) => (id === 's1' ? 80 : undefined), onLostOwnership: (id) => lost.push(id) },
+      ...extra,
+    });
+    return { rpc, claimer, lost };
+  };
+
+  it('chama a variante rated com dono, taxa do número e vagas; entrega os itens um a um', async () => {
+    const { rpc, claimer } = make([[{ item: item('i1'), outcome: 'claimed' }, { item: item('i2'), outcome: 'claimed' }]]);
+    expect((await claimer.next('s1', 'c1', 50))?.item).toMatchObject({ id: 'i1' });
+    expect((await claimer.next('s1', 'c1', 50))?.item).toMatchObject({ id: 'i2' });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('claim_dispatch_batch_rated', { p_session_id: 's1', p_n: 50, p_campaign_ids: ['c1'], p_default_max_in_flight: 100, p_rate: 80, p_owner: 'w1' });
+  });
+
+  it('número sem limite/s manda p_rate null; sem o modo rated o claim é o de sempre (sem p_rate/p_owner)', async () => {
+    const a = make([[{ item: item('i1'), outcome: 'claimed' }]]);
+    await a.claimer.next('s9', 'c1', 10);
+    expect(a.rpc.mock.calls[0][1]).toMatchObject({ p_rate: null, p_owner: 'w1' });
+    const rpc = vi.fn(async () => ({ data: [{ item: item('i1') }], error: null }));
+    const plain = new ChannelClaimer({ db: { rpc } as never, defaultMaxInFlight: () => undefined });
+    await plain.next('s1', 'c1', 10);
+    expect(rpc).toHaveBeenCalledWith('claim_dispatch_batch', { p_session_id: 's1', p_n: 10, p_campaign_ids: ['c1'], p_default_max_in_flight: null });
+  });
+
+  it('throttled (balde sem ficha): a ficha vira no-op SEM esgotar o número; a próxima tentativa volta a pedir', async () => {
+    const { rpc, claimer } = make([[{ item: null, outcome: 'throttled' }], [{ item: item('i1'), outcome: 'claimed' }]]);
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    expect((await claimer.next('s1', 'c1', 10))?.item).toMatchObject({ id: 'i1' });
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it('not_owner: esgota o número no round e avisa que o lease foi perdido (1 vez); nada mais é pedido', async () => {
+    const { rpc, claimer, lost } = make([[{ item: null, outcome: 'not_owner' }]]);
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    expect(lost).toEqual(['s1']);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('empty: esgota (nada vencido/cota/limite), sem avisar perda de dono', async () => {
+    const { rpc, claimer, lost } = make([[{ item: null, outcome: 'empty' }]]);
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    expect(lost).toEqual([]);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('erro da RPC sobe (o worker trata: migration 368 ausente ou falha transitória)', async () => {
+    const claimer = new ChannelClaimer({
+      db: { rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'function not found' } }) } as never,
+      defaultMaxInFlight: () => undefined,
+      rated: { owner: 'w1', rateFor: () => 80 },
+    });
+    await expect(claimer.next('s1', 'c1', 10)).rejects.toThrow('function not found');
+  });
+});

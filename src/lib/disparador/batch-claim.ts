@@ -82,9 +82,11 @@ export interface ClaimedItem {
   blacklistLookup: BlacklistLookup | undefined;
 }
 
+type RefillResult = 'ok' | 'throttled';
+
 interface SlotState {
   buffer: ClaimedItem[];
-  pending: Promise<void> | null;
+  pending: Promise<RefillResult> | null;
   exhausted: boolean;
 }
 
@@ -95,6 +97,17 @@ export interface ChannelClaimerDeps {
   /** Pré-carrega a blacklist dos itens do lote (tick-preload). */
   preload?: (items: QueueItem[]) => Promise<BlacklistLookup | undefined>;
   maxBatch?: number;
+  /**
+   * Modo do WORKER (migration 368): o claim confere o dono do número na mesma transação (fencing) e usa o balde durável por número.
+   * Ausente = o claim de sempre (claim_dispatch_batch), que é o do cron.
+   */
+  rated?: {
+    owner: string;
+    /** Limite/s efetivo do número (qualidade, rampa, cooldown, manual); undefined/0 = sem balde. */
+    rateFor: (channelId: string) => number | undefined;
+    /** O número deixou de ser deste worker (lease perdido ou devolvido ao cron): parar de enviá-lo. */
+    onLostOwnership?: (channelId: string) => void;
+  };
 }
 
 /**
@@ -126,23 +139,40 @@ export class ChannelClaimer {
           state.pending = null;
         });
       }
-      await state.pending;
+      // 'throttled' (balde sem ficha agora): a ficha do agendador vira no-op e o item continua vencido para a próxima rodada; nunca "esgotado".
+      if ((await state.pending) === 'throttled') return state.buffer.shift() ?? null;
     }
   }
 
-  private async refill(state: SlotState, channelId: string, campaignId: string, free: number): Promise<void> {
+  private async refill(state: SlotState, channelId: string, campaignId: string, free: number): Promise<RefillResult> {
     const n = Math.min(this.deps.maxBatch ?? BATCH_CLAIM_MAX, Math.max(1, Math.floor(free)));
-    const { data, error } = await timedClaim(() => this.deps.db.rpc("claim_dispatch_batch", {
-      p_session_id: channelId,
-      p_n: n,
-      p_campaign_ids: [campaignId],
-      p_default_max_in_flight: this.deps.defaultMaxInFlight(channelId) ?? null,
-    }));
+    const rated = this.deps.rated;
+    const { data, error } = await timedClaim(() =>
+      rated
+        ? this.deps.db.rpc("claim_dispatch_batch_rated", {
+            p_session_id: channelId,
+            p_n: n,
+            p_campaign_ids: [campaignId],
+            p_default_max_in_flight: this.deps.defaultMaxInFlight(channelId) ?? null,
+            p_rate: rated.rateFor(channelId) ?? null,
+            p_owner: rated.owner,
+          })
+        : this.deps.db.rpc("claim_dispatch_batch", {
+            p_session_id: channelId,
+            p_n: n,
+            p_campaign_ids: [campaignId],
+            p_default_max_in_flight: this.deps.defaultMaxInFlight(channelId) ?? null,
+          }),
+    );
     if (error) throw new Error(error.message);
-    const items = ((data ?? []) as Array<{ item: QueueItem }>).map((row) => row.item).filter(Boolean);
+    const rows = (data ?? []) as Array<{ item: QueueItem | null; outcome?: string }>;
+    const items = rows.map((row) => row.item).filter((item): item is QueueItem => !!item);
     if (items.length === 0) {
+      const outcome = rows[0]?.outcome;
+      if (rated && outcome === "throttled") return "throttled";
+      if (rated && outcome === "not_owner") rated.onLostOwnership?.(channelId);
       state.exhausted = true;
-      return;
+      return "ok";
     }
     this.batches++;
     this.claimedTotal += items.length;
@@ -153,6 +183,7 @@ export class ChannelClaimer {
       blacklistLookup = undefined; // cada envio consulta a blacklist (falha fechada lá)
     }
     for (const item of items) state.buffer.push({ item, blacklistLookup });
+    return "ok";
   }
 
   /** Itens reivindicados que não chegaram a ser entregues ao envio: voltam a 'agendado'. */
