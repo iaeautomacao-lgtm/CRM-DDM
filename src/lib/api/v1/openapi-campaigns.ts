@@ -1,7 +1,7 @@
 // OpenAPI da LEITURA de campanhas (Onda 1, bloco A1): lista, detalhe enriquecido e status por destinatário.
 // Mesclado em openapi.ts (get da lista, propriedades do detalhe, rota de recipients, schemas e guia), no padrão de
 // openapi-extract.ts e openapi-webhooks.ts. Sem segredo: só contrato. Desenho: prd-v2/api-onda1-desenho.md.
-import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES } from './campaign-api';
+import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES } from './campaign-api-constants';
 
 type Json = Record<string, unknown>;
 

@@ -9,21 +9,19 @@ import { loadChannelIdentities } from '@/lib/disparador/channel-label';
 import { phoneKey } from '@/lib/disparador/phone-key';
 import { loadCampaignFunnel, loadItemResults, type FunnelView, type ItemResult } from '@/lib/utmpay/stats';
 
+import {
+  CAMPAIGN_SOURCES,
+  CAMPAIGN_STATUSES,
+  RECIPIENT_STATUSES,
+  type CampaignStatus,
+  type RecipientStatus,
+} from '@/lib/api/v1/campaign-api-constants';
+export * from '@/lib/api/v1/campaign-api-constants';
+
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
-
-export const CAMPAIGN_STATUSES = ['rascunho', 'agendado', 'preparando', 'em_execucao', 'pausada', 'encerrada'] as const;
-export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
-export const CAMPAIGN_SOURCES = ['api_v1', 'dashboard'] as const;
-
-export const CAMPAIGN_LIST_DEFAULT = 50;
-export const CAMPAIGN_LIST_MAX = 200;
-export const RECIPIENTS_DEFAULT = 100;
-export const RECIPIENTS_MAX = 500;
 
 // ── Status por destinatário ────────────────────────────────────────────────
 
-export const RECIPIENT_STATUSES = ['queued', 'paused', 'sending', 'sent', 'delivered', 'read', 'error', 'blocked', 'cancelled'] as const;
-export type RecipientStatus = (typeof RECIPIENT_STATUSES)[number];
 
 /** Status da fila (disp_message_queue.status) → enum da API (estado ATUAL do destinatário, não cumulativo). */
 const QUEUE_TO_API: Record<string, RecipientStatus> = {
