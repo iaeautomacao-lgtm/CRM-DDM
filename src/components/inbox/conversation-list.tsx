@@ -4,7 +4,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermission } from "@/hooks/use-permission";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -490,6 +490,13 @@ export function ConversationList({
     setFilters({ q: "", canal: null, status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null, tabulacao: null });
   };
 
+  // Seleção estável: o pai troca de função a cada conversa aberta e isso renderizaria todos os itens.
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  });
+  const stableSelect = useCallback((c: Conversation) => onSelectRef.current(c), []);
+
   const renderItems = (items: Conversation[]) => (
     <div className="ddm-stagger flex flex-col">
       {items.map((conv) => (
@@ -497,7 +504,7 @@ export function ConversationList({
           key={conv.id}
           conversation={conv}
           isActive={conv.id === activeConversationId}
-          onSelect={onSelect}
+          onSelect={stableSelect}
           client={conv.client_id ? clientsById.get(conv.client_id) ?? null : null}
           assigneeName={
             conv.assigned_agent_id && conv.assigned_agent_id !== user?.id
@@ -507,7 +514,7 @@ export function ConversationList({
           showStatus={!grouped}
           team={conv.team_id ? teamsById.get(conv.team_id) ?? null : null}
           lineName={linesById.get(conv.config_id ?? conv.channel_id ?? "") ?? null}
-          nowMs={nowMs}
+          nowMs={awaitingReplySince(conv) === null ? 0 : nowMs}
         />
       ))}
     </div>
@@ -1055,7 +1062,9 @@ const QUEUE_DOT: Record<string, string> = {
   closed: "bg-muted-foreground",
 };
 
-function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs }: ConversationItemProps) {
+// Memoizado: um evento em tempo real numa conversa só renderiza o item dela (props estáveis; o relógio só chega
+// para quem está esperando resposta, então o tick de 30 s não mexe nos demais).
+const ConversationItem = memo(function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
@@ -1087,7 +1096,7 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
       onClick={() => onSelect(conversation)}
       aria-current={isActive ? "true" : undefined}
       className={cn(
-        "flex w-full gap-3 border-b border-l-2 border-b-border-soft py-3 pl-3 pr-3.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
+        "flex w-full gap-3 border-b border-l-2 border-b-border-soft py-3 pl-3 pr-3.5 text-left [contain-intrinsic-size:auto_76px] [content-visibility:auto] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
         isActive ? "border-l-primary bg-selected" : "border-l-transparent hover:bg-surface-hover",
       )}
     >
@@ -1197,4 +1206,4 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
       </span>
     </button>
   );
-}
+});
