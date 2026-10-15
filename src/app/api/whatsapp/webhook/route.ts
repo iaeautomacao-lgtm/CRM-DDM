@@ -1030,6 +1030,9 @@ async function processMessage(
     replyPhoneNormalized: senderPhone,
   }).catch(() => {})
 
+  const { tryMentionAgentHandoff } = await import('@/lib/inbox/agent-mention-server')
+  const mentionedHandoff = await tryMentionAgentHandoff({ accountId, conversationId: conversation.id, text: contentType === 'text' ? contentText : null })
+
   // ============================================================
   // Flow runner dispatch.
   //
@@ -1053,7 +1056,7 @@ async function processMessage(
   // Webchat" ligada recebe o convite e conta como tratada (sem fluxo
   // receptivo, sem IA global) — ver src/lib/webchat/campaign.ts.
   // ============================================================
-  const movedToWebchat = await maybeStartCampaignWebchat({
+  const movedToWebchat = mentionedHandoff || Boolean(conversation.requested_agent_id) || await maybeStartCampaignWebchat({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
@@ -1171,9 +1174,9 @@ async function processMessage(
   // manually-imported contacts sending for the first time. We dispatch both
   // so users can pick whichever semantic they want; an automation that
   // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated)
+  if (contactOutcome.wasCreated && !mentionedHandoff)
     automationTriggers.unshift('new_contact_created')
-  if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
+  if (isFirstInboundMessage && !mentionedHandoff) automationTriggers.unshift('first_inbound_message')
   for (const triggerType of automationTriggers) {
     runAutomationsForTrigger({
       accountId,

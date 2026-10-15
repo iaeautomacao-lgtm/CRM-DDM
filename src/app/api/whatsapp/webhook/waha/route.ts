@@ -421,7 +421,7 @@ export async function POST(request: Request) {
       let conversationId: string | null = null
       const { data: convsList, error: convFetchError } = await db
         .from('conversations')
-        .select('id, status, unread_count, assigned_agent_id')
+        .select('id, status, unread_count, assigned_agent_id, requested_agent_id')
         .eq('account_id', accountId)
         .eq('contact_id', contactId!)
         .eq('waha_session', session)
@@ -733,7 +733,9 @@ export async function POST(request: Request) {
 
         // Resposta a campanha com "enviar para o Webchat": convite no lugar
         // do fluxo receptivo (mesma regra do webhook Meta).
-        const movedToWebchat = await maybeStartCampaignWebchat({
+        const { tryMentionAgentHandoff } = await import('@/lib/inbox/agent-mention-server')
+        const mentionedHandoff = await tryMentionAgentHandoff({ accountId, conversationId, text: contentType === 'text' ? contentText : null })
+        const movedToWebchat = mentionedHandoff || Boolean(conversation?.requested_agent_id) || await maybeStartCampaignWebchat({
           accountId,
           userId: config.user_id,
           contactId,
@@ -768,8 +770,8 @@ export async function POST(request: Request) {
           | 'keyword_match'
         )[] = []
         if (!flowConsumed) automationTriggers.push('new_message_received', 'keyword_match')
-        if (contactWasCreated) automationTriggers.unshift('new_contact_created')
-        if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
+        if (contactWasCreated && !mentionedHandoff) automationTriggers.unshift('new_contact_created')
+        if (isFirstInboundMessage && !mentionedHandoff) automationTriggers.unshift('first_inbound_message')
         for (const triggerType of automationTriggers) {
           runAutomationsForTrigger({
             accountId,

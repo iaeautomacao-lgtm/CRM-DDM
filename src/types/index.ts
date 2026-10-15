@@ -71,6 +71,7 @@ export interface AccountMember {
   /** Cap on concurrent open/pending conversations for handoff routing
    *  (migration 116). Null = no limit. */
   max_simultaneous_chats: number | null;
+  mention_alias?: string | null;
 }
 
 /**

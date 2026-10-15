@@ -27,6 +27,7 @@ interface ProfileRow {
   created_at: string;
   team_id: string | null;
   max_simultaneous_chats: number | null;
+  mention_alias: string | null;
 }
 
 export async function GET() {
@@ -38,7 +39,7 @@ export async function GET() {
     const { data, error } = await ctx.supabase
       .from("profiles")
       .select(
-        "user_id, full_name, email, avatar_url, account_role, created_at, team_id, max_simultaneous_chats",
+        "user_id, full_name, email, avatar_url, account_role, created_at, team_id, max_simultaneous_chats, mention_alias",
       )
       .eq("account_id", ctx.accountId)
       .order("created_at", { ascending: true });
@@ -68,6 +69,7 @@ export async function GET() {
           joined_at: row.created_at,
           team_id: row.team_id,
           max_simultaneous_chats: row.max_simultaneous_chats,
+          mention_alias: row.mention_alias,
         },
       ];
     });

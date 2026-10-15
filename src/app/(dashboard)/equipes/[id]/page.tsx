@@ -140,6 +140,7 @@ function MemberRoleSection({
   pendingMemberId,
   onToggle,
   onCapacityChange,
+  onAliasChange,
   readOnly,
 }: {
   title: string;
@@ -154,6 +155,7 @@ function MemberRoleSection({
   onToggle: (userId: string, checked: boolean) => void;
   /** Commits on blur — rawValue is the input's raw text ("" = sem limite). */
   onCapacityChange: (userId: string, rawValue: string) => void;
+  onAliasChange: (userId: string, rawValue: string) => void;
   /** Supervisor (admin) view — same data, add/remove controls hidden. */
   readOnly: boolean;
 }) {
@@ -201,6 +203,18 @@ function MemberRoleSection({
                     {displayName}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{roleMeta.label}</span>
+                  {member.role === 'agent' && (
+                    <Input
+                      key={`alias-${member.user_id}-${member.mention_alias ?? ''}`}
+                      defaultValue={member.mention_alias ?? ''}
+                      onBlur={(e) => onAliasChange(member.user_id, e.target.value)}
+                      placeholder="@apelido"
+                      disabled={readOnly}
+                      aria-label={`Alias de atendimento de ${displayName}`}
+                      title="Apelido exclusivo para o cliente solicitar este operador. Exemplo: @adriana"
+                      className="h-7 w-28 px-2 text-xs"
+                    />
+                  )}
                   <div className="flex shrink-0 items-center gap-1" title="Atend. simultâneos">
                     <Input
                       key={`cap-${member.user_id}-${member.max_simultaneous_chats ?? "none"}`}
@@ -631,6 +645,30 @@ export default function EquipeDetailPage({
     }
   }
 
+  async function handleAliasChange(userId: string, rawValue: string) {
+    const alias = rawValue.trim().replace(/^@/, '').toLowerCase() || null;
+    if (alias && !/^[a-z_][a-z0-9_]{1,31}$/.test(alias)) {
+      toast.error('Alias inválido. Use 2 a 32 caracteres: letras minúsculas, números ou _.');
+      return;
+    }
+    const previous = allAccountMembers.find((m) => m.user_id === userId)?.mention_alias ?? null;
+    if (alias === previous) return;
+    try {
+      const res = await apiFetch(`/api/account/members/${userId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mention_alias: alias }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Falha ao salvar apelido');
+      }
+      setAllAccountMembers((old) => old.map((m) => m.user_id === userId ? { ...m, mention_alias: alias } : m));
+      toast.success(alias ? `Apelido @${alias} salvo` : 'Apelido removido');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao salvar apelido');
+    }
+  }
+
   async function handleCapacityChange(userId: string, rawValue: string) {
     const trimmed = rawValue.trim();
     const newValue = trimmed === "" ? null : Number(trimmed);
@@ -1024,6 +1062,7 @@ export default function EquipeDetailPage({
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
                 onCapacityChange={handleCapacityChange}
+                onAliasChange={handleAliasChange}
                 readOnly={isReadOnly}
               />
 
@@ -1038,6 +1077,7 @@ export default function EquipeDetailPage({
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
                 onCapacityChange={handleCapacityChange}
+                onAliasChange={handleAliasChange}
                 readOnly={isReadOnly}
               />
             </>
