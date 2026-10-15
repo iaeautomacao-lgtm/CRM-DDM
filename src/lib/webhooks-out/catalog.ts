@@ -17,6 +17,9 @@ export const WEBHOOK_EVENTS = [
   "campaign.cancelled", // encerramento manual (tela ou API), com o resumo
   "recipient.status", // destinatário de campanha chegou a um status FINAL: delivered, read, error, blocked ou removed (alto volume)
   "recipient.funnel", // destinatário clicou, fechou acordo ou pagou (link rastreado), com a atribuição (alto volume)
+  "conversation.opened", // uma conversa nasceu (qualquer origem)
+  "conversation.assigned", // atendente e/ou equipe da conversa mudou (inclui atribuição automática)
+  "campaign.reply", // o cliente respondeu a um disparo de campanha (resposta atribuída à campanha)
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -39,6 +42,9 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   "campaign.completed": "Campanha concluída (fila esgotada), com o resumo: total, enviados, entregues, lidos, erros, bloqueados e cancelados.",
   "campaign.cancelled": "Campanha encerrada manualmente (tela ou API), com quem encerrou, o motivo e o resumo.",
   "recipient.status": "Destinatário chegou a um status final: delivered, read, error, blocked ou removed (tirado da campanha). Carrega o telefone; pode ser muito volumoso.",
+  "conversation.opened": "Conversa aberta (cliente que escreve, campanha, API, fluxo ou IA), com contato, telefone, canal, status, equipe e atendente.",
+  "conversation.assigned": "Atendente e/ou equipe da conversa mudou (inclui a atribuição automática), com de/para e quem fez (usuário, API, fluxo, IA ou sistema).",
+  "campaign.reply": "O cliente respondeu a um disparo de campanha: campanha, external_id, destinatário, contato, telefone e o texto da resposta. Carrega dado pessoal.",
   "recipient.funnel": "Destinatário avançou no funil do link rastreado: clicked, closed (fechou acordo) ou paid (pagou, confirmado na DDM), com a atribuição direct, ai ou human. Carrega o telefone; pode ser muito volumoso.",
 };
 
