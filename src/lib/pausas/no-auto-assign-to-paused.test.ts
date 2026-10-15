@@ -163,6 +163,7 @@ const MANUAL: Record<string, string> = {
   "app/api/whatsapp/send/route.ts": "quem responde assume a conversa",
   "lib/conversations/batch.ts": "transferir para mim (lote)",
   "lib/conversations/outcome.ts": "quem tabula assume",
+  "lib/api/v1/conversations-control.ts": "API pública (transferir/atribuir): confirmação no servidor (agent_paused → 409 / confirm_paused)",
 };
 
 describe("cobertura: toda atribuição de conversa está classificada", () => {
