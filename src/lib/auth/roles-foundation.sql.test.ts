@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { presencePermissionsFrom370 } from '@/lib/pausas/presence-permissions-sql'
 
 import { ACCOUNT_ROLES } from './roles'
 import {
@@ -83,6 +84,8 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
       ALTER TABLE wacrm.pipelines ENABLE ROW LEVEL SECURITY; ALTER TABLE wacrm.deals ENABLE ROW LEVEL SECURITY; ALTER TABLE wacrm.pipeline_stages ENABLE ROW LEVEL SECURITY;
     `)
     await db.exec(migration('340_pipeline_archive.sql'))
+    // presence.* (370, pausas de atendimento): o catálogo do código já as tem — só a seção de permissões da 370
+    await db.exec(presencePermissionsFrom370())
   }, 60_000)
   afterAll(async () => {
     await db.close()

@@ -61,6 +61,7 @@ import {
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from "@/lib/webchat/send";
 import { sendSocialMessage } from "@/lib/channels/social";
+import { isAgentPaused } from "@/lib/pausas/availability";
 import {
   sanitizePhoneForMeta,
   phoneVariants,
@@ -1505,7 +1506,8 @@ async function handleAiAutoResponseAttempt(
       }
     }
 
-    if (targetAgentId) {
+    // Dono da linha em pausa não recebe a conversa (migration 370): ela segue pendente, sem dono.
+    if (targetAgentId && !(await isAgentPaused(db as unknown as Parameters<typeof isAgentPaused>[0], targetAgentId))) {
       await db
         .from("conversations")
         .update({

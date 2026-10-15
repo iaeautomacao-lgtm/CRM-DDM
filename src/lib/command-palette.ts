@@ -61,6 +61,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
 
   { label: "Relatórios · Desempenho do atendimento", group: "Relatórios", href: "/relatorios/atendimentos", keywords: "atendimentos" },
   { label: "Relatórios · Sessões de atendentes", group: "Relatórios", href: "/relatorios/agentes", keywords: "agentes login" },
+  { label: "Relatórios · Pausas", group: "Relatórios", href: "/relatorios/pausas", keywords: "pausa almoço intervalo banheiro" },
   { label: "Relatórios · Tabulações", group: "Relatórios", href: "/relatorios/tabulacoes" },
   { label: "Relatórios · Campanhas", group: "Relatórios", href: "/relatorios/envio-em-lote", keywords: "envio em lote disparador" },
   { label: "Relatórios · Exportações", group: "Relatórios", href: "/relatorios/exportacoes", keywords: "downloads" },

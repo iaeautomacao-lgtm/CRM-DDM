@@ -31,7 +31,7 @@ const CONTENT_TYPES: Record<string, string> = {
 const MAX_EXPORT_BYTES = 25 * 1024 * 1024;
 const MAX_BASE64_LENGTH = Math.ceil((MAX_EXPORT_BYTES * 4) / 3) + 4;
 
-const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos", "tabulacoes"] as const;
+const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos", "tabulacoes", "pausas"] as const; // "pausas": relatório de pausas de atendimento (migration 370)
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 interface ExportUploadBody {

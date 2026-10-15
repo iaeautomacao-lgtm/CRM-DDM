@@ -67,6 +67,9 @@ import {
   assignSelf,
 } from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
+import { PausedAgentConfirm } from "@/components/pausas/paused-agent-confirm";
+import { usePausedUserIds } from "@/hooks/use-pauses";
+import type { PausedAgentInfo } from "@/lib/pausas/pause";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
 import { socialWindow } from "@/lib/channels/graph";
@@ -1337,19 +1340,27 @@ export function MessageThread({
     [conversation, user?.id],
   );
 
+  // Atribuir a quem está em pausa: o servidor responde 409 e a pessoa confirma.
+  const [pausedAssign, setPausedAssign] = useState<{ agentId: string; info: PausedAgentInfo } | null>(null);
+  const pausedIds = usePausedUserIds(!!conversation);
+
   const handleAssignChange = useCallback(
-    async (agentId: string | null) => {
+    async (agentId: string | null, confirmPaused = false) => {
       if (!conversation) return;
 
       const assignedAgent = agentId ? profiles.find((p) => p.user_id === agentId) : undefined;
       // Pela rota de transferência: o agente pode passar a conversa para
       // outro mesmo deixando de enxergá-la (RLS), e fica no histórico.
-      const { error } = await transferConversation(
+      const { error, paused } = await transferConversation(
         conversation.id,
-        { agentId },
+        { agentId, confirmPaused },
         assignedAgent?.full_name,
       );
 
+      if (paused && agentId) {
+        setPausedAssign({ agentId, info: paused });
+        return;
+      }
       if (error) {
         console.error("Failed to update assignment:", error);
         toast.error("Falha ao atualizar atribuição");
@@ -1595,6 +1606,7 @@ export function MessageThread({
                       <span className="flex-1">
                         {p.full_name}
                         {p.user_id === user?.id ? " (eu)" : ""}
+                        {pausedIds.has(p.user_id) && <span className="text-muted-foreground"> · em pausa</span>}
                       </span>
                       {isSelected && <Check className="size-3.5 text-primary-text" aria-hidden="true" />}
                     </DropdownMenuItem>
@@ -1750,6 +1762,16 @@ export function MessageThread({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PausedAgentConfirm
+        info={pausedAssign?.info ?? null}
+        onCancel={() => setPausedAssign(null)}
+        onConfirm={() => {
+          const id = pausedAssign?.agentId ?? null;
+          setPausedAssign(null);
+          if (id) void handleAssignChange(id, true);
+        }}
+      />
 
       <TransferDialog
         conversation={transferOpen ? transferTarget : null}

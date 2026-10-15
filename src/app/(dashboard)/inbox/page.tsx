@@ -16,6 +16,7 @@ import type {
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
+import { MyPauseBar } from "@/components/pausas/my-pause-bar";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { ContactSearchPicker } from "@/components/inbox/contact-search-picker";
 import { TemplatePicker, type TemplateSendValues } from "@/components/inbox/template-picker";
@@ -776,6 +777,8 @@ export default function InboxPage() {
           </p>
         </div>
       )}
+
+      <MyPauseBar />
 
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel: Conversation list.

@@ -12,6 +12,7 @@
 // abaixo do teto de max_simultaneous_chats. Away fica de fora. Nada aqui toca na truncagem do engine nem no hasRunLeftNodeSnapshot.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SendListNodeConfig } from '@/lib/flows/types'
+import { filterAvailableAgents } from '@/lib/pausas/availability'
 
 export const PICKER_NO_AGENT_REPLY_ID = '__no_agent'
 export const PICKER_REPLY_PREFIX = 'agent:'
@@ -77,7 +78,8 @@ export async function listOnlineAgents(
     const cutoff = new Date(now - ONLINE_WINDOW_MS).toISOString()
     const { data: online } = await db.from('member_presence').select('user_id').in('user_id', ordered).eq('status', 'online').gte('last_seen_at', cutoff)
     const onlineIds = new Set((online as Array<{ user_id: string }> | null ?? []).map((r) => r.user_id))
-    const eligible = ordered.filter((id) => onlineIds.has(id))
+    // Pausa (migration 370): quem está em pausa não aparece no menu.
+    const eligible = await filterAvailableAgents(db, ordered.filter((id) => onlineIds.has(id)))
     if (eligible.length === 0) return []
 
     const { data: open } = await db.from('conversations').select('assigned_agent_id').in('assigned_agent_id', eligible).in('status', ['open', 'pending'])

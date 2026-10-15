@@ -285,6 +285,17 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("monitoramento/lote/transferir-para-mim", "POST", "supervisor", "monitoring.view_team"),
   pg("monitoramento/lote/finalizar", "POST", "supervisor", "monitoring.view_team"),
   pg("monitoramento/agentes", "GET", "supervisor", "monitoring.view_team"),
+
+  // ── Pausas de atendimento (migration 370) ────────────────
+  pg("pausas/motivos", "GET", "agent", "presence.pause_self"),
+  pg("pausas/motivos", "POST", "admin", "presence.reasons_manage"),
+  pg("pausas/motivos/[id]", "PATCH", "admin", "presence.reasons_manage"),
+  pg("pausas/atual", "GET", "agent", "presence.pause_self"),
+  pg("pausas", "POST", "agent", "presence.pause_self"), // com user_id de outra pessoa a RPC exige presence.pause_others no escopo
+  pg("pausas/retomar", "POST", "agent", "presence.pause_self"),
+  pg("pausas/equipe", "GET", "supervisor", "monitoring.view_team"),
+  pg("pausas/em-pausa", "GET", "agent", "inbox.transfer"),
+  pg("pausas/relatorio", "GET", "supervisor", "reports.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   pg("historico/exports", "POST", "admin", "exports.manage"),
@@ -326,6 +337,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/relatorios/conversas", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios/tabulacoes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios/agentes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
+  { prefix: "/relatorios/pausas", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios", roles: ["owner", "admin"], permission: "reports.view_all", aligned: true },
   { prefix: "/canais", roles: ["owner", "admin"], permission: "channels.manage", aligned: true, note: "decisão 13/10: admin vê Canais" },
   { prefix: "/contacts", roles: ["owner", "admin"], permission: "contacts.import", aligned: true, note: "decisão 13/10: owner+admin; contacts.view é de todos e abriria a tela para quem não deve" },

@@ -137,6 +137,11 @@ export const PERMISSION_CATALOG = {
 
   // ── Funis (decisão do dono 13/10, migration 340): arquivar é o caminho normal (pipelines.manage); excluir em definitivo só o proprietário ──
   "pipelines.delete": { label: "Excluir funil em definitivo", description: "Apagar um funil com etapas e negócios, sem volta (arquivar é o caminho normal).", group: "Funis", scope: "none", roles: ["owner"], ownerOnly: true, dependsOn: ["pipelines.manage"] },
+
+  // ── Pausas de atendimento (decisão do dono 15/10; migration 370) — no FIM do catálogo: a ordem (sort) do banco é a posição aqui ──
+  "presence.pause_self": { label: "Pausar a si mesmo", description: "Entrar em pausa (almoço, banheiro…) e voltar ao atendimento.", group: "Pausas", scope: "own", roles: atLeast("agent"), dependsOn: ["inbox.view"] },
+  "presence.pause_others": { label: "Pausar outros atendentes", description: "Pausar e retomar outros atendentes (supervisor: só das equipes dele; quem vê a organização toda: qualquer um).", group: "Pausas", scope: "team", roles: atLeast("supervisor"), dependsOn: ["presence.pause_self", "monitoring.view_team"] },
+  "presence.reasons_manage": { label: "Gerenciar motivos de pausa", description: "Criar, editar e desativar os motivos de pausa e o tempo máximo de cada um.", group: "Pausas", scope: "none", roles: atLeast("admin") },
 } as const satisfies Record<string, PermissionDef>;
 
 export type Permission = keyof typeof PERMISSION_CATALOG;

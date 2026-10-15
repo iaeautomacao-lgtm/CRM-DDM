@@ -10,6 +10,8 @@ import type { AccountMember } from "@/types";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import { formatFirstResponse, type AgentMetrics } from "@/lib/monitoramento/agent-metrics";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentPauseBadge, AgentPauseMenu } from "@/components/pausas/agent-pause-controls";
+import type { PauseReason, TeamPause } from "@/lib/pausas/pause";
 import { ConversationCard } from "./conversation-card";
 import type { ConversationCardActions } from "./card-actions";
 
@@ -30,6 +32,9 @@ export function AgentColumn({
   metricsLoading = false,
   metricsUnavailable = false,
   metricsPeriodLabel,
+  pause,
+  pauseReasons = null,
+  onPauseChanged,
 }: {
   agent: AccountMember;
   presence: PresenceStatus;
@@ -44,6 +49,11 @@ export function AgentColumn({
   metricsUnavailable?: boolean;
   /** "hoje" ou "nos últimos 7 dias": entra no rótulo do cartão. */
   metricsPeriodLabel?: string;
+  /** Pausa aberta deste atendente (selo no cartão). */
+  pause?: TeamPause;
+  /** Motivos para o menu de pausar/retomar; null = quem vê não tem a permissão (sem menu). */
+  pauseReasons?: PauseReason[] | null;
+  onPauseChanged?: () => void;
 }) {
   const displayName = agent.full_name || agent.email || "Sem nome";
   const initials = displayName.charAt(0).toUpperCase();
@@ -70,8 +80,21 @@ export function AgentColumn({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
-          <p className="text-xs text-muted-foreground">{PRESENCE_TEXT[presence]}</p>
+          {pause ? (
+            <AgentPauseBadge pause={pause} nowMs={now} className="mt-0.5" />
+          ) : (
+            <p className="text-xs text-muted-foreground">{PRESENCE_TEXT[presence]}</p>
+          )}
         </div>
+        {pauseReasons && onPauseChanged && (
+          <AgentPauseMenu
+            agentId={agent.user_id}
+            agentName={displayName}
+            pause={pause}
+            reasons={pauseReasons}
+            onChanged={onPauseChanged}
+          />
+        )}
         {ids.length > 0 && (
           <Checkbox
             checked={allSelected}

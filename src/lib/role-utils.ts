@@ -51,6 +51,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/relatorios/conversas": ["owner", "admin", "supervisor"],
   "/relatorios/tabulacoes": ["owner", "admin", "supervisor"],
   "/relatorios/agentes": ["owner", "admin", "supervisor"],
+  "/relatorios/pausas": ["owner", "admin", "supervisor"],
   "/relatorios": ["owner", "admin"],
 
   // Telas de gestão: proprietário e admin.

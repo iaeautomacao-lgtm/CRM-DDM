@@ -10,6 +10,7 @@ import {
   Plug,
   Webhook,
   Link2,
+  Coffee,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
 export const SETTINGS_SECTIONS = [
   'overview',
   'organization',
+  'pauses',
   'api',
   'secrets',
   'tools',
@@ -67,6 +69,7 @@ export interface SectionMeta {
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   overview: { id: 'overview', label: 'Visão geral', icon: LayoutGrid, group: 'top' },
   organization: { id: 'organization', label: 'Organização', icon: Building2, group: 'workspace', minRole: 'admin' },
+  pauses: { id: 'pauses', label: 'Pausas de atendimento', icon: Coffee, group: 'workspace', minRole: 'admin' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', integrationTab: true },
   secrets: {
     id: 'secrets',
