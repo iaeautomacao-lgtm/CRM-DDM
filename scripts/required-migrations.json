@@ -570,6 +570,15 @@
       "kind": "registry"
     },
     {
+      "version": "372_contacts_owner",
+      "kind": "registry"
+    },
+    {
+      "version": "372b_contacts_owner_idx",
+      "kind": "index",
+      "index": "idx_contacts_owner"
+    },
+    {
       "version": "375_dashboard_ai_snapshot",
       "kind": "registry"
     }

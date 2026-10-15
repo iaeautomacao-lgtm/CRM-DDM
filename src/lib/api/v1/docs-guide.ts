@@ -38,6 +38,8 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   openConversation: 'avulso',
   closeConversation: 'avulso',
   transferConversation: 'avulso',
+  setContactOwner: 'avulso',
+  removeContactOwner: 'avulso',
   upsertContact: 'avulso',
   updateContact: 'avulso',
   sendWhatsappTemplate: 'avulso',

@@ -42,7 +42,7 @@ export const conversationsPost: Json = {
   description: [
     'Abre o atendimento de um contato num canal e, se quiser, já envia a primeira mensagem. Exige `conversations:write`.',
     '',
-    '- **Quem atende:** `assignee_id` = conversa `open` desse atendente; só `team_id` = conversa `pending` na fila da equipe; nenhum dos dois = fila da conta.',
+    '- **Quem atende:** `assignee_id` = conversa `open` desse atendente; só `team_id` = conversa `pending` na fila da equipe; nenhum dos dois = o **dono do contato** (carteira fixa, se ativo e fora de pausa; `via_owner: true`) ou, sem dono, a fila da conta.',
     '- **Já existe atendimento aberto** do contato neste canal: devolve ele (`created: false`). Pediu outro atendente/equipe? `409` (`error.reason = conversation_exists`, com a conversa atual) — ou transfira na hora com `force_transfer: true`.',
     '- **Mensagem inicial:** `message.template` (só canal Meta; mesmas regras de `POST /whatsapp/send-template`) ou `message.text` (Meta: só dentro de 24h da última mensagem do cliente, senão `422` `window_closed`; WAHA: sempre). Contato na lista de bloqueio = `422`. Com mensagem, `Idempotency-Key` é obrigatório.',
     '- **Pausa:** atendente em pausa = `409` (`error.reason = agent_paused`); repita com `confirm_paused: true`.',
@@ -204,6 +204,7 @@ export const atendimentoSchemas: Record<string, Json> = {
     properties: {
       conversation: { allOf: [ref('ConversationRef'), { type: 'object', required: ['created'], properties: { created: { type: 'boolean', description: '`true` = abriu agora; `false` = já existia.' } } }] },
       transferred: { type: 'boolean', description: '`true` quando `force_transfer` mudou atendente/equipe de um atendimento existente.' },
+      via_owner: { type: 'boolean', description: '`true` quando não veio atendente nem equipe e a conversa foi para o **dono do contato** (carteira fixa).' },
       message: {
         type: 'object',
         description: 'Só quando enviou mensagem inicial.',
