@@ -36,15 +36,18 @@ import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { AiPerformance } from '@/components/dashboard/ai-performance'
 import { FinancialPerformance } from '@/components/dashboard/financial-performance'
+import { AgreementPerformance } from '@/components/dashboard/agreement-performance'
+import type { AgreementDashboardMetrics } from '@/lib/dashboard/agreement-metrics'
 import { ErrorState } from '@/components/dashboard/error-state'
 
 type RangeDays = 7 | 30 | 90
 
 // Seções carregadas por loadAll — usadas para rastrear quais falharam
 // e oferecer "Tentar novamente" em vez de skeletons eternos.
-type DashboardSection = 'metrics' | 'series' | 'status' | 'responseTime' | 'activity' | 'ai'
+type DashboardSection = 'metrics' | 'series' | 'status' | 'responseTime' | 'activity' | 'ai' | 'agreements'
 
 export default function DashboardPage() {
+  const { canManageMembers, profileLoading } = useAuth()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
 
@@ -67,6 +70,9 @@ export default function DashboardPage() {
 
   const [aiPerformance, setAiPerformance] = useState<AiAnalyticsData | null>(null)
   const [aiPerformanceLoading, setAiPerformanceLoading] = useState(true)
+
+  const [agreements, setAgreements] = useState<AgreementDashboardMetrics | null>(null)
+  const [agreementsLoading, setAgreementsLoading] = useState(true)
 
   const [failed, setFailed] = useState<Set<DashboardSection>>(() => new Set())
   const markFailed = useCallback((section: DashboardSection) => {
@@ -123,7 +129,26 @@ export default function DashboardPage() {
         markFailed('ai')
       })
       .finally(() => setAiPerformanceLoading(false))
+
   }, [markFailed])
+
+  const loadAgreements = useCallback(() => {
+    void fetch('/api/dashboard/agreements', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('HTTP ' + response.status)
+        return (await response.json() as { data: AgreementDashboardMetrics }).data
+      })
+      .then((data) => setAgreements(data))
+      .catch((err) => {
+        console.error('[dashboard] agreement metrics failed:', err)
+        markFailed('agreements')
+      })
+      .finally(() => setAgreementsLoading(false))
+  }, [markFailed])
+
+  useEffect(() => {
+    if (!profileLoading && canManageMembers) loadAgreements()
+  }, [profileLoading, canManageMembers, loadAgreements])
 
   useEffect(() => {
     loadAll()
@@ -139,7 +164,9 @@ export default function DashboardPage() {
     setResponseTimeLoading(true)
     setActivityLoading(true)
     setAiPerformanceLoading(true)
+    if (canManageMembers) setAgreementsLoading(true)
     loadAll()
+    if (canManageMembers) loadAgreements()
     // loadAll só traz a série de 30 dias; o período escolhido (7/90) que
     // falhou precisa ser buscado de novo, senão o gráfico fica no skeleton.
     if (range !== 30) {
@@ -150,7 +177,7 @@ export default function DashboardPage() {
           markFailed('series')
         })
     }
-  }, [loadAll, range, markFailed])
+  }, [loadAll, range, markFailed, loadAgreements, canManageMembers])
 
   const handleRangeChange = useCallback(
     (r: RangeDays) => {
@@ -258,6 +285,18 @@ export default function DashboardPage() {
       <div className="mt-5">
         <QuickActions />
       </div>
+
+      {/* Account-wide deal attribution is available to owner/admin only. */}
+      {canManageMembers && (
+        <div className="mt-10">
+          <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Acordos formalizados</h3>
+          {failed.has('agreements') ? (
+            <ErrorState title="Não foi possível carregar os indicadores de acordos" onRetry={retryAll} />
+          ) : (
+            <AgreementPerformance data={agreements} loading={agreementsLoading} />
+          )}
+        </div>
+      )}
 
       {/* Recuperação Financeira */}
       <div className="mt-10">

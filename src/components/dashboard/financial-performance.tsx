@@ -45,13 +45,13 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <DollarSign className="h-4 w-4 text-emerald-500" />
-            Acordos ganhos (total)
+            Negócios ganhos (funil)
           </div>
           <div className="text-2xl font-extrabold text-foreground mt-1">
             {formatBRL(totalWonValue)}
           </div>
           <p className="text-xs text-muted-foreground">
-            Soma de todos os acordos marcados como ganhos, desde o início
+            Valores de negócios com status ganho e valor informado no funil.
           </p>
         </div>
 
@@ -72,13 +72,13 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
         <div className="space-y-1.5 mb-2">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Award className="h-4 w-4 text-primary" />
-            Ranking de Cobradores
+            Ranking de negócios ganhos
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-2.5 pr-1.5 scrollbar-thin">
           {operators.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-4">Nenhum acordo ganho registrado.</p>
+            <p className="text-xs text-muted-foreground text-center py-4">Nenhum negócio ganho registrado no funil.</p>
           ) : (
             operators.map((op, idx) => (
               <div key={op.userId} className="flex items-center justify-between text-xs">
@@ -87,7 +87,7 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
                   <span className="font-medium text-foreground truncate">{op.userName}</span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[10px] text-muted-foreground">({op.dealCount} acordos)</span>
+                  <span className="text-[10px] text-muted-foreground">({op.dealCount} negócios)</span>
                   <span className="font-bold text-emerald-500">{formatBRL(op.totalWon)}</span>
                 </div>
               </div>
