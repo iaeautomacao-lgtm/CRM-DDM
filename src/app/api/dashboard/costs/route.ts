@@ -8,8 +8,8 @@ const SKU_PATTERN = /^[a-z0-9][a-z0-9._:/-]{1,127}$/
 const META_SKU_PATTERN = /^BR:(marketing|utility|authentication|service)$/
 
 function currentMonth(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' })
-    .format(new Date()).replace('/', '-')
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit' }).formatToParts(new Date())
+  return (parts.find(p=>p.type==='year')?.value ?? '2026')+'-'+(parts.find(p=>p.type==='month')?.value ?? '01')
 }
 function monthOf(value: string | null): string | null {
   if (value === null) return currentMonth()
