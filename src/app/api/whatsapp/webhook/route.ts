@@ -1056,7 +1056,7 @@ async function processMessage(
   // Webchat" ligada recebe o convite e conta como tratada (sem fluxo
   // receptivo, sem IA global) — ver src/lib/webchat/campaign.ts.
   // ============================================================
-  const movedToWebchat = mentionedHandoff || await maybeStartCampaignWebchat({
+  const movedToWebchat = mentionedHandoff || Boolean(conversation.requested_agent_id) || await maybeStartCampaignWebchat({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
