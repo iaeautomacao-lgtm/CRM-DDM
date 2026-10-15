@@ -7,6 +7,25 @@ export type Atribuicao = "direto" | "ia" | "humano";
 
 export const ATRIBUICAO_LABEL: Record<Atribuicao, string> = { direto: "Direto", ia: "IA", humano: "Humano" };
 
+// Checklist de status: o SERVIDOR monta os textos (mesmo vocabulário nas duas telas); a tela só desenha. Contrato: seção 7.
+export type ChecklistTone = "ok" | "atencao" | "erro" | "pendente";
+export type ChecklistAction = "informar_endereco" | "informar_chave" | "informar_segredo" | "conectar" | "ligar" | "salvar" | null;
+export interface ChecklistItem {
+  id: "endereco" | "chave" | "segredo" | "avisos" | "ligado";
+  titulo: string;
+  estado: ChecklistTone;
+  detalhe: string;
+  acao: string | null;
+  acao_id: ChecklistAction;
+}
+export interface Checklist {
+  itens: ChecklistItem[];
+  primeira_vez: boolean;
+  proximo_passo: ChecklistItem["id"] | null;
+  prontos: number;
+  total: number;
+}
+
 export interface UtmpayConfig {
   available: boolean;
   configured: boolean;
@@ -17,6 +36,9 @@ export interface UtmpayConfig {
   janela_dias: number;
   send_without_tracking: boolean;
   events_url: string;
+  /** Quando a configuração foi salva pela última vez (ISO) ou null. */
+  atualizado_em: string | null;
+  checklist: Checklist | null;
 }
 
 export interface UtmpayConfigInput {
@@ -153,6 +175,34 @@ export function parseRastreio(raw: unknown): Rastreio | null {
   };
 }
 
+const TONES: readonly string[] = ["ok", "atencao", "erro", "pendente"];
+const ACTIONS: readonly string[] = ["informar_endereco", "informar_chave", "informar_segredo", "conectar", "ligar", "salvar"];
+const ITEM_IDS: readonly string[] = ["endereco", "chave", "segredo", "avisos", "ligado"];
+
+export function parseChecklist(raw: unknown): Checklist | null {
+  const o = rec(raw);
+  if (!Array.isArray(o.itens)) return null;
+  const itens: ChecklistItem[] = o.itens
+    .map((i) => rec(i))
+    .filter((i) => ITEM_IDS.includes(String(i.id)))
+    .map((i) => ({
+      id: i.id as ChecklistItem["id"],
+      titulo: str(i.titulo) ?? "",
+      estado: (TONES.includes(String(i.estado)) ? i.estado : "pendente") as ChecklistTone,
+      detalhe: str(i.detalhe) ?? "",
+      acao: str(i.acao),
+      acao_id: (ACTIONS.includes(String(i.acao_id)) ? i.acao_id : null) as ChecklistAction,
+    }));
+  if (itens.length === 0) return null;
+  return {
+    itens,
+    primeira_vez: o.primeira_vez === true,
+    proximo_passo: ITEM_IDS.includes(String(o.proximo_passo)) ? (o.proximo_passo as ChecklistItem["id"]) : null,
+    prontos: num(o.prontos),
+    total: num(o.total) || itens.length,
+  };
+}
+
 export function parseConfig(raw: unknown): UtmpayConfig {
   const o = rec(raw);
   return {
@@ -165,6 +215,8 @@ export function parseConfig(raw: unknown): UtmpayConfig {
     janela_dias: num(o.janela_dias) || 7,
     send_without_tracking: o.send_without_tracking === true,
     events_url: str(o.events_url) ?? "",
+    atualizado_em: str(o.atualizado_em),
+    checklist: parseChecklist(o.checklist),
   };
 }
 
@@ -185,14 +237,40 @@ async function request(url: string, init?: RequestInit): Promise<unknown> {
 
 export const fetchConfig = async () => parseConfig(await request("/api/account/utmpay-config"));
 
-export async function saveConfig(input: UtmpayConfigInput): Promise<UtmpayConfig> {
-  return parseConfig(
-    await request("/api/account/utmpay-config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+/** Resultado da conexão feita ao salvar (PUT) ou no botão Conectar. Falhar aqui NÃO desfaz o que foi salvo. */
+export interface ConexaoResumo {
+  tentou: boolean;
+  ok: boolean;
+  mensagem: string;
+}
+
+function parseConexao(raw: unknown): ConexaoResumo | null {
+  const o = rec(raw);
+  if (Object.keys(o).length === 0) return null;
+  // PUT/connect: { tentou, ok, mensagem }; status: { estado: conectado|..., mensagem }
+  const ok = typeof o.ok === "boolean" ? o.ok : o.estado === "conectado";
+  return { tentou: o.tentou !== false, ok, mensagem: str(o.mensagem) ?? "" };
+}
+
+export async function saveConfig(input: UtmpayConfigInput): Promise<UtmpayConfig & { conexao: ConexaoResumo | null }> {
+  const body = await request("/api/account/utmpay-config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return { ...parseConfig(body), conexao: parseConexao(rec(body).conexao) };
+}
+
+/** Botão Conectar: o CRM entrega ao UTMpay o endereço e o segredo dos avisos JÁ SALVOS. */
+export async function connectUtmpay(): Promise<{ ok: boolean; message: string; connected_at: string | null; checklist: Checklist | null }> {
+  const o = rec(await request("/api/account/utmpay-config/connect", { method: "POST" }));
+  return { ok: o.ok === true, message: str(o.message) ?? (o.ok === true ? "Conectado." : "Não foi possível conectar. Tente de novo."), connected_at: str(o.connected_at), checklist: parseChecklist(o.checklist) };
+}
+
+/** Estado real da conexão (pergunta ao UTMpay): usado para o item 4 do checklist. */
+export async function fetchStatus(): Promise<{ checklist: Checklist | null; alcancavel: boolean; recebeAvisos: boolean; conectadoEm: string | null }> {
+  const o = rec(await request("/api/account/utmpay-config/status"));
+  return { checklist: parseChecklist(o.checklist), alcancavel: o.utmpay_alcancavel === true, recebeAvisos: o.utmpay_recebe_avisos === true, conectadoEm: str(o.conectado_em) };
 }
 
 export async function testConfig(): Promise<{ ok: boolean; message: string }> {

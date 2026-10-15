@@ -6,6 +6,9 @@ import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { resolveSecretForWrite } from "@/lib/whatsapp/secret-write";
 import { resetUtmpayConfigCache } from "@/lib/utmpay/config";
 import { utmpayEventsUrl, validateUtmpayConfigBody, viewUtmpayConfig, type UtmpayConfigRow } from "@/lib/utmpay/config-api";
+import { buildChecklist } from "@/lib/utmpay/checklist";
+import { connectUtmpay, connectionFromResult } from "@/lib/utmpay/connect";
+import { plainSecretFor } from "@/lib/utmpay/credentials";
 
 export const dynamic = "force-dynamic";
 
@@ -13,20 +16,23 @@ export const dynamic = "force-dynamic";
 // Os segredos (api_key e webhook_secret) são WRITE-ONLY: gravados CIFRADOS no servidor (resolveSecretForWrite) e nunca devolvidos (só has_*).
 // Vazio, omitido ou só bolinhas em api_key/webhook_secret = manter o atual. Contrato: prd-v2/contrato-api-utmpay-crm.md.
 const NO_STORE = { "Cache-Control": "no-store" };
-const COLUMNS = "enabled, base_url, api_key_enc, webhook_secret_enc, janela_dias, send_without_tracking";
+const COLUMNS = "enabled, base_url, api_key_enc, webhook_secret_enc, janela_dias, send_without_tracking, updated_at";
 
 const isMissingTable = (code: string | undefined) => code === "42P01" || code === "PGRST205";
+
+/** A visão + o checklist (sem consultar o UTMpay: o passo "avisos" vem do GET .../connection). */
+const withChecklist = (view: ReturnType<typeof viewUtmpayConfig>) => ({ ...view, checklist: buildChecklist(view, null) });
 
 export async function GET() {
   const auth = await guardPermission("settings.account");
   if (!auth.ok) return auth.response;
   const { data, error } = await supabaseAdmin().from("utmpay_config").select(COLUMNS).eq("account_id", auth.ctx.accountId).maybeSingle();
   if (error) {
-    if (isMissingTable(error.code)) return NextResponse.json(viewUtmpayConfig(null, false, utmpayEventsUrl()), { headers: NO_STORE });
+    if (isMissingTable(error.code)) return NextResponse.json(withChecklist(viewUtmpayConfig(null, false, utmpayEventsUrl())), { headers: NO_STORE });
     console.error("[utmpay-config] GET falhou:", error.code ?? "erro");
     return NextResponse.json({ error: "Falha ao carregar a configuração do UTMpay" }, { status: 500, headers: NO_STORE });
   }
-  return NextResponse.json(viewUtmpayConfig((data ?? null) as UtmpayConfigRow | null, true, utmpayEventsUrl()), { headers: NO_STORE });
+  return NextResponse.json(withChecklist(viewUtmpayConfig((data ?? null) as UtmpayConfigRow | null, true, utmpayEventsUrl())), { headers: NO_STORE });
 }
 
 export async function PUT(request: Request) {
@@ -91,5 +97,27 @@ export async function PUT(request: Request) {
     },
     metadata: { api_key_changed: apiKey.value !== (current?.api_key_enc ?? null), webhook_secret_changed: webhookSecret.value !== (current?.webhook_secret_enc ?? null) },
   });
-  return NextResponse.json(viewUtmpayConfig(row as UtmpayConfigRow, true, utmpayEventsUrl()), { headers: NO_STORE });
+  // "Conectar com um clique": ao salvar, o CRM entrega ao UTMpay o endereço dos avisos e o segredo (também quando o segredo é trocado). Falha aqui NÃO desfaz
+  // o que foi salvo: a configuração fica gravada e a resposta traz o resultado claro (e o que fazer) para a tela.
+  const eventsUrl = utmpayEventsUrl();
+  const conexao = await connectUtmpay({
+    baseUrl: body.base_url,
+    apiKey: plainSecretFor(body.api_key, current?.api_key_enc),
+    secret: plainSecretFor(body.webhook_secret, current?.webhook_secret_enc),
+    eventsUrl,
+  });
+  if (conexao.tentou) {
+    await logAuditEvent({
+      accountId,
+      eventType: "action",
+      resourceType: "utmpay_config",
+      resourceId: accountId,
+      resourceLabel: "UTMpay",
+      action: conexao.ok ? "utmpay.connected" : "utmpay.connect_failed",
+      summary: conexao.ok ? "UTMpay conectado ao CRM (avisos ligados)" : "Tentativa de conectar o UTMpay ao CRM falhou",
+      metadata: { ok: conexao.ok, reason: conexao.reason },
+    });
+  }
+  const view = viewUtmpayConfig({ ...row, updated_at: row.updated_at } as UtmpayConfigRow, true, eventsUrl);
+  return NextResponse.json({ ...view, conexao, checklist: buildChecklist(view, connectionFromResult(conexao, eventsUrl)) }, { headers: NO_STORE });
 }

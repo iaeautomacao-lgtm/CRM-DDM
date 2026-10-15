@@ -58,6 +58,7 @@ vi.mock("@/lib/auth/route-guard", () => ({
 }));
 vi.mock("@/lib/audit/log-event", () => ({ logAuditEvent: vi.fn(async () => {}) }));
 vi.mock("@/lib/whatsapp/secret-write", () => ({
+  isKeepCurrentSecret: (submitted: unknown) => submitted === undefined || submitted === null || (typeof submitted === "string" && (submitted.trim() === "" || /^[•*]+$/.test(submitted.trim()))),
   resolveSecretForWrite: (submitted: unknown, existing: string | null | undefined) => {
     const keep = submitted === undefined || submitted === null || (typeof submitted === "string" && (submitted.trim() === "" || /^[•*]+$/.test(submitted.trim())));
     return { ok: true, value: keep ? (existing ?? null) : `ENC(${String(submitted)})` };
@@ -194,19 +195,19 @@ describe("POST /api/account/utmpay-config/test", () => {
     state.perm = false;
     expect((await testPost()).status).toBe(403);
     state.perm = true;
-    expect(await (await testPost()).json()).toEqual({ ok: true, message: "Conexão com o UTMpay funcionando." });
+    expect(await (await testPost()).json()).toEqual({ ok: true, message: "O UTMpay está no ar e respondendo." });
     state.health = "http";
     const bad = await (await testPost()).json();
     expect(bad.ok).toBe(false);
     expect(JSON.stringify(bad)).not.toContain("utm.exemplo.com");
     state.health = "net";
-    expect((await (await testPost()).json()).message).toBe("Não foi possível alcançar o UTMpay.");
+    expect((await (await testPost()).json()).message).toBe("Não foi possível falar com o UTMpay. Confira o endereço e se ele está no ar.");
   });
   it("sem configuração ou sem chave/segredo: avisa o que falta; limite de uso: 429", async () => {
     state.config = null;
-    expect((await (await testPost()).json()).message).toMatch(/ainda não configurado/);
+    expect((await (await testPost()).json()).message).toMatch(/ainda não foi configurado/);
     state.config = { enabled: true, baseUrl: "https://utm.exemplo.com", apiKey: null, webhookSecret: null, janelaDias: 7, sendWithoutTracking: false };
-    expect((await (await testPost()).json()).message).toMatch(/chave da API e segredo do webhook/);
+    expect((await (await testPost()).json()).message).toMatch(/a chave de acesso e o segredo dos avisos/);
     state.rate = false;
     expect((await testPost()).status).toBe(429);
   });
