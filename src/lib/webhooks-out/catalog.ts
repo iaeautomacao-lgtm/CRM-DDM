@@ -10,6 +10,13 @@ export const WEBHOOK_EVENTS = [
   "campaign.auto_paused", // campanha pausada automaticamente (taxa de erro, resultado incerto, IA fora) — alerta ativo, 1 por campanha/hora
   "channel.quality_changed", // qualidade do número Meta mudou (GREEN/YELLOW/RED) — alerta ativo, 1 por número/hora
   "dispatch.cron_stalled", // um cron do Disparador parou de bater — alerta ativo, 1 por cron/hora
+  "campaign.started", // campanha iniciada (criada pela API e ativada, ou iniciada pelo painel)
+  "campaign.paused", // pausa MANUAL (tela ou API); a automática é campaign.auto_paused
+  "campaign.resumed", // retomada manual (tela ou API)
+  "campaign.completed", // fila da campanha esgotada, com o resumo
+  "campaign.cancelled", // encerramento manual (tela ou API), com o resumo
+  "recipient.status", // destinatário de campanha chegou a um status FINAL: delivered, read, error, blocked ou removed (alto volume)
+  "recipient.funnel", // destinatário clicou, fechou acordo ou pagou (link rastreado), com a atribuição (alto volume)
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -26,6 +33,13 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   "campaign.auto_paused": "Campanha pausada automaticamente, com o motivo (no máximo 1 aviso por campanha por hora).",
   "channel.quality_changed": "Qualidade do número Meta mudou, com a cor anterior e a nova (no máximo 1 aviso por número por hora).",
   "dispatch.cron_stalled": "Um cron do Disparador parou de bater (no máximo 1 aviso por cron por hora).",
+  "campaign.started": "Campanha iniciada (criada pela API e ativada, ou iniciada pelo painel), com nome, external_id, origem, total de contatos e canal.",
+  "campaign.paused": "Campanha pausada manualmente (tela ou API), com quem pausou e o motivo. A pausa automática é campaign.auto_paused.",
+  "campaign.resumed": "Campanha retomada manualmente (tela ou API), com quem retomou e quantos itens voltaram à fila.",
+  "campaign.completed": "Campanha concluída (fila esgotada), com o resumo: total, enviados, entregues, lidos, erros, bloqueados e cancelados.",
+  "campaign.cancelled": "Campanha encerrada manualmente (tela ou API), com quem encerrou, o motivo e o resumo.",
+  "recipient.status": "Destinatário chegou a um status final: delivered, read, error, blocked ou removed (tirado da campanha). Carrega o telefone; pode ser muito volumoso.",
+  "recipient.funnel": "Destinatário avançou no funil do link rastreado: clicked, closed (fechou acordo) ou paid (pagou, confirmado na DDM), com a atribuição direct, ai ou human. Carrega o telefone; pode ser muito volumoso.",
 };
 
 export const MAX_ENDPOINTS_PER_ACCOUNT = 10;

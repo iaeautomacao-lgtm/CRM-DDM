@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       url: body.url,
       events: body.events,
       description: body.description,
+      rateLimitPerMinute: body.rate_limit_per_minute,
     });
     return ok(created, 201, logCtx);
   } catch (err) {
