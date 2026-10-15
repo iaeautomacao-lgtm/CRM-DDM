@@ -14,6 +14,7 @@ import "server-only";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 import { DebtSourceError, normalizeDocument, parseMoneyToCents, type DebtLookup, type DebtSource, type DebtStatus } from "./debt-source";
+import { aggregateStage, classifySituacao, type SituacaoStage } from "./ddm-situacao";
 
 export const DDM_LOCALIZA_URL = "https://www.ddmacordos.com/calc/localiza_dev.php";
 export const DDM_TIMEOUT_MS = 10_000;
@@ -128,19 +129,24 @@ export interface DdmSituation {
   /** Soma do valor em aberto das dívidas ativas (reais); null se a DDM não informou. */
   valor_em_aberto: number | null;
   instituicao: string | null;
-  /** A DDM confirma que NÃO há mais nada a pagar (lista vazia, ou toda dívida listada com situação paga/quitada). */
+  /** Etapa do CPF pelo mapeamento único (ddm-situacao.ts): paid | agreement | none | unknown. */
+  stage: SituacaoStage;
+  /** A DDM confirma que NÃO há mais nada a pagar (etapa `paid`: lista vazia, ou toda dívida listada paga/quitada). */
   settled: boolean;
+  /** Textos de situação que o mapeamento não conhece (para logar 1x e completar a tabela). */
+  unknown_values: string[];
 }
-
-const SETTLED_PATTERN = /\b(pag[oa]s?|quitad[oa]s?|liquidad[oa]s?)\b/i;
 
 /**
  * Função pura: resposta de `localiza_dev` → situação do CPF. Campos lidos: `situacao_acordo`, `valor_em_aberto`, `instituicao`
- * (cai em `apelido`/`sistema`). Lista vazia = sem dívida ativa = quitada (a mesma premissa do dono usada pela régua; A CONFIRMAR com a DDM).
+ * (cai em `apelido`/`sistema`). O que cada `situacao_acordo` significa vem de UM lugar: ddm-situacao.ts.
  */
 export function interpretSituation(body: unknown): DdmSituation {
   if (!Array.isArray(body)) throw new DebtSourceError("Resposta inesperada da DDM", false);
-  if (body.length === 0) return { situacao_acordo: null, valor_em_aberto: 0, instituicao: null, settled: true };
+  if (body.length === 0) {
+    const stage = aggregateStage([]);
+    return { situacao_acordo: null, valor_em_aberto: 0, instituicao: null, stage, settled: stage === "paid", unknown_values: [] };
+  }
   const rows = body.filter((d): d is Record<string, unknown> => !!d && typeof d === "object");
   const text = (v: unknown) => {
     const s = String(v ?? "").trim();
@@ -152,11 +158,14 @@ export function interpretSituation(body: unknown): DdmSituation {
     const c = parseMoneyToCents(r.valor_em_aberto);
     if (c !== null) cents = (cents ?? 0) + c;
   }
+  const stage = aggregateStage(situacoes);
   return {
     situacao_acordo: situacoes.find((s) => s !== null) ?? null,
     valor_em_aberto: cents === null ? null : cents / 100,
     instituicao: rows.map((r) => text(r.instituicao) ?? text(r.apelido) ?? text(r.Apelido) ?? text(r.sistema)).find((s) => s !== null) ?? null,
-    settled: situacoes.length > 0 && situacoes.every((s) => s !== null && SETTLED_PATTERN.test(s)),
+    stage,
+    settled: stage === "paid",
+    unknown_values: situacoes.filter((s): s is string => s !== null && classifySituacao(s) === "unknown"),
   };
 }
 

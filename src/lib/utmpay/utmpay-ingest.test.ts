@@ -103,8 +103,8 @@ function enrichDb(opts: { msgs?: unknown[]; cpf?: string | null } = {}) {
     return {};
   });
 }
-const settled = { situacao_acordo: "PAGO", valor_em_aberto: 0, instituicao: "Instituição X", settled: true };
-const openDebt = { situacao_acordo: "Em aberto", valor_em_aberto: 500, instituicao: "Instituição X", settled: false };
+const settled = { situacao_acordo: "PAGO", valor_em_aberto: 0, instituicao: "Instituição X", stage: "paid" as const, settled: true, unknown_values: [] };
+const openDebt = { situacao_acordo: "Em aberto", valor_em_aberto: 500, instituicao: "Instituição X", stage: "none" as const, settled: false, unknown_values: [] };
 
 describe("enrichFromEvent (atribuição + API DDM)", () => {
   it("payment_start: atribui pela conversa (humano vence IA, último atendente) e grava a situação da DDM", async () => {
@@ -164,15 +164,15 @@ describe("recheckPendingPayments", () => {
 });
 
 describe("interpretSituation (API DDM localiza_dev)", () => {
-  it("lista vazia = sem dívida ativa = quitada", () => {
-    expect(interpretSituation([])).toEqual({ situacao_acordo: null, valor_em_aberto: 0, instituicao: null, settled: true });
+  it("lista vazia NÃO conta como quitada (conservador, EMPTY_LIST_MEANS_PAID = false)", () => {
+    expect(interpretSituation([])).toEqual({ situacao_acordo: null, valor_em_aberto: 0, instituicao: null, stage: "none", settled: false, unknown_values: [] });
   });
   it("lê situacao_acordo, valor_em_aberto (soma) e instituicao", () => {
     const s = interpretSituation([
       { situacao_acordo: "Acordo vigente", valor_em_aberto: "1.234,50", instituicao: "Cruzeiro" },
       { situacao_acordo: "", valor_em_aberto: 100, apelido: "Outra" },
     ]);
-    expect(s).toEqual({ situacao_acordo: "Acordo vigente", valor_em_aberto: 1334.5, instituicao: "Cruzeiro", settled: false });
+    expect(s).toEqual({ situacao_acordo: "Acordo vigente", valor_em_aberto: 1334.5, instituicao: "Cruzeiro", stage: "agreement", settled: false, unknown_values: [] });
   });
   it("só é quitada se TODA dívida listada estiver paga/quitada", () => {
     expect(interpretSituation([{ situacao_acordo: "Pago" }, { situacao_acordo: "Quitado" }]).settled).toBe(true);

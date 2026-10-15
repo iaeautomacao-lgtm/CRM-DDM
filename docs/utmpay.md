@@ -14,6 +14,7 @@ Decisões do dono (14/10/2026). O UTMpay (serviço próprio, Flask/MySQL) rastre
    - Eventos fora da janela de atribuição (padrão 7 dias após o envio, configurável por conta) ficam gravados mas não viram resultado.
 4. **Atribuição** (olha a conversa do contato entre o envio e o evento): sem mensagem do contato ⇒ `direto`; só IA/fluxo respondeu ⇒ `ia`; algum atendente humano respondeu ⇒ `humano` (com o último atendente; humano vence IA). Origem `flow` e `ai` contam como IA (o catálogo de origem não separa fluxo com IA de fluxo sem IA).
 5. **Conferência do pagamento.** Se a DDM estiver fora do ar quando chega o `paid`, o evento fica pendente (`pagou_evento_em` sem `pagou_em`) e o cron abaixo confirma depois (até 14 dias).
+6. **Detecção por consulta à DDM** (não depende do webhook): ver a seção "Detecção por consulta à API DDM" abaixo.
 
 ## Configuração (por conta, pela tela)
 
@@ -27,6 +28,25 @@ Decisões do dono (14/10/2026). O UTMpay (serviço próprio, Flask/MySQL) rastre
 ## Segurança do webhook
 
 Cabeçalhos `X-UTMpay-Timestamp` (unix s) e `X-UTMpay-Signature: sha256=hex(HMAC_SHA256(secret, timestamp + "." + corpo))`. O CRM usa o segredo da **conta dona do `tid`**; assinatura inválida, `tid` desconhecido e conta sem segredo respondem o mesmo 401; relógio fora de ±5 min é recusado; idempotente por `event_id`; corpo até 8 KB; sem CPF. A atribuição e a consulta à DDM rodam depois da resposta (2xx rápido).
+
+## Detecção por consulta à API DDM (fechou/pagou sem depender do webhook)
+
+**Por quê.** Achado na VPS (14/10): o UTMpay de produção recebeu 262 eventos de funil e **todos eram `click`** — o DDMPay não manda `cpf_view`, `payment_start` nem `paid`. Então "fechou" e "pagou" **não podem depender do webhook**. Se um dia o DDMPay mandar o funil, o webhook continua valendo e marca antes (a detecção não sobrescreve `fechou_em`/`pagou_em` já preenchidos).
+
+**O que faz.** Um passo do cron `POST /api/integrations/utmpay/recheck` (15 min) — depois da conferência dos `paid` — olha os links rastreados que **já clicaram**, ainda **sem `pagou_em`** e **dentro da janela** de atribuição da conta (7 dias por padrão), e consulta a DDM (`localiza_dev`, o mesmo `ddm-source`/`fetchDdmSituation`, o mesmo token e o mesmo teto de consultas por minuto):
+
+| `situacao_acordo` da DDM (etapa) | O que o CRM grava |
+|---|---|
+| acordo formalizado/em andamento (`agreement`) | `fechou_em` = momento da detecção (se vazio) + **atribuição** (`direto`/`ia`/`humano`, com `atendente_id`) pela conversa entre o envio e a detecção |
+| quitado/pago (`paid`) | `pagou_em` (e `fechou_em` se vazio) + atribuição |
+| sem acordo (`none`) | nada (só atualiza `situacao_acordo`, `valor_em_aberto`, `instituicao`, `verificado_em`) |
+| valor que o mapeamento não conhece (`unknown`) | **não marca nada** e loga **uma vez** por valor: `[ddm] situacao_acordo desconhecida … "<texto>"` |
+
+**Limites por execução:** até **50 CPFs** (a resposta do cron traz `detection: { checked, fechou, pagou, unknown }`); **um CPF por execução** (o link de clique mais recente dele); ordem do clique mais recente; um link verificado há menos de 60 min não é consultado de novo (o lote gira pelos demais, sem starvation). CPF inválido/ausente e DDM fora do ar: pula, tenta na próxima rodada.
+
+**Mapeamento num único lugar:** `src/lib/billing/ddm-situacao.ts` (`classifySituacao`, `aggregateStage`). Valores **reais conhecidos** (achados em `legacy-compose.ts` e no prompt do agente, `acordos[].status` da DDM): `Quitado` ⇒ pago; `Acordo na DDM` e `Aguardando Pgto` ⇒ acordo formalizado. O mapeamento também aceita as variações óbvias (acordo vigente/ativo/pendente/formalizado, em andamento, pago, liquidado; e "sem acordo", "em aberto", "inadimplente" como sem acordo). **Ainda não há amostra real do `situacao_acordo` do `localiza_dev` no repositório**: quando a DDM mandar um texto novo ele aparece **uma vez** no log como `desconhecida`; é só acrescentar a regra na função (e o teste). Com várias dívidas no mesmo CPF: acordo em andamento em qualquer uma ⇒ `agreement`; só é `paid` se **todas** estão pagas.
+
+**Premissa a confirmar com a DDM:** lista de dívidas **vazia** (sem dívida ativa) = quitada (a mesma premissa do dono usada na régua). Está em `EMPTY_LIST_MEANS_PAID` (`true`); se a DDM também remove dívida cancelada/baixada da lista, isso vira falso "pagou" — é só trocar para `false`.
 
 ## Cron na VPS (novo)
 
@@ -45,3 +65,29 @@ Cabeçalhos `X-UTMpay-Timestamp` (unix s) e `X-UTMpay-Signature: sha256=hex(HMAC
 - O UTMpay só aceita destino `https` em domínio de `UTM_DESTINOS_PERMITIDOS`; fora da lista o link não é gerado e o envio não sai (erro no item).
 - Contato sem CPF vai ao UTMpay como `crm-<id do contato>` (o checkout não pré-preenche o CPF) e não tem confirmação na DDM (sem CPF não há consulta): o `paid` dele fica pendente.
 - A DDM não distingue com certeza "paga" de "removida": hoje "lista vazia" ou `situacao_acordo` paga/quitada contam como quitada (premissa do dono, a confirmar com a DDM).
+
+## Teste local (UTMpay ↔ CRM, ponta a ponta)
+
+Um comando sobe o UTMpay real em modo arquivo e exercita o CRM de verdade, **sem MySQL, sem Supabase remoto e sem rede externa**. **Não entra no CI dos PRs** (config própria; o `vitest` padrão só pega `src/**/*.test.ts`). Serve para conferir a integração na máquina antes de mexer em produção.
+
+```bash
+npm run test:utmpay-local
+```
+
+**Pré-requisitos** (nesta máquina já estão nos padrões; senão defina as variáveis):
+
+| Variável | Padrão | O que é |
+|---|---|---|
+| `UTMPAY_PYTHON` | `C:/Users/Arthur.Henriques/py312/python.exe` | Python 3.12 portátil com Flask e `mysql-connector` instalados |
+| `UTMPAY_DIR` | `C:/Users/Arthur.Henriques/utmpay-v2` | repositório do UTMpay (commit `0848489` ou mais novo) |
+
+Se faltar algum, o teste falha com a mensagem do que falta (não passa "em branco"). Pelo `git bash` use o Node do projeto no `PATH`; a trava de memória da máquina vale como sempre (`bash test-lock.sh Cinzel npm run test:utmpay-local`).
+
+**Como funciona** (`scripts/utmpay-local/`):
+- `utmpay-process.ts` sobe o UTMpay com `python -c "import sys; sys.path.insert(0, DIR); from app import app; app.run(...)"`, sem `MYSQL_*` (modo arquivo), com `DDMPAY_DATA_DIR` temporário, `UTM_API_KEY` e `CRM_EVENTS_SECRET` de teste e `CRM_EVENTS_URL` apontando para o servidor HTTP do próprio teste. No fim derruba o processo e apaga o diretório temporário.
+- `pglite-supabase.ts` é um adaptador mínimo "supabase-js sobre PGlite" (só o subconjunto que as libs usam), para rodar o código **real** do CRM contra a migration **real** 356.
+- `utmpay-local.e2e.ts`: o servidor HTTP do teste repassa cada aviso do UTMpay ao handler **real** de `POST /api/integrations/utmpay/events` (assinatura, relógio, idempotência) e executa o trabalho pós-resposta (`after()`); a API DDM é simulada (a situação do CPF muda conforme o cenário).
+
+**Cenários (17)**: geração em lote pelo `client.ts` real (1 chamada, 1 link por envio, destino preservado); destino fora da lista ⇒ link não gerado e link cru não sai; prévia do WhatsApp e `HEAD` não contam clique, clique de celular conta 1; avisos assinados e sem CPF; cliques dos 3 contatos; `funil-evento` com `tid` falso (404) e etapa inválida (400); atribuição em 3 conversas (sem mensagem do contato = `direto`; só IA respondeu = `ia`; atendente respondeu = `humano` com `atendente_id`; conversa anterior ao envio ignorada); `paid` só vira `pagou_em` quando a DDM confirma (depois pelo cron de conferência); reenvio do UTMpay com o mesmo `event_id` não duplica; assinatura errada, relógio velho e cabeçalho ausente ⇒ 401; `utmpay_funnel` e `loadCampaignFunnel` com os números certos; contagem final de eventos (10, sem perda nem duplicata); **detecção por consulta à DDM** — só chega o `click` (nenhum aviso de funil) e o `fechou` vem da DDM com a atribuição pela conversa, depois a DDM indica quitado e vem o `pagou_em` (sem sobrescrever o `fechou_em`), situação desconhecida não marca e loga uma vez, e o cron real faz o passo e exige o segredo.
+
+**Limites:** não cobre MySQL de verdade, o JavaScript do DDMPay mandando o funil, o Apache/Passenger da VPS nem a API DDM real (simulada). O `CHECK` de `base_url` (https) é removido só na cópia do PGlite do teste, porque o UTMpay local fala `http://127.0.0.1`.
