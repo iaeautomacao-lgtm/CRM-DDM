@@ -76,6 +76,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account/utmpay-config", "GET", "admin", "settings.account"), // UTMpay (14/10)
   pg("account/utmpay-config", "PUT", "admin", "settings.account"),
   pg("account/utmpay-config/test", "POST", "admin", "settings.account"),
+  pg("account/utmpay-config/connect", "POST", "admin", "settings.account"), // conectar com um clique (15/10)
+  pg("account/utmpay-config/status", "GET", "admin", "settings.account"),
   pg("account/copilot-config", "GET", "agent", "inbox.view"), // Acordito (14/10)
   pg("account/copilot-config", "PUT", "admin", "ai.config"),
   pg("ai/copilot/suggestions", "POST", "agent", "inbox.reply"),

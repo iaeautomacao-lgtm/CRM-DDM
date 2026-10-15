@@ -20,15 +20,15 @@ export async function POST() {
 
   resetUtmpayConfigCache(accountId);
   const config = await loadUtmpayConfig(supabaseAdmin(), accountId);
-  if (!config) return NextResponse.json({ ok: false, message: "UTMpay ainda não configurado." });
+  if (!config) return NextResponse.json({ ok: false, message: "O UTMpay ainda não foi configurado. Informe o endereço e a chave de acesso." });
 
   try {
     const res = await safeFetch(`${config.baseUrl}/health`, { method: "GET" }, { timeoutMs: 8_000, maxBytes: 64 * 1024, failOnCrossOriginRedirect: true });
-    if (!res.ok) return NextResponse.json({ ok: false, message: `O UTMpay respondeu com erro (HTTP ${res.status}).` });
+    if (!res.ok) return NextResponse.json({ ok: false, message: `O UTMpay respondeu com erro (${res.status}). Tente de novo em instantes ou peça ao suporte para olhar o UTMpay.` });
   } catch {
-    return NextResponse.json({ ok: false, message: "Não foi possível alcançar o UTMpay." });
+    return NextResponse.json({ ok: false, message: "Não foi possível falar com o UTMpay. Confira o endereço e se ele está no ar." });
   }
-  const missing = [!config.apiKey && "chave da API", !config.webhookSecret && "segredo do webhook"].filter(Boolean);
-  if (missing.length > 0) return NextResponse.json({ ok: false, message: `O UTMpay respondeu, mas falta cadastrar: ${missing.join(" e ")}.` });
-  return NextResponse.json({ ok: true, message: "Conexão com o UTMpay funcionando." });
+  const missing = [!config.apiKey && "a chave de acesso", !config.webhookSecret && "o segredo dos avisos"].filter(Boolean);
+  if (missing.length > 0) return NextResponse.json({ ok: false, message: `O UTMpay está no ar, mas falta informar: ${missing.join(" e ")}.` });
+  return NextResponse.json({ ok: true, message: "O UTMpay está no ar e respondendo." });
 }

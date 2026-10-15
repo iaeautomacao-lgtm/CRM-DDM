@@ -6,6 +6,8 @@ export interface UtmpayConfigRow {
   webhook_secret_enc: string | null;
   janela_dias: number | null;
   send_without_tracking: boolean | null;
+  /** Quando a configuração foi salva pela última vez (para "salvo em …"). */
+  updated_at?: string | null;
 }
 
 export interface UtmpayConfigView {
@@ -18,6 +20,8 @@ export interface UtmpayConfigView {
   janela_dias: number;
   send_without_tracking: boolean;
   events_url: string | null;
+  /** Última vez que a configuração foi salva (ISO); null se nunca. */
+  atualizado_em: string | null;
 }
 
 export const DEFAULT_JANELA_DIAS = 7;
@@ -60,6 +64,7 @@ export function viewUtmpayConfig(row: UtmpayConfigRow | null, available: boolean
     janela_dias: row?.janela_dias && row.janela_dias > 0 ? row.janela_dias : DEFAULT_JANELA_DIAS,
     send_without_tracking: row?.send_without_tracking === true,
     events_url: eventsUrl,
+    atualizado_em: row?.updated_at ?? null,
   };
 }
 

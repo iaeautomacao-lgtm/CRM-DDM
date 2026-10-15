@@ -25,6 +25,17 @@ Decisões do dono (14/10/2026). O UTMpay (serviço próprio, Flask/MySQL) rastre
 - **`CRM_EVENTS_URL` do UTMpay** = `https://<domínio do CRM>/api/integrations/utmpay/events` (a tela mostra o endereço pronto: `events_url`).
 - **Token da DDM:** reaproveita o que já existe (`DDM_ACORDOS_API_TOKEN` / `DDM_TOKEN` / `DDM_API_KEY`, `src/lib/billing/ddm-source.ts`); nenhum token novo.
 
+## Conectar com um clique (nada no `.env`)
+
+Decisão do dono (15/10): tudo configurável pela tela. Em vez de cadastrar o endereço dos avisos e o segredo no `.env` do UTMpay, o **CRM entrega os dois ao UTMpay**:
+
+- `POST {endereço do UTMpay}/api/integracoes/crm` com a **chave de acesso** (`X-API-Key`) e `{ "url": "<endereço dos avisos do CRM>", "segredo": "<segredo dos avisos>" }`. O UTMpay guarda (segredo cifrado) e responde `{status, url, tem_segredo, atualizado_em}`; `401` chave errada, `400` (url não https ou segredo com menos de 16 caracteres), `503` UTMpay sem banco. `GET` no mesmo caminho devolve `{url, tem_segredo, atualizado_em}` (nunca o segredo).
+- O CRM chama isso **ao salvar a tela** Integrações → Rastreamento (`PUT /api/account/utmpay-config`), **ao trocar o segredo** (reenvia automaticamente) e no botão **Conectar** (`POST …/connect`). Falha na conexão não desfaz o que foi salvo: a resposta traz o motivo e o que fazer.
+- `GET …/status` pergunta ao UTMpay para onde ele manda os avisos e compara com o endereço dos avisos do CRM (`conectado`, `divergente`, `nao_conectado`, `erro`, `nao_configurado`).
+- O servidor monta um **checklist** de 5 itens (endereço, chave de acesso, segredo dos avisos, UTMpay mandando avisos, rastreamento ligado) com cor, o que está acontecendo e o que fazer; `primeira_vez` pede o passo a passo. Vocabulário sem jargão, igual nas duas telas. Contrato para a tela: `prd-v2/contrato-api-utmpay-crm.md` (seção 7).
+- O endereço dos avisos do CRM vem de `NEXT_PUBLIC_APP_URL` (https). Sem ele, o CRM salva mas não conecta e avisa.
+- O segredo e a chave ficam cifrados no CRM e **nunca voltam ao navegador**; a tela mostra só "configurado em <data>" e **Trocar**.
+
 ## Segurança do webhook
 
 Cabeçalhos `X-UTMpay-Timestamp` (unix s) e `X-UTMpay-Signature: sha256=hex(HMAC_SHA256(secret, timestamp + "." + corpo))`. O CRM usa o segredo da **conta dona do `tid`**; assinatura inválida, `tid` desconhecido e conta sem segredo respondem o mesmo 401; relógio fora de ±5 min é recusado; idempotente por `event_id`; corpo até 8 KB; sem CPF. A atribuição e a consulta à DDM rodam depois da resposta (2xx rápido).
