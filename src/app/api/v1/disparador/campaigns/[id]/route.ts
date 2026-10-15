@@ -12,7 +12,7 @@
 import { requireApiKey } from "@/lib/auth/api-context";
 import { ok, notFound, toApiErrorResponse, type ApiCallLogContext } from "@/lib/api/v1/respond";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
-import { CAMPAIGN_DETAIL_COLUMNS, CAMPAIGN_DETAIL_COLUMNS_BASE, foldQueueStats, loadCampaignDetailExtras, type CampaignDetailRow } from "@/lib/api/v1/campaign-api";
+import { CAMPAIGN_DETAIL_COLUMNS, CAMPAIGN_DETAIL_COLUMNS_336, CAMPAIGN_DETAIL_COLUMNS_BASE, foldQueueStats, loadCampaignDetailExtras, type CampaignDetailRow } from "@/lib/api/v1/campaign-api";
 
 export async function GET(
   request: Request,
@@ -34,6 +34,7 @@ export async function GET(
     const readCampaign = (columns: string) =>
       db.from("campaigns").select(columns).eq("id", campaignId).eq("account_id", ctx.accountId).limit(1);
     let campaignRes = await readCampaign(CAMPAIGN_DETAIL_COLUMNS);
+    if (campaignRes.error?.code === "42703") campaignRes = await readCampaign(CAMPAIGN_DETAIL_COLUMNS_336);
     if (campaignRes.error?.code === "42703") campaignRes = await readCampaign(CAMPAIGN_DETAIL_COLUMNS_BASE);
     const { error: campaignError } = campaignRes;
     const campaign = (campaignRes.data?.[0] ?? null) as unknown as (CampaignDetailRow & { id: string }) | null;
@@ -59,7 +60,7 @@ export async function GET(
 
     // As 5 chaves de sempre + as que faltavam (pendente, pausado, lido, bloqueado): aditivo.
     const queue = foldQueueStats((statsRows ?? []) as Array<{ status: string; qty: number }>);
-    const extras = await loadCampaignDetailExtras(db, ctx.accountId, campaign as unknown as CampaignDetailRow, (queue.entregue ?? 0) + (queue.lido ?? 0));
+    const extras = await loadCampaignDetailExtras(db, ctx.accountId, campaign as unknown as CampaignDetailRow, (queue.entregue ?? 0) + (queue.lido ?? 0), queue.cancelado);
 
     return ok(
       {

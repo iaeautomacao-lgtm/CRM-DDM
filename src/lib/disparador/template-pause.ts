@@ -155,7 +155,7 @@ export async function resumeCampaignsForTemplate(
 }
 
 /** Todos os templates da campanha existem e nenhuma linha deles está PAUSED/DISABLED; pelo menos uma está APPROVED. */
-async function allTemplatesApproved(db: Db, accountId: string, templates: Array<{ name: string; language: string }>): Promise<boolean> {
+export async function allTemplatesApproved(db: Db, accountId: string, templates: Array<{ name: string; language: string }>): Promise<boolean> {
   if (templates.length === 0) return true;
   const { data, error } = await db
     .from("message_templates")

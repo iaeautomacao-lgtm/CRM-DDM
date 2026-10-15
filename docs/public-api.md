@@ -17,12 +17,15 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `GET /api/v1/disparador/campaigns/{id}` | `campaigns:read` ou `campaigns:write` | Status e métricas |
 | `GET /api/v1/disparador/campaigns` | `campaigns:read` ou `campaigns:write` | Lista campanhas (filtros `status`, `source`, `external_id`, período; cursor) |
 | `GET /api/v1/disparador/campaigns/{id}/recipients` | `campaigns:read` ou `campaigns:write` | Status por destinatário (`queued`…`read`, `error`, `blocked`, `cancelled`), `replied` e funil `clicked`/`closed`/`paid` do UTMpay; 60/min, auditado; nunca CPF |
+| `POST /api/v1/disparador/campaigns/{id}/pause` · `/resume` · `/cancel` | `campaigns:write` | Pausar, retomar e cancelar (idempotentes por estado; `cancel` exige `{"confirm": true}`; `resume` de pausa automática exige `acknowledge_auto_pause`); 30/min |
+| `POST /api/v1/disparador/campaigns/{id}/recipients/remove` | `campaigns:write` | Tira da campanha quem ainda não recebeu (ex.: pagou), por `phone`, `cpf` ou `reference`; idempotente; não é opt-out; 30/min |
 | `GET /api/v1/reports/*` (`operations/current`, `operations/summary`, `teams`, `agents`, `tabulations`) | `reports:read` | Reporting API: métricas agregadas para BI (Power BI, Metabase, n8n). Detalhes em [`reporting-api.md`](./reporting-api.md) |
 
 - **Autenticação:** `Authorization: Bearer wacrm_live_…`. Crie a chave em **Configurações → API keys** (owner/admin); o valor aparece uma única vez e só o hash é guardado. A chave age apenas na conta onde foi criada.
 - **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `recipient_blocked`, `internal`…).
 - **Limite:** 120 requisições por minuto por chave (`429` com `Retry-After`). O limitador é em memória, por processo.
 - **Detalhe da campanha:** além de status e métricas, `GET …/campaigns/{id}` traz `source`, `external_id`, canal, template, motivo da pausa (`pause`), `replied` e, com o UTMpay ativo, o `funnel` (clicou/fechou/pagou com atribuição `direct`/`ai`/`human`). Campos novos são aditivos.
+- **`reference` por contato:** em `POST /disparador/campaigns`, cada contato aceita `reference` (texto de até 64 caracteres). Ele volta em `GET …/recipients` e permite tirar o contato depois (`recipients/remove`) sem depender de telefone ou CPF. O CPF só acha quem já é contato no CRM e nunca é devolvido. O ritmo do create (`slot_size`, `slot_interval_minutes`) passa a ser guardado na campanha. Exige a migration 357; sem ela o create funciona igual, só sem a `reference` (503).
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
 - **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.
 

@@ -515,6 +515,10 @@
     {
       "version": "356_utmpay_integracao",
       "kind": "registry"
+    },
+    {
+      "version": "357_campaign_api_control",
+      "kind": "registry"
     }
   ]
 }

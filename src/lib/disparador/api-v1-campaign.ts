@@ -23,7 +23,8 @@ export type InvalidReason =
   | "invalid_contact"
   | "missing_phone"
   | "invalid_phone"
-  | "missing_variable";
+  | "missing_variable"
+  | "invalid_reference";
 
 export interface InvalidSample {
   index: number;
@@ -34,12 +35,15 @@ export interface InvalidSample {
 export interface ApiContactInput {
   phone: unknown;
   variables?: unknown;
+  /** Texto opaco do integrador (até 64 caracteres), para tirar o contato da campanha depois sem depender de telefone/CPF. */
+  reference?: unknown;
 }
 
 export interface NormalizedContact {
   index: number;
   phone: string;
   variables: string[];
+  reference: string | null;
 }
 
 export interface NormalizeResult {
@@ -108,6 +112,15 @@ export function resolveWahaMessage(message: string, variables: readonly string[]
   return missing ? null : text;
 }
 
+/** Referência opcional: texto de 1 a 64 caracteres sem controle. null = não informada; false = inválida. */
+export function normalizeReference(raw: unknown): string | null | false {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw !== "string") return false;
+  const value = raw.trim();
+  if (value.length === 0 || value.length > 64 || [...value].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127)) return false;
+  return value;
+}
+
 function normalizeVariables(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((v) => (v === null || v === undefined ? "" : typeof v === "string" ? v : String(v)));
@@ -149,6 +162,11 @@ export function normalizeApiContacts(
       reject(index, shown, phone.reason);
       return;
     }
+    const reference = normalizeReference(contact.reference);
+    if (reference === false) {
+      reject(index, shown, "invalid_reference");
+      return;
+    }
     const variables = normalizeVariables(contact.variables);
     if (required.some((n) => variables[n - 1] === undefined || variables[n - 1] === "")) {
       reject(index, shown, "missing_variable");
@@ -164,7 +182,7 @@ export function normalizeApiContacts(
       skipped++;
       return;
     }
-    out.push({ index, phone: phone.digits, variables });
+    out.push({ index, phone: phone.digits, variables, reference });
   });
 
   return { contacts: out, duplicates, skipped, invalid, invalidSample };
