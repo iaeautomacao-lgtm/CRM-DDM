@@ -57,11 +57,13 @@ describe("catálogo de eventos", () => {
     expect(isWebhookEvent("webhook.test")).toBe(false); // o teste nunca se "assina"
   });
 
-  it("os eventos do catálogo são exatamente os que os triggers da migration 204 emitem", () => {
-    const sql = readFileSync("supabase/migrations/204_outbound_webhooks.sql", "utf8");
+  it("os eventos do catálogo são os que os triggers (204, 361, 362) emitem + os emitidos pelo código", () => {
+    const sql = ["204_outbound_webhooks.sql", "361_webhook_recipient_status.sql", "362_webhook_recipient_funnel.sql"].map((n) => readFileSync("supabase/migrations/" + n, "utf8")).join(" ");
     const emitted = new Set([...sql.matchAll(/enqueue_webhook_event\([^,]+,\s*'([a-z_.]+)'/g)].map((m) => m[1]));
     // Alertas ativos (item 5, 13/10) são emitidos pelo código (active-alerts.ts), não por trigger da 204.
     const byCode = ["campaign.auto_paused", "channel.quality_changed", "dispatch.cron_stalled"];
+    // Ciclo de vida de campanha (bloco B): emitido pelo código logo depois da RPC que muda o estado (campaign-events.ts).
+    byCode.push("campaign.started", "campaign.paused", "campaign.resumed", "campaign.completed", "campaign.cancelled");
     expect([...emitted, ...byCode].sort()).toEqual([...WEBHOOK_EVENTS].sort());
   });
 });

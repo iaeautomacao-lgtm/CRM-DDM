@@ -25,6 +25,7 @@ const endpointExample = {
   last_success_at: '2026-10-09T14:00:00.000Z',
   last_failure_at: null,
   created_at: '2026-10-09T12:00:00.000Z',
+  rate_limit_per_minute: 600,
 };
 
 export const WEBHOOK_GUIDE = [
@@ -44,7 +45,19 @@ export const WEBHOOK_GUIDE = [
   '',
   '**Garantias:** *pelo menos uma vez* e **sem ordem garantida** entre eventos. Deduplique pelo `id` do evento (igual em reentregas). Endpoint `paused` não recebe: as entregas aguardam até você reativá-lo.',
   '',
-  '**Dados pessoais:** `message.received` carrega telefone e texto do cliente; trate o seu endpoint como dado sensível (HTTPS, validação da assinatura, sem log do corpo).',
+  '**Dados pessoais:** `message.received` carrega telefone e texto do cliente; `recipient.status` e `recipient.funnel` carregam o telefone do destinatário (nunca CPF nem o texto enviado); trate o seu endpoint como dado sensível (HTTPS, validação da assinatura, sem log do corpo).',
+  '',
+  '### Eventos de campanha e de destinatário',
+  'Só chegam a quem **assinou** o tipo. `data` traz sempre `campaign_id`, `external_id` (o da criação pela API; `null` nas campanhas do painel) e, nas de ciclo de vida, `name` e `source` (`api_v1` ou `dashboard`).',
+  '- `campaign.started`: `total_contacts`, `provider` (`meta`/`waha`). Uma vez por campanha.',
+  '- `campaign.paused` (pausa **manual**; a automática é `campaign.auto_paused`): `automatic: false`, `by` (`user`/`api`), `reason`, `items_pending_move`.',
+  '- `campaign.resumed`: `by`, `resumed_items`.',
+  '- `campaign.completed` (fila esgotada): `completed_at` e `summary` com `total`, `sent`, `delivered`, `read`, `errors`, `blocked`, `cancelled` (`sent` inclui entregues e lidos; `delivered` inclui lidos). Uma vez por campanha.',
+  '- `campaign.cancelled` (encerramento manual): `by`, `reason` (`cancelled`, `cancelled_api`), `cancelled_items`, `cancelled_at`, `summary`.',
+  '- `recipient.status` — só **transições finais** do destinatário: `delivered`, `read`, `error`, `blocked` e `removed` (tirado da campanha pela API). Não há evento para queued/sending/sent. `data`: `recipient_id` (o `recipient_id` de `GET …/recipients`), `phone`, `reference`, `previous_status`, `status`, `error` (`{ code, type }` com `type` ∈ `empty_variable`, `window_24h`, `timeout`, `channel_offline`, `other`; nunca o texto técnico) e `at`. Cada status final sai **uma vez** por destinatário.',
+  '- `recipient.funnel` — o destinatário avançou no link rastreado: `step` ∈ `clicked`, `closed` (fechou acordo), `paid` (pagou, confirmado na API DDM). `closed` e `paid` trazem `attribution` (`direct`, `ai`, `human`) e `attendant_id`. Cada etapa sai uma vez por destinatário. Dá a baixa no ERP sem polling.',
+  '',
+  '**Volume e limite por endpoint:** os eventos por destinatário podem passar de **centenas de milhares por dia**. Cada endpoint tem um teto de entregas por minuto, `rate_limit_per_minute` (padrão **600**, de 1 a 6000; defina no `POST /webhooks` ou no `PATCH /webhooks/{id}`). O que passa do teto **não se perde**: espera na fila e sai no minuto seguinte (sem gastar tentativas); janela deslizante de 60 s. Escolha a partir do que o seu ERP aguenta e assine só os tipos de que precisa. A ordem **não** é garantida (deduplique pelo `id`).',
 ].join('\n');
 
 export const webhookTags = [{ name: 'Webhooks', description: 'Webhooks de saída assinados (escopos webhooks:read / webhooks:write).' }];
@@ -110,12 +123,12 @@ export const webhookPaths: Record<string, Json> = {
       tags: ['Webhooks'],
       operationId: 'updateWebhook',
       summary: 'Altera um webhook',
-      description: 'Exige `webhooks:write`. Informe ao menos um de `url`, `events`, `description`, `status` (`active`|`paused`). Pausar interrompe o envio sem perder as entregas pendentes.',
+      description: 'Exige `webhooks:write`. Informe ao menos um de `url`, `events`, `description`, `status` (`active`|`paused`), `rate_limit_per_minute` (1 a 6000). Pausar interrompe o envio sem perder as entregas pendentes.',
       parameters: [idParam],
       requestBody: { required: true, content: { 'application/json': { schema: ref('WebhookUpdateRequest'), example: { status: 'paused' } } } },
       responses: {
         '200': { description: 'O webhook atualizado.', content: { 'application/json': { schema: { type: 'object', required: ['data'], properties: { data: ref('Webhook') } } } } },
-        '400': apiError('Campo inválido ou corpo vazio.', 'bad_request', 'Informe ao menos um campo: url, events, description ou status'),
+        '400': apiError('Campo inválido ou corpo vazio.', 'bad_request', 'Informe ao menos um campo: url, events, description, status ou rate_limit_per_minute'),
         '404': apiError('Webhook inexistente ou de outra conta.', 'not_found', 'Webhook não encontrado'),
         '413': apiError('Corpo acima de 16 KB.', 'payload_too_large', 'Corpo grande demais (máx. 16 KB)'),
         '503': unavailable,
@@ -220,6 +233,7 @@ export const webhookSchemas: Record<string, Json> = {
       consecutive_failures: { type: 'integer', description: 'Falhas seguidas desde o último sucesso.' },
       last_success_at: { type: ['string', 'null'], format: 'date-time' },
       last_failure_at: { type: ['string', 'null'], format: 'date-time' },
+      rate_limit_per_minute: { type: 'integer', minimum: 1, maximum: 6000, default: 600, description: 'Teto de entregas por minuto deste endpoint. O excedente espera na fila (nada se perde) e sai no minuto seguinte.' },
       created_at: { type: 'string', format: 'date-time' },
     },
   },
@@ -233,6 +247,7 @@ export const webhookSchemas: Record<string, Json> = {
       url: { type: 'string', format: 'uri', pattern: '^https://', description: 'URL https pública que recebe os eventos.' },
       events: { type: 'array', minItems: 1, items: { type: 'string', enum: [...WEBHOOK_EVENTS] } },
       description: { type: 'string', maxLength: 200 },
+      rate_limit_per_minute: { type: 'integer', minimum: 1, maximum: 6000, default: 600, description: 'Entregas por minuto (padrão 600). Ajuste ao que o seu ERP aguenta: com eventos por destinatário o volume pode passar de centenas de milhares por dia.' },
     },
   },
   WebhookUpdateRequest: {
@@ -241,6 +256,7 @@ export const webhookSchemas: Record<string, Json> = {
       url: { type: 'string', format: 'uri', pattern: '^https://' },
       events: { type: 'array', minItems: 1, items: { type: 'string', enum: [...WEBHOOK_EVENTS] } },
       description: { type: ['string', 'null'], maxLength: 200 },
+      rate_limit_per_minute: { type: 'integer', minimum: 1, maximum: 6000, description: 'Entregas por minuto deste endpoint.' },
       status: { type: 'string', enum: ['active', 'paused'] },
     },
   },

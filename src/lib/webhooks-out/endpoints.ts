@@ -23,9 +23,36 @@ export interface EndpointView {
   last_success_at: string | null;
   last_failure_at: string | null;
   created_at: string;
+  /** Teto de entregas por minuto deste endpoint (migration 360). O excedente espera na fila, sem se perder. */
+  rate_limit_per_minute: number;
 }
 
-const VIEW_COLUMNS = "id, url, description, events, status, consecutive_failures, last_success_at, last_failure_at, created_at";
+export const DEFAULT_RATE_LIMIT_PER_MINUTE = 600;
+export const MIN_RATE_LIMIT_PER_MINUTE = 1;
+export const MAX_RATE_LIMIT_PER_MINUTE = 6000;
+
+const BASE_COLUMNS = "id, url, description, events, status, consecutive_failures, last_success_at, last_failure_at, created_at";
+const VIEW_COLUMNS = BASE_COLUMNS + ", rate_limit_per_minute";
+
+type DbError = { code?: string; message?: string } | null;
+
+/** 42703 = coluna inexistente: a migration 360 ainda não foi aplicada (o app segue funcionando sem o limite configurável). */
+const isMissingColumn = (e: DbError | undefined) => e?.code === "42703" || e?.code === "PGRST204";
+
+/** Roda a consulta com as colunas da view; sem a 360, repete sem `rate_limit_per_minute` (o padrão vale na resposta). */
+async function withView(run: (columns: string) => PromiseLike<{ data: unknown; error: DbError }>): Promise<{ data: EndpointView[] | null; error: DbError }> {
+  let res = await run(VIEW_COLUMNS);
+  if (res.error && isMissingColumn(res.error)) res = await run(BASE_COLUMNS);
+  const rows = (res.data ?? null) as Array<Omit<EndpointView, "rate_limit_per_minute"> & { rate_limit_per_minute?: number }> | null;
+  return { data: rows ? rows.map((r) => ({ ...r, rate_limit_per_minute: r.rate_limit_per_minute ?? DEFAULT_RATE_LIMIT_PER_MINUTE })) : null, error: res.error };
+}
+
+export function validateRateLimit(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < MIN_RATE_LIMIT_PER_MINUTE || raw > MAX_RATE_LIMIT_PER_MINUTE) {
+    throw badRequest(`\`rate_limit_per_minute\` deve ser um inteiro de ${MIN_RATE_LIMIT_PER_MINUTE} a ${MAX_RATE_LIMIT_PER_MINUTE} (entregas por minuto; o excedente espera na fila)`);
+  }
+  return raw;
+}
 
 /** 42P01/PGRST205 = a migration 204 ainda não foi aplicada: 503 em vez de 500. */
 function unwrap<T>(result: { data: T | null; error: { code?: string; message?: string } | null }): T | null {
@@ -65,11 +92,12 @@ function validateEvents(raw: unknown): WebhookEvent[] {
 
 export async function createEndpoint(
   db: Db,
-  input: { accountId: string; keyId: string | null; url: unknown; events: unknown; description?: unknown },
+  input: { accountId: string; keyId: string | null; url: unknown; events: unknown; description?: unknown; rateLimitPerMinute?: unknown },
 ): Promise<EndpointView & { secret: string }> {
   const url = await validateUrl(input.url);
   const events = validateEvents(input.events);
   const description = validateDescription(input.description);
+  const rate = input.rateLimitPerMinute === undefined || input.rateLimitPerMinute === null ? null : validateRateLimit(input.rateLimitPerMinute);
 
   const count = await db.from("webhook_endpoints").select("id", { count: "exact", head: true }).eq("account_id", input.accountId);
   unwrap({ data: true, error: count.error });
@@ -78,24 +106,21 @@ export async function createEndpoint(
   }
 
   const secret = generateWebhookSecret();
-  const row = unwrap(
-    await db
-      .from("webhook_endpoints")
-      .insert({ account_id: input.accountId, url, events, description, secret_enc: encrypt(secret), created_by_key: input.keyId })
-      .select(VIEW_COLUMNS)
-      .limit(1),
-  ) as EndpointView[] | null;
+  const insert = { account_id: input.accountId, url, events, description, secret_enc: encrypt(secret), created_by_key: input.keyId, ...(rate !== null ? { rate_limit_per_minute: rate } : {}) };
+  const created = await withView((columns) => db.from("webhook_endpoints").insert(insert).select(columns).limit(1));
+  if (rate !== null && created.error && isMissingColumn(created.error)) throw new ApiError("unavailable", "Limite por endpoint indisponível: aplique a migration 360", 503);
+  const row = unwrap(created);
   if (!row?.[0]) throw new ApiError("internal", "Falha ao criar o endpoint", 500);
   return { ...row[0], secret };
 }
 
 export async function listEndpoints(db: Db, accountId: string): Promise<EndpointView[]> {
-  const rows = unwrap(await db.from("webhook_endpoints").select(VIEW_COLUMNS).eq("account_id", accountId).order("created_at", { ascending: false }).limit(MAX_ENDPOINTS_PER_ACCOUNT));
-  return (rows ?? []) as unknown as EndpointView[];
+  const rows = unwrap(await withView((columns) => db.from("webhook_endpoints").select(columns).eq("account_id", accountId).order("created_at", { ascending: false }).limit(MAX_ENDPOINTS_PER_ACCOUNT)));
+  return rows ?? [];
 }
 
 export async function getEndpoint(db: Db, accountId: string, id: string): Promise<EndpointView> {
-  const rows = unwrap(await db.from("webhook_endpoints").select(VIEW_COLUMNS).eq("account_id", accountId).eq("id", id).limit(1)) as EndpointView[] | null;
+  const rows = unwrap(await withView((columns) => db.from("webhook_endpoints").select(columns).eq("account_id", accountId).eq("id", id).limit(1)));
   if (!rows?.[0]) throw notFound("Webhook não encontrado");
   return rows[0];
 }
@@ -110,8 +135,11 @@ export async function updateEndpoint(db: Db, accountId: string, id: string, patc
     if (patch.status !== "active" && patch.status !== "paused") throw badRequest("`status` deve ser 'active' ou 'paused'");
     update.status = patch.status;
   }
-  if (Object.keys(update).length === 1) throw badRequest("Informe ao menos um campo: url, events, description ou status");
-  const rows = unwrap(await db.from("webhook_endpoints").update(update).eq("account_id", accountId).eq("id", id).select(VIEW_COLUMNS).limit(1)) as EndpointView[] | null;
+  if (patch.rate_limit_per_minute !== undefined) update.rate_limit_per_minute = validateRateLimit(patch.rate_limit_per_minute);
+  if (Object.keys(update).length === 1) throw badRequest("Informe ao menos um campo: url, events, description, status ou rate_limit_per_minute");
+  const updated = await withView((columns) => db.from("webhook_endpoints").update(update).eq("account_id", accountId).eq("id", id).select(columns).limit(1));
+  if (patch.rate_limit_per_minute !== undefined && updated.error && isMissingColumn(updated.error)) throw new ApiError("unavailable", "Limite por endpoint indisponível: aplique a migration 360", 503);
+  const rows = unwrap(updated);
   if (!rows?.[0]) throw notFound("Webhook não encontrado");
   return rows[0];
 }

@@ -515,6 +515,18 @@
     {
       "version": "356_utmpay_integracao",
       "kind": "registry"
+    },
+    {
+      "version": "360_webhook_endpoint_rate_limit",
+      "kind": "registry"
+    },
+    {
+      "version": "361_webhook_recipient_status",
+      "kind": "registry"
+    },
+    {
+      "version": "362_webhook_recipient_funnel",
+      "kind": "registry"
     }
   ]
 }

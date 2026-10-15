@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
+import { emitCampaignStarted } from "@/lib/webhooks-out/campaign-events";
 import { chatMediaReference } from "@/lib/storage/chat-media";
 import { randomUUID } from "crypto";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
@@ -706,6 +707,7 @@ export async function POST(request: Request) {
         .eq("id", campaignId)
         .eq("account_id", ctx.accountId);
       if (activateError) throw activateError;
+      await emitCampaignStarted(db, { accountId: ctx.accountId, campaignId, by: "api" }); // webhook campaign.started (melhor esforço; nunca lança)
     } catch (err) {
       console.error("[v1/disparador] falha ao enfileirar; desfazendo campanha", campaignId, err);
       await rollbackApiCampaign(db, campaignId, ctx.accountId);
