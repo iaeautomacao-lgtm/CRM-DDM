@@ -79,6 +79,23 @@ CREATE TRIGGER trg_clear_mention_reservation
   BEFORE INSERT OR UPDATE OF assigned_agent_id, status ON wacrm.conversations
   FOR EACH ROW EXECUTE FUNCTION wacrm.clear_mention_reservation_on_takeover();
 
+-- Direct browser clients may update other conversation columns, but never
+-- forge or clear a routing reservation. The routing RPC runs as service_role.
+CREATE OR REPLACE FUNCTION wacrm.guard_mention_reservation()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $
+BEGIN
+  IF current_user IN ('anon', 'authenticated')
+    AND NEW.requested_agent_id IS DISTINCT FROM OLD.requested_agent_id THEN
+    RAISE EXCEPTION 'reserved agent is server-managed' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$;
+DROP TRIGGER IF EXISTS trg_guard_mention_reservation ON wacrm.conversations;
+CREATE TRIGGER trg_guard_mention_reservation
+  BEFORE UPDATE OF requested_agent_id ON wacrm.conversations
+  FOR EACH ROW EXECUTE FUNCTION wacrm.guard_mention_reservation();
+
 -- Atomic routing + flow stop. Server-only RPC; never callable with anon or a
 -- user's JWT. Locks the conversation to prevent concurrent claims/reroutes.
 -- Returns selected user_id on success, NULL on no match/ineligible conversation.
