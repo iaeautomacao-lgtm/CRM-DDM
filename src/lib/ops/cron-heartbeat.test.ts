@@ -65,7 +65,7 @@ describe('trackCron', () => {
   it('todo cron do docs/crons.md tem cadência definida', () => {
     expect(Object.keys(CRON_JOBS).sort()).toEqual([
       'automations', 'billing', 'channels_refresh_tokens', 'conversations_retry_assignment', 'disparador_exports', 'disparador_health',
-      'disparador_imports', 'disparador_prepare', 'disparador_tick', 'flows', 'webhooks_out',
+      'disparador_imports', 'disparador_prepare', 'disparador_tick', 'dispatch_worker', 'flows', 'webhooks_out',
     ])
   })
 })

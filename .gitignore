@@ -61,3 +61,6 @@ tests/stress/.session-token
 e2e/.auth/
 e2e/report/
 e2e/test-results/
+
+# worker de envio (npm run build:worker)
+/dist/

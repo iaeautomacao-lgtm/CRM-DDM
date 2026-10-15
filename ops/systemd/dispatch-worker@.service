@@ -1,0 +1,31 @@
+# MODELO — não aplicado em lugar nenhum. Worker de envio do Disparador (docs/disparador-worker.md).
+# Uma instância por processo: `systemctl enable --now dispatch-worker@a` lê /etc/crm-worker/a.env (cada instância tem seu DISPATCH_WORKER_ID/GRUPO).
+# Máquina própria com só Node 20 + este arquivo + o bundle em /opt/crm-worker/current/dispatch-worker.cjs (scripts/deploy-worker.sh).
+[Unit]
+Description=CRM-DDM worker de envio (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crmworker
+Group=crmworker
+EnvironmentFile=/etc/crm-worker/%i.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/crm-worker/current/dispatch-worker.cjs
+Restart=always
+RestartSec=3
+# Parada limpa: o worker espera os envios em voo (≤ 8 s), drena as confirmações e expira os leases; depois disso o systemd mata.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+# Limites de recurso (ajustar à máquina; um número a 80/s usa ≈ 0,5–1 vCPU, a medir na bancada).
+MemoryMax=1G
+CPUQuota=200%
+# Endurecimento básico
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

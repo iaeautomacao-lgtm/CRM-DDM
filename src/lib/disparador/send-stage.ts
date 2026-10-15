@@ -43,13 +43,16 @@ function assumedP95Seconds(): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 30) : 1;
 }
 
+/** true = este (campanha, número) NÃO é enviado por este processo. */
+export type SkipSend = (campaign: Campaign, channelId: string) => boolean;
+
 export async function buildChannelWork(
   db: AdminDb,
   planned: PlannedCampaign[],
   config: ThroughputConfig,
   telemetry: TickTelemetry,
-  /** Números que um worker vivo envia (worker-ownership.ts): o cron os pula; vazio/ausente = comportamento de sempre. */
-  skipChannels?: ReadonlySet<string>,
+  /** Itens que outro processo envia (worker vivo, worker-ownership.ts): o cron os pula; ausente = comportamento de sempre. */
+  skipSend?: SkipSend,
 ): Promise<{
   channels: ChannelWork<QueueItem>[];
   defaultMaxInFlight: Map<string, number | undefined>;
@@ -61,6 +64,7 @@ export async function buildChannelWork(
   for (const entry of planned) {
     for (const item of entry.items) {
       const channelId = item.session_id ?? "";
+      if (skipSend?.(entry.campaign, channelId)) continue;
       let campaigns = byChannel.get(channelId);
       if (!campaigns) byChannel.set(channelId, (campaigns = new Map()));
       let list = campaigns.get(entry.campaign.id);
@@ -131,7 +135,6 @@ export async function buildChannelWork(
   for (const [channelId, campaigns] of byChannel) {
     const channelInfo = info.get(channelId);
     if (channelInfo?.paused) continue;
-    if (skipChannels?.has(channelId)) continue;
     const provider = channelInfo?.provider ?? null;
     const inCooldown = isInCooldown(channelId, now, channelInfo?.cooldownUntil);
     let maxConcurrency = resolveChannelConcurrency({
@@ -232,15 +235,17 @@ export interface SendStageInput {
   outOfTime: () => boolean;
   health: ReturnType<typeof startHealthMonitor> | undefined;
   autoPauseConfig: ReturnType<typeof autoPauseConfigFromEnv>;
-  /** Números com worker vivo: ficam fora deste estágio (o cron só os pula com a chave do worker ligada). */
-  skipChannels?: ReadonlySet<string>;
+  /** Itens que um worker vivo envia: ficam fora deste estágio (o cron só os pula com a chave do worker ligada). */
+  skipSend?: SkipSend;
+  /** Modo do WORKER: claim com fencing do lease e balde durável por número (migration 368). Ausente = o claim do cron. */
+  claimerRated?: { owner: string; onLostOwnership?: (channelId: string) => void };
 }
 
 /** Envia o que foi planejado: números em paralelo, campanhas do mesmo número em round-robin, teto por número e global. */
 export async function runSendStage(input: SendStageInput): Promise<SchedulerReport> {
-  const { db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipChannels } = input;
+  const { db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipSend, claimerRated } = input;
   const [channelWork, blacklistLookup] = await Promise.all([
-    buildChannelWork(db, planned, config, telemetry, skipChannels),
+    buildChannelWork(db, planned, config, telemetry, skipSend),
     // Revalidação da blacklist de todos os candidatos do tick numa leitura
     // (tick-preload.ts); sem ela, cada envio consulta como antes.
     preloadBlacklist(
@@ -254,12 +259,21 @@ export async function runSendStage(input: SendStageInput): Promise<SchedulerRepo
   const attemptsInTick = new Map<string, number>();
   const pauseChecks = new Map<string, Promise<boolean>>();
   const pausedCampaigns = new Set<string>();
+  // Limite/s efetivo de cada número (do mesmo cálculo que o agendador usa): o claim do worker o usa como taxa do balde durável.
+  const ratePerSecondByChannel = new Map(channelWork.channels.map((c) => [c.channelId, c.ratePerSecond] as const));
   // Claim/confirmação em lote só quando TODAS as campanhas do tick foram planejadas por fichas (sem mistura de caminhos).
   const claimer = batchMode
     ? new ChannelClaimer({
         db,
         defaultMaxInFlight: (channelId) => channelWork.defaultMaxInFlight.get(channelId),
         preload: (claimed) => preloadBlacklist(db, claimed.map(queueItemPrimaryPhone)),
+        rated: claimerRated
+          ? {
+              owner: claimerRated.owner,
+              rateFor: (channelId) => ratePerSecondByChannel.get(channelId),
+              onLostOwnership: claimerRated.onLostOwnership,
+            }
+          : undefined,
       })
     : null;
   const confirmBatcher = claimer ? new ConfirmBatcher({ db, single: singleConfirm(db) }) : null;

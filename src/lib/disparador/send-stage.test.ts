@@ -48,7 +48,7 @@ describe('send-stage', () => {
     expect(work.channels.find((c) => c.channelId === 'S2')!.campaigns).toHaveLength(1);
   });
 
-  it('skipChannels (números com worker vivo): o cron os pula; os demais seguem; vazio = comportamento de sempre', async () => {
+  it('skipSend (números com worker vivo): o cron pula só o que o worker envia; os demais seguem; ausente = comportamento de sempre', async () => {
     const planned: PlannedCampaign[] = [
       { campaign: campaign('c1'), items: [item('i1', 'S1', 'c1'), item('i2', 'S2', 'c1')], result: { campaign_id: 'c1', sent: 0, pending_confirmation: 0 } },
     ];
@@ -56,9 +56,9 @@ describe('send-stage', () => {
       { id: 'S1', provider: 'meta', account_id: 'ACC' },
       { id: 'S2', provider: 'meta', account_id: 'ACC' },
     ]);
-    const skipped = await buildChannelWork(db, planned, config, new TickTelemetry(), new Set(['S1']));
+    const skipped = await buildChannelWork(db, planned, config, new TickTelemetry(), (_c, channelId) => channelId === 'S1');
     expect(skipped.channels.map((c) => c.channelId)).toEqual(['S2']);
-    const none = await buildChannelWork(db, planned, config, new TickTelemetry(), new Set());
+    const none = await buildChannelWork(db, planned, config, new TickTelemetry(), () => false);
     expect(none.channels.map((c) => c.channelId).sort()).toEqual(['S1', 'S2']);
     const absent = await buildChannelWork(db, planned, config, new TickTelemetry());
     expect(absent.channels).toHaveLength(2);
