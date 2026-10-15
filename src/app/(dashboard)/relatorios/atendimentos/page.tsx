@@ -24,19 +24,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { format, startOfMonth } from "date-fns";
 import { Bot, Headphones, Search } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -60,6 +48,17 @@ import { PeriodFilter } from "@/components/relatorios/period-filter";
 import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL = "all";
+
+// Recharts (~547 KB) só é baixado quando há dados para desenhar; enquanto isso, esqueleto do tamanho do gráfico.
+const ChartFallback = ({ height }: { height: number }) => <Skeleton className="w-full" style={{ height }} />;
+const AtendimentosPie = dynamic(() => import("@/components/relatorios/atendimentos-charts").then((m) => m.AtendimentosPie), {
+  ssr: false,
+  loading: () => <ChartFallback height={260} />,
+});
+const AtendimentosBars = dynamic(() => import("@/components/relatorios/atendimentos-charts").then((m) => m.AtendimentosBars), {
+  ssr: false,
+  loading: () => <ChartFallback height={260} />,
+});
 
 // Validated order: #FF5706 (DDM primary) first, then the dataviz
 // skill's default blue/aqua/yellow/magenta slots — passes lightness
@@ -328,23 +327,11 @@ function pct(value: number, total: number): number {
   return Math.round((value / total) * 1000) / 10;
 }
 
-function renderPieLabel({ percent }: { percent?: number }) {
-  return `${Math.round((percent ?? 0) * 100)}%`;
-}
-
 // ============================================================
 // AttendanceSection — Por Equipe / Por Agente share this exact
 // structure (table + 2 pies + 1 bar chart); only the name column
 // header and the row set differ between the two callers.
 // ============================================================
-// Tooltip dos gráficos nos tokens do tema (o padrão do Recharts é branco, ilegível no escuro).
-const TOOLTIP_STYLE = {
-  background: "var(--popover)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  color: "var(--popover-foreground)",
-} as const;
-
 /** Alternativa textual do gráfico de pizza (leitores de tela). */
 function describePie(items: { name: string; value: number }[], total: number): string {
   return items.map((d) => `${d.name} ${pct(d.value, total)}%`).join("; ");
@@ -404,69 +391,31 @@ function AttendanceSection({
             <p className="mb-2 text-sm font-medium text-foreground">
               % de atendimentos por {nameHeader.toLowerCase()} (TOP 5)
             </p>
-            <div role="img" aria-label={`Gráfico de pizza, % de atendimentos por ${nameHeader.toLowerCase()}: ${describePie(pieAtendimentos, totalAtendimentos)}`}>
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={pieAtendimentos}
-                  dataKey="value"
-                  nameKey="name"
-                  outerRadius={90}
-                  label={renderPieLabel}
-                >
-                  {pieAtendimentos.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-            </div>
+            <AtendimentosPie
+              data={pieAtendimentos}
+              ariaLabel={`Gráfico de pizza, % de atendimentos por ${nameHeader.toLowerCase()}: ${describePie(pieAtendimentos, totalAtendimentos)}`}
+            />
           </div>
 
           <div className="rounded-card border border-border bg-card p-4">
             <p className="mb-2 text-sm font-medium text-foreground">
               % de mensagens por {nameHeader.toLowerCase()} (TOP 5)
             </p>
-            <div role="img" aria-label={`Gráfico de pizza, % de mensagens por ${nameHeader.toLowerCase()}: ${describePie(pieMensagens, totalMensagens)}`}>
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={pieMensagens}
-                  dataKey="value"
-                  nameKey="name"
-                  outerRadius={90}
-                  label={renderPieLabel}
-                >
-                  {pieMensagens.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-            </div>
+            <AtendimentosPie
+              data={pieMensagens}
+              ariaLabel={`Gráfico de pizza, % de mensagens por ${nameHeader.toLowerCase()}: ${describePie(pieMensagens, totalMensagens)}`}
+            />
           </div>
 
           <div className="rounded-card border border-border bg-card p-4 lg:col-span-2">
             <p className="mb-2 text-sm font-medium text-foreground">
               Atendimentos e Mensagens % por {nameHeader.toLowerCase()}
             </p>
-            <div role="img" aria-label={`Gráfico de barras, atendimentos e mensagens em porcentagem por ${nameHeader.toLowerCase()}: ${barData.map((d) => `${d.name}, ${d["Atendimentos %"]}% dos atendimentos e ${d["Mensagens %"]}% das mensagens`).join("; ")}`}>
-            <ResponsiveContainer width="100%" height={Math.max(200, barData.length * 44 + 40)}>
-              <BarChart data={barData} layout="vertical" margin={{ left: 16, right: 16 }}>
-                <CartesianGrid horizontal={false} stroke="var(--border)" />
-                <XAxis type="number" domain={[0, 100]} unit="%" stroke="var(--muted-foreground)" />
-                <YAxis type="category" dataKey="name" width={140} stroke="var(--muted-foreground)" />
-                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
-                <Legend />
-                <Bar dataKey="Atendimentos %" fill={CATEGORICAL[0]} radius={[0, 4, 4, 0]} />
-                <Bar dataKey="Mensagens %" fill={CATEGORICAL[1]} radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            </div>
+            <AtendimentosBars
+              data={barData}
+              colors={[CATEGORICAL[0], CATEGORICAL[1]]}
+              ariaLabel={`Gráfico de barras, atendimentos e mensagens em porcentagem por ${nameHeader.toLowerCase()}: ${barData.map((d) => `${d.name}, ${d["Atendimentos %"]}% dos atendimentos e ${d["Mensagens %"]}% das mensagens`).join("; ")}`}
+            />
           </div>
         </div>
       )}

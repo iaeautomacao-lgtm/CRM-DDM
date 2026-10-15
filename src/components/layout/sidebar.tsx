@@ -33,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { usePrefetchOnIntent } from "@/hooks/use-prefetch-on-intent";
 import { useIsDesktop, useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
 
 function RailTooltip({
@@ -102,6 +103,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const intent = usePrefetchOnIntent();
   const searchParams = useSearchParams();
   const { accountRole } = useAuth();
   const totalUnread = useTotalUnread();
@@ -348,6 +350,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                             <RailTooltip enabled={rail} label={item.label}>
                               <Link
                                 href={item.href}
+                                {...intent(item.href)}
                                 aria-label={
                                   rail
                                     ? showUnread
@@ -414,6 +417,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     <RailTooltip enabled={rail} label={item.label}>
                       <Link
                         href={item.href}
+                        {...intent(item.href)}
                         aria-label={rail ? item.label : undefined}
                         aria-current={active ? "page" : undefined}
                         className={navItemClass(rail, active)}
