@@ -36,6 +36,7 @@ import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { AiPerformance } from '@/components/dashboard/ai-performance'
 import { FinancialPerformance } from '@/components/dashboard/financial-performance'
+import { MonthlyCostsDashboard } from '@/components/dashboard/monthly-costs-dashboard'
 import { AgreementPerformance } from '@/components/dashboard/agreement-performance'
 import type { AgreementDashboardMetrics } from '@/lib/dashboard/agreement-metrics'
 import { ErrorState } from '@/components/dashboard/error-state'
@@ -297,6 +298,9 @@ export default function DashboardPage() {
           )}
         </div>
       )}
+
+      {/* Custos mensais de IA + Meta — apenas administradores da conta. */}
+      {canManageMembers && <div className="mt-10"><MonthlyCostsDashboard /></div>}
 
       {/* Recuperação Financeira */}
       <div className="mt-10">
