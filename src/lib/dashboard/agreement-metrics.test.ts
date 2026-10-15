@@ -52,9 +52,9 @@ describe("Dashboard: attribution of formalized agreements", () => {
         created_at: "2026-10-14T12:00:00Z", changes: { status: { after: "closed" } },
       },
     ];
-    // Only tag-change events are passed from the data loader; a status
-    // change must not overwrite the prior agreement-tag attribution.
-    const result = summarizeAgreements([conv("conversation")], events.slice(0, 1), tags, now);
+    // Even if an unrelated status event is accidentally included,
+    // it must not overwrite the prior agreement-tag attribution.
+    const result = summarizeAgreements([conv("conversation")], events, tags, now);
     expect(result.ai).toBe(1);
     expect(result.human).toBe(0);
   });
