@@ -66,7 +66,7 @@ describe('OpenAPI da API pública', () => {
   it('documenta TODAS as rotas de src/app/api/v1 (exceto o próprio openapi.json)', () => {
     const files = routeFiles(V1_DIR).filter((f) => !toOpenApiPath(f).startsWith('/openapi.json'));
     expect(files.length).toBeGreaterThan(0);
-    const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;
+    const paths = openApiSpec.paths as unknown as Record<string, Record<string, unknown>>;
     for (const file of files) {
       const path = toOpenApiPath(file);
       const methods = exportedMethods(file);

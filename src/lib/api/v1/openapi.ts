@@ -14,6 +14,7 @@ import { campaignDetailProperties, campaignListGet, campaignPaths, campaignSchem
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
 import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
 import { catalogosPaths, catalogosSchemas, catalogosTags, CATALOGOS_GUIDE } from './openapi-catalogos';
+import { atendimentoPaths, atendimentoSchemas, conversationsPost, ATENDIMENTO_GUIDE } from './openapi-atendimento';
 import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
 
 type Json = Record<string, unknown>;
@@ -148,7 +149,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE + CATALOGOS_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE + CATALOGOS_GUIDE + ATENDIMENTO_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -168,6 +169,8 @@ export const openApiSpec = {
     ...campaignPaths,
     ...contactsPaths,
     ...catalogosPaths,
+    ...atendimentoPaths,
+    '/conversations': { ...(extractPaths['/conversations'] as Record<string, unknown>), post: conversationsPost },
     ...templatesPaths,
     '/me': {
       get: {
@@ -850,6 +853,7 @@ export const openApiSpec = {
       ...campaignSchemas,
       ...contactsSchemas,
       ...catalogosSchemas,
+      ...atendimentoSchemas,
       ...templatesSchemas,
       Scope: {
         type: 'string',
@@ -911,6 +915,9 @@ export const openApiSpec = {
                 },
               },
               unknown_custom_fields: { type: 'array', items: { type: 'string' }, description: 'Só em 422 de contato: campos personalizados que não existem na conta.' },
+              agent: { type: 'object', description: 'Só em 409 `agent_paused`: o atendente em pausa.', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+              pause: { type: ['object', 'null'], description: 'Só em 409 `agent_paused`: motivo e desde quando.', properties: { reason: { type: 'string' }, since: { type: 'string', format: 'date-time' } } },
+              conversation: { type: 'object', description: 'Só em 409 `conversation_exists`: o atendimento já aberto.' },
               meta_code: { type: ['integer', 'null'], description: 'Só em 502 de template: código de erro da Meta.' },
               meta_http_status: { type: 'integer', description: 'Só em 502 de template: HTTP devolvido pela Meta.' },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
