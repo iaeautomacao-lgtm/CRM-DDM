@@ -18,6 +18,9 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { transferConversation } from "@/lib/conversations/actions";
+import { usePausedUserIds } from "@/hooks/use-pauses";
+import { PausedAgentConfirm } from "@/components/pausas/paused-agent-confirm";
+import type { PausedAgentInfo } from "@/lib/pausas/pause";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -69,6 +72,9 @@ export function TransferDialog({
   const [teamId, setTeamId] = useState(NO_TEAM);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  // Atribuição a quem está em pausa: o servidor pede confirmação (409 agent_paused).
+  const [pausedInfo, setPausedInfo] = useState<PausedAgentInfo | null>(null);
+  const pausedIds = usePausedUserIds(conversation !== null);
 
   useEffect(() => {
     if (!conversation) return;
@@ -77,7 +83,7 @@ export function TransferDialog({
     setReason("");
   }, [conversation]);
 
-  async function handleTransfer() {
+  async function handleTransfer(confirmPaused = false) {
     if (!conversation) return;
     setSaving(true);
     try {
@@ -90,15 +96,20 @@ export function TransferDialog({
         return;
       }
 
-      const { error } = await transferConversation(
+      const { error, paused } = await transferConversation(
         conversation.id,
         {
           agentId: agentChanged ? nextAgentId : undefined,
           teamId: teamChanged ? nextTeamId : undefined,
           reason,
+          confirmPaused,
         },
         agentOptions.find((o) => o.id === nextAgentId)?.label,
       );
+      if (paused) {
+        setPausedInfo(paused);
+        return;
+      }
       if (error) throw new Error(error);
 
       toast.success("Conversa transferida");
@@ -143,6 +154,7 @@ export function TransferDialog({
                 {agentOptions.map((opt) => (
                   <SelectItem key={opt.id} value={opt.id}>
                     {opt.label}
+                    {pausedIds.has(opt.id) ? " · em pausa" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -187,7 +199,7 @@ export function TransferDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleTransfer} disabled={saving}>
+          <Button onClick={() => void handleTransfer()} disabled={saving}>
             {saving ? (
               <>
                 <Loader2 className="size-4 animate-spin" />
@@ -199,6 +211,14 @@ export function TransferDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <PausedAgentConfirm
+        info={pausedInfo}
+        onCancel={() => setPausedInfo(null)}
+        onConfirm={() => {
+          setPausedInfo(null);
+          void handleTransfer(true);
+        }}
+      />
     </Dialog>
   );
 }

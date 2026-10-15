@@ -337,6 +337,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/relatorios/conversas", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios/tabulacoes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios/agentes", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
+  { prefix: "/relatorios/pausas", roles: ["owner", "admin", "supervisor"], permission: "reports.view_team", aligned: true },
   { prefix: "/relatorios", roles: ["owner", "admin"], permission: "reports.view_all", aligned: true },
   { prefix: "/canais", roles: ["owner", "admin"], permission: "channels.manage", aligned: true, note: "decisão 13/10: admin vê Canais" },
   { prefix: "/contacts", roles: ["owner", "admin"], permission: "contacts.import", aligned: true, note: "decisão 13/10: owner+admin; contacts.view é de todos e abriria a tela para quem não deve" },

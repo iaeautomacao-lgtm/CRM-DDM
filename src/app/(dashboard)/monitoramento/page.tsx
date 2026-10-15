@@ -66,6 +66,9 @@ import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
 import { SlaPanel } from "@/components/monitoramento/sla-panel";
 import { DayPanel } from "@/components/monitoramento/day-panel";
 import type { ConversationCardActions } from "@/components/monitoramento/card-actions";
+import { useTeamPauses, usePausePermissions } from "@/hooks/use-pauses";
+import { pausasApi } from "@/lib/pausas/client";
+import type { PauseReason } from "@/lib/pausas/pause";
 import { ConversationModal } from "@/components/monitoramento/conversation-modal";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 import { ErrorState } from "@/components/dashboard/error-state";
@@ -416,10 +419,22 @@ function MonitoramentoBoard() {
 
   const { getPresence, getRow, now } = usePresence();
 
-  const sortedAgents = useMemo(
-    () => sortAgentsByPresence(members, getPresence),
-    [members, getPresence],
-  );
+  // Pausas de atendimento (selo no cartão do atendente; pausar/retomar por permissão).
+  const { byUser: pausesByUser, reload: reloadPauses } = useTeamPauses();
+  const { canPauseOthers } = usePausePermissions();
+  const [pauseReasons, setPauseReasons] = useState<PauseReason[]>([]);
+  useEffect(() => {
+    if (!canPauseOthers) return;
+    void pausasApi.reasons().then((r) => {
+      if (r.ok) setPauseReasons(r.data.reasons);
+    });
+  }, [canPauseOthers]);
+
+  // Quem está em pausa vai depois de quem está disponível (a ordem por presença se mantém dentro de cada grupo).
+  const sortedAgents = useMemo(() => {
+    const sorted = sortAgentsByPresence(members, getPresence);
+    return [...sorted.filter((a) => !pausesByUser.has(a.user_id)), ...sorted.filter((a) => pausesByUser.has(a.user_id))];
+  }, [members, getPresence, pausesByUser]);
 
   const byAgent = useMemo(
     () => groupConversationsByAgent(filteredConversations),
@@ -1011,6 +1026,9 @@ function MonitoramentoBoard() {
                   metricsLoading={agentMetrics === null && !agentMetricsError}
                   metricsUnavailable={agentMetricsError}
                   metricsPeriodLabel={agentPeriod === "hoje" ? "hoje" : "em 7 dias"}
+                  pause={pausesByUser.get(agent.user_id)}
+                  pauseReasons={canPauseOthers ? pauseReasons : null}
+                  onPauseChanged={reloadPauses}
                 />
               ))}
             </div>

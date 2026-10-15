@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Tag } from "@/types";
+import type { PausedAgentInfo } from "@/lib/pausas/pause";
 
 type DB = SupabaseClient;
 
@@ -68,9 +69,9 @@ export async function sendTakeoverMessage(
  */
 export async function transferConversation(
   conversationId: string,
-  target: { agentId?: string | null; teamId?: string | null; reason?: string },
+  target: { agentId?: string | null; teamId?: string | null; reason?: string; confirmPaused?: boolean },
   agentFullName?: string | null,
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; paused?: PausedAgentInfo }> {
   try {
     const res = await apiFetch(`/api/conversations/${conversationId}/transfer`, {
       method: "POST",
@@ -79,10 +80,22 @@ export async function transferConversation(
         agent_id: target.agentId,
         team_id: target.teamId,
         reason: target.reason ?? "",
+        ...(target.confirmPaused ? { confirm_paused: true } : {}),
       }),
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
+      // 409 agent_paused: o atendente está em pausa; quem chamou pergunta e repete com confirmPaused.
+      if (res.status === 409 && json.code === "agent_paused") {
+        return {
+          error: json.error ?? "Atendente em pausa",
+          paused: {
+            agentName: json.agent?.name ?? agentFullName ?? "Atendente",
+            reasonName: json.pause?.reason_name ?? "pausa",
+            startedAt: json.pause?.started_at ?? new Date().toISOString(),
+          },
+        };
+      }
       return { error: json.error ?? `HTTP ${res.status}` };
     }
   } catch (err) {
