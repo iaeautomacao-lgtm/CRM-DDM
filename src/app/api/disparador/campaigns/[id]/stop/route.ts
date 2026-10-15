@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { toErrorResponse } from "@/lib/auth/account";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
+import { emitCampaignCancelled, emitCampaignPaused } from "@/lib/webhooks-out/campaign-events";
 
 export async function POST(
   request: Request,
@@ -58,10 +59,14 @@ export async function POST(
     // A RPC só trocou o status (instantâneo; nenhum item é enviado a partir daqui). Os itens movem em lotes:
     // um orçamento curto aqui; o que sobrar (campanha muito grande) o cron termina.
     const moves = await drainDispatchMoves(supabaseAdmin(), campaignId, { budgetMs: 15_000 });
+    const itemsPendingMove = moves.partial || !moves.ok;
+    // Webhooks de saída (só com a RPC tendo mudado o estado; melhor esforço, nunca lançam): pausa manual ou encerramento pela tela.
+    if (action === "pause") await emitCampaignPaused(supabaseAdmin(), { accountId: ctx.accountId, campaignId, by: "user", itemsPendingMove });
+    else await emitCampaignCancelled(supabaseAdmin(), { accountId: ctx.accountId, campaignId, by: "user", reason: "cancelled", itemsPendingMove });
     return NextResponse.json({
       success: true,
       status: action === "pause" ? "pausada" : "encerrada",
-      items_pending_move: moves.partial || !moves.ok,
+      items_pending_move: itemsPendingMove,
     });
   } catch (err) {
     console.error("[Campaign Stop/Pause] Failed:", err);

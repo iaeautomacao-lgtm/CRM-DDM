@@ -45,6 +45,7 @@
     "src/lib/billing/sync.ts",
     "src/lib/push/service.ts",
     "src/lib/ops/cron-heartbeat.ts",
+    "src/lib/webhooks-out/campaign-events.ts",
     "src/lib/webhooks-out/endpoints.ts",
     "src/lib/webhooks-out/deliver.ts",
     "src/lib/ai/knowledge/extract.ts",

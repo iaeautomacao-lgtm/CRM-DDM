@@ -146,3 +146,23 @@ Claude Desktop (`claude_desktop_config.json`, via `mcp-remote`):
 ```
 
 Nunca coloque a chave em repositório ou em arquivo compartilhado.
+
+## Webhooks de campanha e de destinatário (Onda 1, bloco B)
+
+Pela fila de webhooks de saída já existente (`/api/v1/webhooks`: assinatura `X-CRM-Signature`, retry com backoff, replay, dedupe pelo `id`), só para quem **assinou** o tipo. Detalhe dos campos no OpenAPI (`/api/v1/openapi.json`, seção "Eventos de campanha e de destinatário").
+
+| Evento | Quando | Origem |
+| --- | --- | --- |
+| `campaign.started` | campanha criada pela API e ativada, ou iniciada pelo painel | código, depois da ativação |
+| `campaign.paused` | pausa **manual** (tela ou API). A automática continua `campaign.auto_paused` | código, depois da RPC de pausa (só se mudou) |
+| `campaign.resumed` | retomada manual (tela ou API) | código, depois da RPC de retomada (só se mudou) |
+| `campaign.completed` | fila esgotada (`complete_dispatch_campaign` devolveu verdadeiro) | código, no cron do disparador |
+| `campaign.cancelled` | encerramento manual (tela `stop` ou API `cancel`) | código, depois da RPC de encerramento (só se mudou) |
+| `recipient.status` | destinatário chegou a um status **final**: `delivered`, `read`, `error`, `blocked`, `removed` | trigger em `disp_message_queue` (migration 361) |
+| `recipient.funnel` | clicou (`clicked`), fechou acordo (`closed`) ou pagou (`paid`, confirmado na DDM), com a atribuição `direct`/`ai`/`human` | trigger em `utmpay_links` (migration 362) |
+
+- **Volume:** os dois eventos por destinatário podem passar de centenas de milhares por dia. Cada endpoint tem o teto `rate_limit_per_minute` (padrão 600, de 1 a 6000), configurável no `POST /webhooks` e no `PATCH /webhooks/{id}` (migration 360). O que passa do teto **espera** na fila (não se perde e não gasta tentativa); a janela é deslizante de 60 s. Ajuste ao que o ERP aguenta e assine só os tipos de que precisa. A retenção das entregas antigas continua fora desta entrega.
+- **Cada status/etapa sai uma vez por destinatário** (`event_id` determinístico). `queued`/`sending`/`sent` não geram evento; o encerramento de campanha tem o seu próprio evento, com contagem, em vez de um evento por item cancelado.
+- **Dado pessoal:** `recipient.*` leva o telefone do destinatário (nunca CPF nem o texto enviado). O erro sai só como `{ code, type }`, sem texto técnico.
+- **Quem emite o quê:** ciclo de vida em `src/lib/webhooks-out/campaign-events.ts` (`emitCampaignStarted|Paused|Resumed|Completed|Cancelled`, melhor esforço, nunca lançam); a API de controle de campanha (pause/resume/cancel) chama `emitCampaignPaused|Resumed|Cancelled` com `by: 'api'`, só quando o estado mudou.
+- **Migrations:** 360 (limite por endpoint), 361 (`recipient.status`), 362 (`recipient.funnel`); aplicar na ordem 360 → 361 → 362, depois da 204 (e da 356 para a 362). Sem elas o app segue funcionando; só faltam os eventos por destinatário e o limite configurável.
