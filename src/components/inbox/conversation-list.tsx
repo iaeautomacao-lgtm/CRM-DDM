@@ -21,6 +21,11 @@ import {
   BellOff,
   History,
   PanelLeftClose,
+  MessageCircle,
+  MessageSquare,
+  Globe,
+  Smartphone,
+  type LucideIcon,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
@@ -47,6 +52,7 @@ import {
 import { sectionTotal, shouldAutoLoadMore } from "@/lib/inbox/pagination";
 import { INBOX_QUEUE_LABELS, inboxQueueSection } from "@/lib/inbox/queue-section";
 import { PushNudge } from "./push-nudge";
+import { awaitingReplySince, formatWait, waitLevel, waitMinutes } from "@/lib/inbox/wait-time";
 
 // Lista do inbox (F2). Os dados vêm de /api/inbox/conversations, paginados
 // e filtrados no servidor (RLS do usuário). Os filtros ficam na URL
@@ -236,6 +242,12 @@ export function ConversationList({
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const options = useFilterOptions(accountId);
+  // Relógio do card (tempo de espera): atualiza a cada 30 s sem refazer consulta.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [openSectionExpanded, setOpenSectionExpanded] = useState<boolean>(() =>
     readSectionPref(SECTION_STORAGE_KEY.open)
@@ -419,6 +431,7 @@ export function ConversationList({
   const clientsById = useMemo(() => new Map(options.clients.map((c) => [c.id, c])), [options.clients]);
   const agentsById = useMemo(() => new Map(options.agents.map((a) => [a.id, a.name])), [options.agents]);
   const teamsById = useMemo(() => new Map(options.teams.map((t) => [t.id, t])), [options.teams]);
+  const linesById = useMemo(() => new Map(options.lines.map((l) => [l.id, l.name])), [options.lines]);
   const linesForTab = useMemo(
     () =>
       options.lines.filter((l) =>
@@ -493,6 +506,8 @@ export function ConversationList({
           }
           showStatus={!grouped}
           team={conv.team_id ? teamsById.get(conv.team_id) ?? null : null}
+          lineName={linesById.get(conv.config_id ?? conv.channel_id ?? "") ?? null}
+          nowMs={nowMs}
         />
       ))}
     </div>
@@ -995,13 +1010,19 @@ interface ConversationItemProps {
   showStatus: boolean;
   /** Equipe da conversa: a cor dela marca o avatar (item 12 do PRD 23). */
   team: { name: string; color: string | null } | null;
+  /** Nome curto da linha/número por onde a conversa chegou. */
+  lineName: string | null;
+  /** Relógio compartilhado da lista (ms), para o tempo de espera andar sozinho. */
+  nowMs: number;
 }
 
-/** Minutos que o cliente espera sem atendente (null se não está esperando). */
-function waitingMinutes(c: Conversation): number | null {
-  if (c.assigned_agent_id || c.status === "closed" || !c.last_customer_message_at) return null;
-  return Math.floor((Date.now() - Date.parse(c.last_customer_message_at)) / 60_000);
-}
+const CHANNEL_ICON: Record<string, LucideIcon> = {
+  whatsapp: MessageCircle,
+  webchat: Globe,
+  instagram: MessageSquare,
+  messenger: MessageSquare,
+  sms: Smartphone,
+};
 
 /** "5 min", "2 h", "3 d". */
 function shortDuration(minutes: number): string {
@@ -1034,20 +1055,24 @@ const QUEUE_DOT: Record<string, string> = {
   closed: "bg-muted-foreground",
 };
 
-function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team }: ConversationItemProps) {
+function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
   const channelLabel = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"]?.label ?? "WhatsApp";
   const unread = conversation.unread_count > 0;
-  const waitMin = waitingMinutes(conversation);
-  const waiting = waitMin !== null && waitMin >= 5;
+  // Espera = última mensagem é do cliente e ninguém respondeu (com ou sem atendente).
+  const waitSince = awaitingReplySince(conversation);
+  const waitMin = waitSince === null ? null : waitMinutes(waitSince, nowMs);
+  const waiting = waitMin !== null;
+  const level = waitMin === null ? "ok" : waitLevel(waitMin);
+  const ChannelIcon = CHANNEL_ICON[conversation.channel_type ?? "whatsapp"] ?? MessageCircle;
   const negative = conversation.sentiment === "negative";
   const queueSection = inboxQueueSection(conversation);
   const queueLabel = INBOX_QUEUE_LABELS[queueSection];
 
   const time = waiting
-    ? `aguarda ${shortDuration(waitMin)}`
+    ? `aguarda ${formatWait(waitMin)}`
     : conversation.last_message_at
       ? compactTimeAgo(conversation.last_message_at)
       : "";
@@ -1099,12 +1124,12 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
             className={cn(
               "shrink-0 whitespace-nowrap text-[11.5px] tabular-nums",
               waiting
-                ? cn("font-semibold", waitMin >= 30 ? "text-destructive" : "text-warning")
+                ? cn("font-semibold", level === "critical" ? "text-destructive" : level === "late" ? "text-warning" : "text-foreground-2")
                 : unread
                   ? "font-semibold text-primary-text"
                   : "text-muted-foreground",
             )}
-            title={timeTitle}
+            title={waiting ? `Cliente aguardando resposta há ${formatWait(waitMin)}` : timeTitle}
           >
             {time}
           </span>
@@ -1138,8 +1163,19 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
               <span aria-hidden="true">·</span>
             </>
           )}
-          <span className="shrink-0">{channelLabel}</span>
-          {team && <span className="sr-only">Equipe: {team.name}.</span>}
+          <span className="inline-flex min-w-0 shrink items-center gap-1" title={lineName ? `${channelLabel}: ${lineName}` : channelLabel}>
+            <ChannelIcon className="size-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">{lineName ?? channelLabel}</span>
+          </span>
+          {team && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="min-w-0 truncate" title={`Equipe: ${team.name}`}>
+                <span className="sr-only">Equipe: </span>
+                {team.name}
+              </span>
+            </>
+          )}
           {assigneeName && (
             <>
               <span aria-hidden="true">·</span>
