@@ -14,6 +14,8 @@ export interface ConversationCardActions {
   onTransferClick: (conversation: MonitorConversation) => void;
   onFinalizeClick: (conversation: MonitorConversation) => void;
   onHistoryClick: (conversation: MonitorConversation) => void;
+  /** Abre a conversa numa gaveta, sem sair do Monitoramento. */
+  onOpenClick: (conversation: MonitorConversation) => void;
   getTeamName: (teamId: string | null) => string | null;
   getAgentName: (agentId: string | null) => string | null;
 }
