@@ -28,6 +28,9 @@ import {
 } from "recharts";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { useDisparadorLive } from "@/hooks/use-disparador-live";
+import { LiveBadge } from "@/components/disparador/live-badge";
+import { applyDeltaToLive, livePollMs } from "@/lib/disparador/live-delta";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -158,6 +161,11 @@ export default function DisparadorDesempenhoPage() {
 
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);
+  // Empurrado pelo banco (migration 364): cada envio atualiza os contadores na hora; a consulta vira só reconciliação (45 s).
+  const { connected: liveConnected, latencyMs: liveLatency } = useDisparadorLive(
+    (delta) => setLive((prev) => (prev ? applyDeltaToLive(prev, delta) : prev)),
+    true,
+  );
 
   const isMountedRef = useRef(true);
   const liveRequestInFlightRef = useRef(false);
@@ -246,9 +254,9 @@ export default function DisparadorDesempenhoPage() {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") void fetchLiveData();
-    }, 3000);
+    }, livePollMs(liveConnected));
     return () => clearInterval(interval);
-  }, [autoRefresh, fetchLiveData]);
+  }, [autoRefresh, fetchLiveData, liveConnected]);
 
   // Telemetria histórica continua a cada 30 segundos
   useEffect(() => {
@@ -300,11 +308,10 @@ export default function DisparadorDesempenhoPage() {
               <Switch
                 checked={autoRefresh}
                 onCheckedChange={setAutoRefresh}
-                aria-label="Estado operacional a cada 3 segundos e histórico a cada 30 segundos"
+                aria-label="Estado operacional ao vivo e histórico a cada 30 segundos"
               />
               <span className="flex items-center gap-1.5 tabular-nums">
-                <span aria-hidden="true" className={cn("size-2 rounded-full", autoRefresh ? "animate-pulse bg-success" : "bg-muted-foreground")} />
-                Ao vivo 3 s · histórico {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}
+                <LiveBadge connected={liveConnected && autoRefresh} latencyMs={liveLatency} /> · histórico {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}
               </span>
             </label>
             <Button

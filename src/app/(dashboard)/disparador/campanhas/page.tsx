@@ -57,6 +57,9 @@ import { forecastFromCampaign } from "@/lib/disparador/dispatch-forecast";
 import { CampaignWizard, type EditableCampaign } from "@/components/disparador/nova-campanha/campaign-wizard";
 import { formatShortBrasilia } from "@/components/disparador/nova-campanha/forecast-summary";
 import type { NamedChannel } from "@/components/disparador/nova-campanha/step-origem";
+import { useDisparadorLive } from "@/hooks/use-disparador-live";
+import { LiveBadge } from "@/components/disparador/live-badge";
+import { applyDeltaToMetrics } from "@/lib/disparador/live-delta";
 
 interface Campaign {
   id: string;
@@ -463,6 +466,27 @@ export default function CampanhasPage() {
   // Só tem dado pra campanhas cujo modal de métricas já foi aberto
   // nesta sessão.
   const [metricsMap, setMetricsMap] = useState<Record<string, CampaignMetrics>>({});
+  // Empurrado pelo banco (migration 364): cada envio/entrega/leitura/erro atualiza os cards e o modal na hora; a consulta do modal vira reconciliação (45 s).
+  const { connected: liveConnected, latencyMs: liveLatency } = useDisparadorLive((delta) => {
+    setMetricsMap((prev) => {
+      let next = prev;
+      for (const id of Object.keys(delta.campaigns)) {
+        if (!prev[id]) continue;
+        const updated = applyDeltaToMetrics(prev[id], id, delta);
+        if (updated !== prev[id]) next = next === prev ? { ...prev, [id]: updated } : { ...next, [id]: updated };
+      }
+      return next;
+    });
+    setMetricsData((prev) => {
+      const id = metricsModalIdRef.current;
+      return prev && id ? applyDeltaToMetrics(prev, id, delta) : prev;
+    });
+  });
+  const liveConnectedRef = useRef(false);
+  const metricsModalIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    liveConnectedRef.current = liveConnected;
+  }, [liveConnected]);
   // Contagem do card "A enviar" — não vem de campaign_metrics. A rota
   // queue-details agrega trabalho ainda não concluído:
   // agendado + pendente + pausado + enviando.
@@ -992,6 +1016,7 @@ export default function CampanhasPage() {
 
   const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
     setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
+    metricsModalIdRef.current = campaign.id;
     setMetricsData(null);
     setTimingData(null);
     setAgendadosCount(null);
@@ -1002,7 +1027,11 @@ export default function CampanhasPage() {
 
     // Auto-refresh a cada 15 segundos enquanto o modal estiver aberto.
     if (metricsRefreshRef.current) clearInterval(metricsRefreshRef.current);
+    // Com o canal ao vivo os números já chegam empurrados: só reconcilia a cada 3ª volta (45 s).
+    let ticks = 0;
     metricsRefreshRef.current = setInterval(() => {
+      ticks += 1;
+      if (liveConnectedRef.current && ticks % 3 !== 0) return;
       fetchMetrics(campaign.id, campaign.nome, true);
     }, 15000);
   };
@@ -1096,6 +1125,7 @@ export default function CampanhasPage() {
       clearInterval(metricsRefreshRef.current);
       metricsRefreshRef.current = null;
     }
+    metricsModalIdRef.current = null;
     setMetricsModal(null);
     setMetricsData(null);
     setTimingData(null);
@@ -1608,9 +1638,12 @@ export default function CampanhasPage() {
         description="Métricas da campanha"
         headerExtra={
           metricsCampaign ? (
-            <StatusChip tone={STATUS_TONE[statusKey(metricsCampaign.status)]}>
-              {STATUS_LABELS[statusKey(metricsCampaign.status)]}
-            </StatusChip>
+            <span className="inline-flex items-center gap-3">
+              <StatusChip tone={STATUS_TONE[statusKey(metricsCampaign.status)]}>
+                {STATUS_LABELS[statusKey(metricsCampaign.status)]}
+              </StatusChip>
+              <LiveBadge connected={liveConnected} latencyMs={liveLatency} />
+            </span>
           ) : null
         }
         size="md"

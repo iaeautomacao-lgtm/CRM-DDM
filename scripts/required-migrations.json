@@ -515,6 +515,10 @@
     {
       "version": "356_utmpay_integracao",
       "kind": "registry"
+    },
+    {
+      "version": "364_disp_live_push",
+      "kind": "registry"
     }
   ]
 }
