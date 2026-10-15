@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { presencePermissionsFrom370 } from '@/lib/pausas/presence-permissions-sql'
 
 import {
   PERMISSIONS,
@@ -107,6 +108,7 @@ describe('migrations 312/313 — papel personalizado', { timeout: 120_000 }, () 
     await db.exec(`INSERT INTO wacrm.permission_catalog (key, label, description, group_name, scope, owner_only, grantable, depends_on, sort)
       VALUES ('pipelines.delete', 'Excluir funil em definitivo', 'Apagar um funil com etapas e negócios, sem volta (arquivar é o caminho normal).', 'Funis', 'n/a', true, false, ARRAY['pipelines.manage']::text[], 680)
       ON CONFLICT (key) DO NOTHING`)
+    await db.exec(presencePermissionsFrom370()) // presence.* (370): o catálogo do código já as tem
     await db.exec(migration('312_custom_role_validation.sql'))
     await db.exec(migration('313_custom_roles.sql'))
     await db.exec(migration('312_custom_role_validation.sql')) // idempotentes

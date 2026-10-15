@@ -9,6 +9,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { SYSTEM_ROLE_PERMISSIONS, validateCustomRolePermissions } from '@/lib/auth/permissions'
+import { presencePermissionsFrom370 } from '@/lib/pausas/presence-permissions-sql'
 
 const migration = (file: string) =>
   readFileSync(resolve(process.cwd(), 'supabase/migrations', file), 'utf8').replace(/NOTIFY pgrst[^;]*;/g, '')
@@ -96,6 +97,7 @@ describe('migrations 318/319 — cargos por nível e por organização', { timeo
       '304_view_permission_keys.sql', '312_custom_role_validation.sql', '313_custom_roles.sql', '318_roles_by_level.sql', '319_invitation_role_id.sql']) {
       await db.exec(migration(f))
     }
+    await db.exec(presencePermissionsFrom370()) // presence.* (370): o catálogo do código já as tem
     await db.exec(migration('318_roles_by_level.sql')) // idempotentes
     await db.exec(migration('319_invitation_role_id.sql'))
   }, 120_000)

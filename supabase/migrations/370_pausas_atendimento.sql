@@ -74,11 +74,11 @@ END $$;
 -- ---------- 1. Permissões (catálogo + papéis de sistema) ----------
 INSERT INTO wacrm.permission_catalog (key, label, description, group_name, scope, owner_only, grantable, depends_on, sort) VALUES
   ('presence.pause_self', 'Pausar a si mesmo', 'Entrar em pausa (almoço, banheiro…) e voltar ao atendimento.', 'Pausas', 'own', false, true,
-   ARRAY['inbox.view']::text[], 700),
+   ARRAY['inbox.view']::text[], 690),
   ('presence.pause_others', 'Pausar outros atendentes', 'Pausar e retomar outros atendentes (supervisor: só das equipes dele; quem vê a organização toda: qualquer um).', 'Pausas', 'team', false, true,
-   ARRAY['presence.pause_self', 'monitoring.view_team']::text[], 701),
+   ARRAY['presence.pause_self', 'monitoring.view_team']::text[], 700),
   ('presence.reasons_manage', 'Gerenciar motivos de pausa', 'Criar, editar e desativar os motivos de pausa e o tempo máximo de cada um.', 'Pausas', 'n/a', false, true,
-   ARRAY[]::text[], 702)
+   ARRAY[]::text[], 710)
 ON CONFLICT (key) DO UPDATE SET label = EXCLUDED.label, description = EXCLUDED.description, group_name = EXCLUDED.group_name,
   scope = EXCLUDED.scope, owner_only = EXCLUDED.owner_only, grantable = EXCLUDED.grantable, depends_on = EXCLUDED.depends_on, sort = EXCLUDED.sort;
 
