@@ -556,6 +556,10 @@
     {
       "version": "367_dispatch_worker_leases",
       "kind": "registry"
+    },
+    {
+      "version": "368_dispatch_send_bucket",
+      "kind": "registry"
     }
   ]
 }
