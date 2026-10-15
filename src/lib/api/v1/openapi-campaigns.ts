@@ -22,6 +22,7 @@ export const CAMPAIGN_CONTROL_GUIDE = [
   '- `POST /disparador/campaigns/{id}/pause` pausa uma campanha em execução (corpo opcional `{ "reason": "…" }`, até 200 caracteres, visível no painel). Itens que já estão sendo enviados não são tocados.',
   '- `POST /disparador/campaigns/{id}/resume` retoma uma pausada. Se o **motor** pausou (taxa de erro etc.), envie `{ "acknowledge_auto_pause": true }` depois de corrigir a causa. Bloqueia **sempre** (409): template da campanha sem aprovação na Meta (`details.code = template_not_approved`) e número em qualidade vermelha (`details.code = red_quality`, a confirmação é do proprietário na tela).',
   '- `POST /disparador/campaigns/{id}/cancel` encerra a campanha. **Irreversível**: exige `{ "confirm": true }`; os itens agendados e pausados viram `cancelado`. Só cancela campanha em execução, pausada ou agendada.',
+  '- `POST /disparador/campaigns/{id}/recipients` **adiciona** contatos a uma campanha criada pela API que esteja em execução ou pausada (até 20.000 por chamada, 50.000 por campanha; `Idempotency-Key` obrigatória; repetir é seguro e não duplica).',
   '- `POST /disparador/campaigns/{id}/recipients/remove` tira destinatários **ainda não enviados** (ex.: o cliente pagou), por `phone`, `cpf` ou `reference`. Não é opt-out: a lista de bloqueio não é tocada. Quem já recebeu não se desfaz (`already_sent`); quem está sendo enviado agora volta como `in_flight` (repita depois). O CPF só acha quem já existe como contato no CRM e nunca é devolvido; para campanhas criadas pela API, o jeito mais seguro é mandar um `reference` por contato no `POST /disparador/campaigns` e usá-lo aqui.',
   '',
   'No detalhe da campanha, `ended_reason` diz se a encerrada foi `completed`, `cancelled` (tela) ou `cancelled_api`; `pause.reason` traz o motivo da pausa.',
@@ -125,6 +126,38 @@ const jsonBody = (schemaName: string, example: Json, required = false) => ({
   required,
   content: { 'application/json': { schema: ref(schemaName), example } },
 });
+
+const addRecipientsPost = {
+  tags: ['Disparador'],
+  operationId: 'addCampaignRecipients',
+  summary: 'Adicionar contatos a uma campanha existente',
+  description: [
+    'Exige `campaigns:write` e o cabeçalho **`Idempotency-Key`** (obrigatório). Só funciona em campanha **criada pela API** que esteja **em execução ou pausada**; nos demais estados responde `409`. Até 20.000 contatos por chamada e no máximo **50.000 contatos por campanha** (`413` acima disso). Limite de 6 chamadas por minuto por chave, o mesmo de criar campanha.',
+    '',
+    'Valem as regras do create: blacklist/opt-out, telefones inválidos, variáveis do template (Meta) ou da mensagem (WAHA), janela e dias da campanha. O ritmo é o da própria campanha (`slot_size` e `slot_interval_minutes` guardados na criação) e os novos entram **depois do último já agendado**. Contato cujo telefone já está na campanha conta em `duplicates` e não é inserido de novo. Número em qualidade vermelha ou template sem aprovação na Meta bloqueiam (`409`).',
+    '',
+    '**Repetir é seguro.** A mesma `Idempotency-Key` com o mesmo corpo devolve a mesma resposta sem inserir. Se uma tentativa falhar no meio (`error.details.added_before_error` informa quantos entraram), repita a chamada completa: a deduplicação contra a campanha só acrescenta o que faltou. Em campanha pausada os itens entram pausados e saem quando ela for retomada.',
+  ].join('\n'),
+  parameters: [idParam, { name: 'Idempotency-Key', in: 'header', required: true, description: '8 a 128 caracteres (letras, números, `.`, `_`, `:`, `-`), uma por intenção de adição.', schema: { type: 'string', minLength: 8, maxLength: 128 } }],
+  requestBody: jsonBody('AddRecipientsRequest', { contacts: [{ phone: '+5521999998888', variables: ['Maria', 'R$ 150,00'], reference: 'contrato-8841' }] }, true),
+  responses: {
+    '200': {
+      description: 'Resultado da adição.',
+      content: {
+        'application/json': {
+          schema: { type: 'object', required: ['data'], properties: { data: ref('AddRecipientsResponse') } },
+          example: { data: { added: 480, duplicates: 12, skipped: 3, invalid: 5, invalid_sample: [{ index: 7, phone: '123', reason: 'invalid_phone' }], total_contacts: 1480, estimated_completion_minutes: 30 } },
+        },
+      },
+    },
+    '400': apiError('Corpo inválido, ou nenhum contato válido.', 'bad_request', "'contacts' é obrigatório e deve ser uma lista"),
+    '404': notFound,
+    '409': stateConflict('Só é possível adicionar contatos a uma campanha em execução ou pausada', { status: 'encerrada' }),
+    '413': apiError('Mais de 20.000 contatos na chamada ou campanha acima de 50.000.', 'payload_too_large', 'A campanha passaria de 50000 contatos (hoje 49800); abra outra campanha'),
+    '503': apiError('Migrations 357/358 ainda não aplicadas.', 'unavailable', 'Adicionar contatos indisponível: aplique as migrations 357 e 358'),
+    ...common,
+  },
+};
 
 export const campaignControlPaths: Record<string, Json> = {
   '/disparador/campaigns/{id}/pause': {
@@ -237,6 +270,7 @@ export const campaignControlPaths: Record<string, Json> = {
 export const campaignPaths: Record<string, Json> = {
   ...campaignControlPaths,
   '/disparador/campaigns/{id}/recipients': {
+    post: addRecipientsPost,
     get: {
       tags: ['Disparador'],
       operationId: 'listCampaignRecipients',
@@ -325,6 +359,23 @@ export const campaignDetailProperties = {
 };
 
 export const campaignSchemas: Record<string, Json> = {
+  AddRecipientsRequest: {
+    type: 'object',
+    required: ['contacts'],
+    properties: { contacts: { type: 'array', minItems: 1, maxItems: 20000, items: ref('CampaignContact') } },
+  },
+  AddRecipientsResponse: {
+    type: 'object',
+    properties: {
+      added: { type: 'integer', description: 'Contatos inseridos na campanha.' },
+      duplicates: { type: 'integer', description: 'Repetidos na chamada ou já presentes na campanha.' },
+      skipped: { type: 'integer', description: 'Na lista de bloqueio (opt-out).' },
+      invalid: { type: 'integer' },
+      invalid_sample: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, phone: { type: ['string', 'null'] }, reason: { type: 'string' } } } },
+      total_contacts: { type: 'integer', description: 'Itens da campanha depois da adição.' },
+      estimated_completion_minutes: { type: 'integer' },
+    },
+  },
   CampaignControlResult: {
     type: 'object',
     properties: {

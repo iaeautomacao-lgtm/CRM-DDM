@@ -18,6 +18,7 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `GET /api/v1/disparador/campaigns` | `campaigns:read` ou `campaigns:write` | Lista campanhas (filtros `status`, `source`, `external_id`, período; cursor) |
 | `GET /api/v1/disparador/campaigns/{id}/recipients` | `campaigns:read` ou `campaigns:write` | Status por destinatário (`queued`…`read`, `error`, `blocked`, `cancelled`), `replied` e funil `clicked`/`closed`/`paid` do UTMpay; 60/min, auditado; nunca CPF |
 | `POST /api/v1/disparador/campaigns/{id}/pause` · `/resume` · `/cancel` | `campaigns:write` | Pausar, retomar e cancelar (idempotentes por estado; `cancel` exige `{"confirm": true}`; `resume` de pausa automática exige `acknowledge_auto_pause`); 30/min |
+| `POST /api/v1/disparador/campaigns/{id}/recipients` | `campaigns:write` | Adiciona contatos a campanha criada pela API (em execução ou pausada); até 20.000 por chamada e 50.000 por campanha; `Idempotency-Key` obrigatória; repetir não duplica; 6/min |
 | `POST /api/v1/disparador/campaigns/{id}/recipients/remove` | `campaigns:write` | Tira da campanha quem ainda não recebeu (ex.: pagou), por `phone`, `cpf` ou `reference`; idempotente; não é opt-out; 30/min |
 | `GET /api/v1/reports/*` (`operations/current`, `operations/summary`, `teams`, `agents`, `tabulations`) | `reports:read` | Reporting API: métricas agregadas para BI (Power BI, Metabase, n8n). Detalhes em [`reporting-api.md`](./reporting-api.md) |
 

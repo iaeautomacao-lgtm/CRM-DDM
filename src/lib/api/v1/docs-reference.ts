@@ -19,6 +19,7 @@ export const OPERATION_SCOPES: Record<string, string[]> = {
   getCampaign: ['campaigns:read', 'campaigns:write'],
   listCampaigns: ['campaigns:read', 'campaigns:write'],
   listCampaignRecipients: ['campaigns:read', 'campaigns:write'],
+  addCampaignRecipients: ['campaigns:write'],
   pauseCampaign: ['campaigns:write'],
   resumeCampaign: ['campaigns:write'],
   cancelCampaign: ['campaigns:write'],

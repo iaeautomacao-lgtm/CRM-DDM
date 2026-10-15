@@ -24,6 +24,7 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getCampaign: 'acompanhar',
   listCampaigns: 'acompanhar',
   listCampaignRecipients: 'acompanhar',
+  addCampaignRecipients: 'acompanhar',
   pauseCampaign: 'acompanhar',
   resumeCampaign: 'acompanhar',
   cancelCampaign: 'acompanhar',
