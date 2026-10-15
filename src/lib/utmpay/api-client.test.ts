@@ -5,6 +5,9 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 
 import {
   UtmpayApiError,
+  connectUtmpay,
+  fetchStatus,
+  parseChecklist,
   etapaDoRastreio,
   fetchContactRastreio,
   fetchFunil,
@@ -94,5 +97,70 @@ describe("UTMpay · chamadas", () => {
     expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({ enabled: false, janela_dias: 10 });
     apiFetch.mockResolvedValue(json(200, { ok: false, message: "UTMpay não respondeu" }));
     expect(await testConfig()).toEqual({ ok: false, message: "UTMpay não respondeu" });
+  });
+});
+
+const CHECKLIST = {
+  itens: [
+    { id: "endereco", titulo: "1. Endereço do UTMpay", estado: "ok", detalhe: "https://u.example.com", acao: null, acao_id: null },
+    { id: "chave", titulo: "2. Chave de acesso", estado: "ok", detalhe: "Configurada (salva em 15/10/2026 09:00).", acao: null, acao_id: null },
+    { id: "segredo", titulo: "3. Segredo dos avisos", estado: "ok", detalhe: "Configurado.", acao: null, acao_id: null },
+    { id: "avisos", titulo: "4. UTMpay mandando avisos para o CRM", estado: "erro", detalhe: "Ainda não.", acao: "Clique em Conectar.", acao_id: "conectar" },
+    { id: "ligado", titulo: "5. Rastreamento ligado", estado: "pendente", detalhe: "Desligado.", acao: "Ligue quando quiser.", acao_id: "ligar" },
+  ],
+  primeira_vez: false,
+  proximo_passo: "avisos",
+  prontos: 3,
+  total: 5,
+};
+
+describe("UTMpay · checklist e conexão (contrato seção 7)", () => {
+  it("lê o checklist do servidor; descarta itens/estados desconhecidos sem quebrar", () => {
+    const c = parseChecklist(CHECKLIST)!;
+    expect(c.itens.map((i) => i.id)).toEqual(["endereco", "chave", "segredo", "avisos", "ligado"]);
+    expect(c.itens[3]).toMatchObject({ estado: "erro", acao_id: "conectar" });
+    expect(c).toMatchObject({ primeira_vez: false, proximo_passo: "avisos", prontos: 3, total: 5 });
+    const ruim = parseChecklist({ itens: [{ id: "chave", estado: "azul", acao_id: "voar" }, { id: "outro" }], proximo_passo: "x" })!;
+    expect(ruim.itens).toHaveLength(1);
+    expect(ruim.itens[0]).toMatchObject({ estado: "pendente", acao_id: null });
+    expect(ruim.proximo_passo).toBeNull();
+    expect(parseChecklist(null)).toBeNull();
+    expect(parseChecklist({ itens: [] })).toBeNull();
+  });
+
+  it("GET config traz o checklist e a data de salvamento", async () => {
+    apiFetch.mockResolvedValue(json(200, { available: true, configured: true, enabled: false, base_url: "https://u.example.com", has_api_key: true, has_webhook_secret: true, janela_dias: 7, events_url: "https://crm/x", atualizado_em: "2026-10-15T12:00:00Z", checklist: CHECKLIST }));
+    const c = await fetchConfig();
+    expect(c.atualizado_em).toBe("2026-10-15T12:00:00Z");
+    expect(c.checklist?.total).toBe(5);
+  });
+
+  it("PUT já conecta: devolve a conexão (falha não desfaz o salvamento) e o checklist novo", async () => {
+    apiFetch.mockResolvedValue(json(200, { available: true, configured: true, enabled: false, base_url: "https://u.example.com", has_api_key: true, has_webhook_secret: true, janela_dias: 7, conexao: { tentou: true, ok: false, reason: "unauthorized", mensagem: "Falhou: a chave de acesso está errada. Copie a chave de novo no UTMpay e salve." }, checklist: CHECKLIST }));
+    const r = await saveConfig({ webhook_secret: "um-segredo-bem-longo-123" });
+    expect(r.base_url).toBe("https://u.example.com");
+    expect(r.conexao).toEqual({ tentou: true, ok: false, mensagem: "Falhou: a chave de acesso está errada. Copie a chave de novo no UTMpay e salve." });
+    expect(r.checklist?.itens).toHaveLength(5);
+  });
+
+  it("Conectar: ok com data e checklist; falha com a mensagem que diz o que fazer", async () => {
+    apiFetch.mockResolvedValue(json(200, { ok: true, message: "Conectado.", connected_at: "2026-10-15T12:00:00Z", conexao: { tentou: true, ok: true }, checklist: CHECKLIST }));
+    expect(await connectUtmpay()).toMatchObject({ ok: true, connected_at: "2026-10-15T12:00:00Z" });
+    expect(apiFetch.mock.calls[0][0]).toBe("/api/account/utmpay-config/connect");
+    expect(apiFetch.mock.calls[0][1].method).toBe("POST");
+    apiFetch.mockResolvedValue(json(200, { ok: false, message: "Falhou: a chave de acesso está errada. Copie a chave de novo no UTMpay e salve.", connected_at: null, checklist: null }));
+    const f = await connectUtmpay();
+    expect(f.ok).toBe(false);
+    expect(f.message).toMatch(/Copie a chave de novo/);
+    apiFetch.mockResolvedValue(json(429, { error: "Muitas tentativas. Aguarde um minuto." }));
+    await expect(connectUtmpay()).rejects.toMatchObject({ status: 429, message: "Muitas tentativas. Aguarde um minuto." });
+  });
+
+  it("status: estado real da conexão e checklist atualizado", async () => {
+    apiFetch.mockResolvedValue(json(200, { base_url_ok: true, api_key_ok: true, utmpay_alcancavel: true, utmpay_recebe_avisos: true, conectado_em: "2026-10-15T12:00:00Z", conexao: { estado: "conectado" }, checklist: CHECKLIST }));
+    const s = await fetchStatus();
+    expect(s).toMatchObject({ alcancavel: true, recebeAvisos: true, conectadoEm: "2026-10-15T12:00:00Z" });
+    expect(s.checklist?.itens).toHaveLength(5);
+    expect(apiFetch.mock.calls[0][0]).toBe("/api/account/utmpay-config/status");
   });
 });
