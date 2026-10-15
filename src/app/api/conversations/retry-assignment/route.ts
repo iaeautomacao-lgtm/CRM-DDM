@@ -25,6 +25,7 @@ export async function POST(request: Request) {
     .select("id, team_id, account_id")
     .eq("status", "pending")
     .is("assigned_agent_id", null)
+    .is("requested_agent_id", null)
     .or(`assignment_retry_at.is.null,assignment_retry_at.lte.${new Date().toISOString()}`)
     // Removido — conversas sem team_id também precisam de retry
     .lte("updated_at", cutoff)
