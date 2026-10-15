@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { recordAiTokenUsage } from '@/lib/billing/usage';
 
 // Geração de texto das campanhas `tipo=ia`. REGRA: se a IA falhar (429, timeout, sem chave ou
 // resposta vazia) NADA é enviado — o `mensagem_final` de um item `ia` é o PROMPT de instrução, e
@@ -32,6 +33,7 @@ export async function generateDispatchAiText(
   prompt: string,
   contactName: string | null | undefined,
   env: Record<string, string | undefined> = process.env,
+  accountId?: string,
 ): Promise<string | null> {
   const apiKey = env.DISPARADOR_OPENAI_API_KEY || env.OPENAI_API_KEY;
   if (!apiKey) return null;
@@ -48,6 +50,7 @@ export async function generateDispatchAiText(
       ],
       max_tokens: 500,
     });
+    await recordAiTokenUsage({ accountId, provider: 'openai', model: completion.model || 'gpt-4o-mini', feature: 'disparador', response: completion });
     const text = completion.choices[0]?.message?.content?.trim();
     return text ? text : null;
   } catch (error) {
