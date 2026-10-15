@@ -4,7 +4,7 @@ import { ERROR_ROWS, GUIDE_COVERAGE, GUIDE_SECTIONS, SCOPE_ROWS, buildGuideExamp
 import { API_KEY_PLACEHOLDER, requestFromOperation, toCurl, toN8n } from './docs-examples';
 
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
-const operations = Object.entries(openApiSpec.paths as Record<string, Record<string, { operationId: string }>>).flatMap(([path, item]) =>
+const operations = Object.entries(openApiSpec.paths as unknown as Record<string, Record<string, { operationId: string }>>).flatMap(([path, item]) =>
   METHODS.filter((m) => item[m]).map((method) => ({ path, method, operationId: item[method].operationId })),
 );
 
