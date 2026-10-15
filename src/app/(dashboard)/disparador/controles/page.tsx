@@ -22,6 +22,7 @@ import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
+import { EngineSwitches } from "@/components/disparador/engine-switches";
 import { formatInt, timeAgoPt } from "@/lib/disparador/monitor-format";
 import type { LimitsOverview, NumberLimits, RateInfo } from "@/lib/disparador/limits";
 
@@ -602,6 +603,8 @@ export default function ControlesPage() {
           Pausar número exige a migration 192, que ainda não foi aplicada neste banco. Vagas e limite por hora já funcionam.
         </div>
       )}
+
+      <EngineSwitches />
 
       {loading && !overview ? (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2" aria-busy="true" aria-label="Carregando controles">
