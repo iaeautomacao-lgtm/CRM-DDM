@@ -307,6 +307,48 @@ export function MessageComposer({
     el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
   }, []);
 
+  // Rascunho: grava no navegador 300 ms depois da última tecla (gravar a cada tecla travava a digitação em
+  // conversas com texto longo). Sai na hora ao trocar de conversa, ao desmontar e antes de a aba fechar.
+  const pendingDraftRef = useRef<{ id: string; val: string } | null>(null);
+  const draftTimerRef = useRef<number | null>(null);
+  const flushDraft = useCallback(() => {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    const pending = pendingDraftRef.current;
+    pendingDraftRef.current = null;
+    if (!pending) return;
+    try {
+      if (pending.val) localStorage.setItem(`wacrm:draft:${pending.id}`, pending.val);
+      else localStorage.removeItem(`wacrm:draft:${pending.id}`);
+    } catch (err) {
+      console.error("[Draft] Failed to save draft:", err);
+    }
+  }, []);
+  const discardPendingDraft = useCallback(() => {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    pendingDraftRef.current = null;
+  }, []);
+  const saveDraft = useCallback(
+    (val: string) => {
+      pendingDraftRef.current = { id: conversationId, val };
+      if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = window.setTimeout(flushDraft, 300);
+    },
+    [conversationId, flushDraft],
+  );
+  useEffect(() => {
+    window.addEventListener("pagehide", flushDraft);
+    return () => {
+      window.removeEventListener("pagehide", flushDraft);
+      flushDraft();
+    };
+  }, [flushDraft]);
+
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sending || sessionExpired) return;
@@ -316,6 +358,7 @@ export function MessageComposer({
       onSend(trimmed, replyTo?.id);
       reportAcorditoSend(trimmed);
       setText("");
+      discardPendingDraft();
       try {
         localStorage.removeItem(`wacrm:draft:${conversationId}`);
       } catch {}
@@ -325,7 +368,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId, reportAcorditoSend]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId, reportAcorditoSend, discardPendingDraft]);
 
   // ---- Respostas rápidas ("/atalho" ou botão ⚡) ----------------------
   const { profile } = useAuth();
@@ -352,17 +395,6 @@ export function MessageComposer({
     setQrIndex(0);
   }, []);
 
-  const saveDraft = useCallback(
-    (val: string) => {
-      try {
-        if (val) localStorage.setItem(`wacrm:draft:${conversationId}`, val);
-        else localStorage.removeItem(`wacrm:draft:${conversationId}`);
-      } catch (err) {
-        console.error("[Draft] Failed to save draft:", err);
-      }
-    },
-    [conversationId],
-  );
 
   const pickQuickReply = useCallback(
     (reply: QuickReply) => {
@@ -446,6 +478,7 @@ export function MessageComposer({
   // Load draft on mount / conversationId change
   useEffect(() => {
     if (!conversationId) return;
+    flushDraft();
     try {
       const saved = localStorage.getItem(`wacrm:draft:${conversationId}`);
       setText(saved || "");
@@ -459,7 +492,9 @@ export function MessageComposer({
     } catch {
       setText("");
     }
-  }, [conversationId, adjustHeight]);
+    // Rascunho pendente da conversa que está saindo grava antes de a nova abrir.
+    return flushDraft;
+  }, [conversationId, adjustHeight, flushDraft]);
 
   // Undo-Send "Editar" recall — restores the text or the staged media draft
   // that was pulled back from a pending (not-yet-sent) message. Runs once
@@ -481,6 +516,21 @@ export function MessageComposer({
     onRecallHandled?.();
   }, [recall, adjustHeight, onRecallHandled, removeStaged]);
 
+  const heightFrameRef = useRef<number | null>(null);
+  const scheduleAdjustHeight = useCallback(() => {
+    if (heightFrameRef.current !== null) return;
+    heightFrameRef.current = requestAnimationFrame(() => {
+      heightFrameRef.current = null;
+      adjustHeight();
+    });
+  }, [adjustHeight]);
+  useEffect(
+    () => () => {
+      if (heightFrameRef.current !== null) cancelAnimationFrame(heightFrameRef.current);
+    },
+    [],
+  );
+
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
@@ -497,9 +547,9 @@ export function MessageComposer({
         // em vez de enviar).
         closeQuickReplies();
       }
-      adjustHeight();
+      scheduleAdjustHeight();
     },
-    [saveDraft, qr, closeQuickReplies, adjustHeight]
+    [saveDraft, qr, closeQuickReplies, scheduleAdjustHeight]
   );
 
   // Upload a captured file to chat-media and stage it as a draft.
