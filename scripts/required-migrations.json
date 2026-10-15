@@ -515,6 +515,15 @@
     {
       "version": "356_utmpay_integracao",
       "kind": "registry"
+    },
+    {
+      "version": "363_perf_rls_membership_initplan",
+      "kind": "registry"
+    },
+    {
+      "version": "365b_deals_contact_idx",
+      "kind": "index",
+      "index": "idx_deals_contact"
     }
   ]
 }
