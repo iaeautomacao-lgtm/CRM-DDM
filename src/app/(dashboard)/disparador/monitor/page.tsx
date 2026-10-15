@@ -12,6 +12,9 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Info, Pause, RefreshCw, Siren } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { useDisparadorLive } from "@/hooks/use-disparador-live";
+import { LiveBadge } from "@/components/disparador/live-badge";
+import { RECONCILE_RATES_MS, applyDeltaToSnapshot, livePollMs } from "@/lib/disparador/live-delta";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -31,7 +34,7 @@ import {
   timeAgoPt,
 } from "@/lib/disparador/monitor-format";
 
-const POLL_MS = 3000;
+
 
 const LEVEL_STYLES: Record<AlertLevel, string> = {
   critical: "bg-danger-soft text-foreground [&_svg]:text-danger",
@@ -129,13 +132,20 @@ export default function MonitorV2Page() {
     }
   }, []);
 
-  // Primeira carga e polling de 3 s SÓ com a aba visível; ao voltar para a aba, atualiza na hora.
+  // Empurrado pelo banco (migration 364): cada envio/erro atualiza campanhas e fila na hora; a consulta vira reconciliação (10 s, para as taxas por minuto).
+  const { connected: liveConnected, latencyMs: liveLatency } = useDisparadorLive((delta) => {
+    setSnapshot((prev) => (prev ? applyDeltaToSnapshot(prev, delta) : prev));
+    setLastOkAt(Date.now());
+  }, live);
+  const pollMs = livePollMs(liveConnected, RECONCILE_RATES_MS);
+
+  // Primeira carga e polling (3 s sem o canal ao vivo; 10 s com ele) SÓ com a aba visível; ao voltar para a aba, atualiza na hora.
   useEffect(() => {
     void load();
     if (!live) return;
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") void load();
-    }, POLL_MS);
+    }, pollMs);
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
@@ -144,7 +154,7 @@ export default function MonitorV2Page() {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [live, load]);
+  }, [live, load, pollMs]);
 
   // Relógio de 1 s só para os textos "há X s".
   useEffect(() => {
@@ -152,7 +162,7 @@ export default function MonitorV2Page() {
     return () => clearInterval(t);
   }, []);
 
-  const stale = lastOkAt !== null && clock - lastOkAt > POLL_MS * 4;
+  const stale = lastOkAt !== null && clock - lastOkAt > pollMs * 4;
   const s = snapshot;
   const engineDown = s?.engine.stale === true;
   const liveOk = live && !stale && !error;
@@ -163,13 +173,13 @@ export default function MonitorV2Page() {
         actions={
           <>
             <label className="flex h-8 cursor-pointer items-center gap-2 rounded-[6px] border border-border bg-card px-2.5 text-[12.5px] font-medium text-foreground">
-              <Switch checked={live} onCheckedChange={setLive} aria-label="Atualização automática a cada 3 segundos" />
+              <Switch checked={live} onCheckedChange={setLive} aria-label="Atualização automática ao vivo" />
               <span className="flex items-center gap-1.5">
                 <span
                   aria-hidden="true"
                   className={cn("size-2 rounded-full", liveOk ? "animate-pulse bg-success" : "bg-muted-foreground")}
                 />
-                {live ? "Ao vivo" : "Pausado"}
+                {live ? <LiveBadge connected={liveConnected} latencyMs={liveLatency} className="text-[12.5px] text-foreground" /> : "Pausado"}
               </span>
             </label>
             <Button variant="outline" onClick={() => void load()} disabled={loading}>

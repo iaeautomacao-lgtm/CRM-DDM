@@ -521,6 +521,10 @@
       "kind": "registry"
     },
     {
+      "version": "364_disp_live_push",
+      "kind": "registry"
+    },
+    {
       "version": "365b_deals_contact_idx",
       "kind": "index",
       "index": "idx_deals_contact"

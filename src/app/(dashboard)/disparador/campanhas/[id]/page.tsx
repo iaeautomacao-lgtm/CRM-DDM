@@ -14,11 +14,13 @@
 // campaign_id da URL só é aceito se estiver entre os campaignIds da
 // conta do usuário logado.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { use } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useDisparadorLive } from "@/hooks/use-disparador-live";
+import { LiveBadge } from "@/components/disparador/live-badge";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { normalizarErroMeta } from "@/lib/disparador/normalize-meta-error";
 import {
@@ -111,6 +113,10 @@ export default function CampanhaContatosPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Recarga disparada pelo canal ao vivo: troca as linhas sem piscar o esqueleto de carregamento.
+  const silentReloadRef = useRef(false);
+  const livePageRef = useRef(0);
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Links do Monitor/Erros chegam com ?status=erro&codigo=131049 (lista filtrada por código de erro).
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get("status");
@@ -122,6 +128,24 @@ export default function CampanhaContatosPage({
     Number.isInteger(initialCodigo) && initialCodigo > 0 ? initialCodigo : null,
   );
   const [page, setPage] = useState(0);
+  // Ao vivo (migration 364): quando ESTA campanha tem envio/erro/entrega, recarrega a página 1 sem piscar, no máximo a cada 4 s (antes: sem atualização).
+  const { connected: liveConnected, latencyMs: liveLatency } = useDisparadorLive((delta) => {
+    if (!delta.campaigns[campaignId] || livePageRef.current !== 0 || liveTimerRef.current) return;
+    liveTimerRef.current = setTimeout(() => {
+      liveTimerRef.current = null;
+      if (document.visibilityState !== "visible") return;
+      silentReloadRef.current = true;
+      setReloadKey((k) => k + 1);
+    }, 4000);
+  });
+  useEffect(() => {
+    livePageRef.current = page;
+  }, [page]);
+  useEffect(() => {
+    return () => {
+      if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    };
+  }, []);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   // Totais da campanha para a barra e os KPIs (mesma fonte dos cartões da lista).
@@ -162,7 +186,8 @@ export default function CampanhaContatosPage({
     if (!allowed) return;
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (!silentReloadRef.current) setLoading(true);
+      silentReloadRef.current = false;
       const supabase = createClient();
       const from = page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -253,6 +278,7 @@ export default function CampanhaContatosPage({
           <h2 className="m-0 truncate text-[15px] font-semibold text-foreground">{campaignName || "Carregando…"}</h2>
           <p className="m-0 text-[12.5px] text-muted-foreground">
             Envios por contato{totalCount != null ? ` — ${totalCount.toLocaleString("pt-BR")} neste filtro` : ""}
+            <LiveBadge connected={liveConnected} latencyMs={liveLatency} className="ml-3 align-middle" />
           </p>
         </div>
       </div>
