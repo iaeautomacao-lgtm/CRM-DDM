@@ -570,6 +570,14 @@
       "kind": "registry"
     },
     {
+      "version": "373_webhook_conversation_events",
+      "kind": "registry"
+    },
+    {
+      "version": "374_webhook_campaign_reply",
+      "kind": "registry"
+    },
+    {
       "version": "375_dashboard_ai_snapshot",
       "kind": "registry"
     }
