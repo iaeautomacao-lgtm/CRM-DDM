@@ -43,6 +43,7 @@ import {
   pickerNoAgentTarget,
   pickerTemplateRow,
 } from "./agent-picker";
+import { filterAvailableAgents, isAgentPaused } from "@/lib/pausas/availability";
 import { maskPiiArgs } from "@/lib/privacy/mask";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
@@ -1304,7 +1305,8 @@ async function executeHandoff(
       status: "pending",
       updated_at: new Date().toISOString(),
     };
-    if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+    // Atendente fixo em pausa não recebe (migration 370): a conversa segue para a fila (pending, sem dono).
+    if (cfg.assign_to && !(await isAgentPaused(db, cfg.assign_to))) convUpdate.assigned_agent_id = cfg.assign_to;
     if (cfg.team_id) convUpdate.team_id = cfg.team_id;
     if (run.conversation_id) {
       await db
@@ -1435,7 +1437,8 @@ async function executeHandoffAgent(
       status: "pending",
       updated_at: new Date().toISOString(),
     };
-    if (assignTo) convUpdate.assigned_agent_id = assignTo;
+    // Operador escolhido/fixo que entrou em pausa depois do menu não recebe (migration 370): a conversa segue para a fila.
+    if (assignTo && !(await isAgentPaused(db, assignTo))) convUpdate.assigned_agent_id = assignTo;
     if (run.conversation_id) {
       await db
         .from("conversations")
@@ -1580,6 +1583,8 @@ export async function selectAgentForTeam(
   let eligibleIds = (onlineRows as { user_id: string }[] | null ?? []).map(
     (r) => r.user_id,
   );
+  // Pausa (migration 370): quem está em pausa não recebe atribuição automática (src/lib/pausas/availability.ts).
+  eligibleIds = await filterAvailableAgents(db, eligibleIds);
 
   if (eligibleIds.length === 0) {
     const { data: awayRows } = await db
@@ -1591,6 +1596,7 @@ export async function selectAgentForTeam(
     eligibleIds = (awayRows as { user_id: string }[] | null ?? []).map(
       (r) => r.user_id,
     );
+    eligibleIds = await filterAvailableAgents(db, eligibleIds);
   }
 
   if (eligibleIds.length === 0) {
@@ -1665,6 +1671,8 @@ export async function selectAnyAgentForAccount(
     .gte("last_seen_at", cutoff);
 
   let eligibleIds = (onlineRows ?? []).map((r) => r.user_id);
+  // Pausa (migration 370): quem está em pausa não recebe atribuição automática (src/lib/pausas/availability.ts).
+  eligibleIds = await filterAvailableAgents(db, eligibleIds);
 
   // Fallback para away
   if (eligibleIds.length === 0) {
@@ -1675,6 +1683,7 @@ export async function selectAnyAgentForAccount(
       .eq("status", "away")
       .gte("last_seen_at", cutoff);
     eligibleIds = (awayRows ?? []).map((r) => r.user_id);
+    eligibleIds = await filterAvailableAgents(db, eligibleIds);
   }
 
   // Nenhum disponível — retorna null (conversa fica pending,

@@ -229,3 +229,44 @@ export async function sendOpsAlertPush(
   }
   return summary;
 }
+
+export const PAUSE_ALERT_PUSH_TYPE = "pause_exceeded" as const;
+
+/**
+ * Aviso de pausa acima do tempo (decisão do dono 15/10): vai aos usuários indicados (supervisores da equipe do atendente), que tenham inscrição de
+ * push. O texto da notificação é fixo no service worker (nada de nome de atendente nem dado pessoal no payload: só o tipo e a tag). Nunca lança.
+ */
+export async function sendPauseExceededPush(
+  db: Db,
+  args: { accountId: string; userIds: readonly string[]; tag: string },
+  sender: typeof sendWebPush = sendWebPush,
+): Promise<{ sent: number; failed: number; removed: number }> {
+  const summary = { sent: 0, failed: 0, removed: 0 };
+  try {
+    const userIds = [...new Set(args.userIds)];
+    if (userIds.length === 0) return summary;
+    const { data: subs, error } = await db.from("push_subscriptions").select("endpoint, p256dh, auth").eq("account_id", args.accountId).in("user_id", userIds).limit(500);
+    if (error || !subs?.length) return summary;
+    const vapid = await loadVapid(db, args.accountId);
+    if (!vapid) return summary;
+    const payload = { type: PAUSE_ALERT_PUSH_TYPE, tag: args.tag.slice(0, 80) };
+    const gone: string[] = [];
+    for (const sub of subs as Array<{ endpoint: string; p256dh: string; auth: string }>) {
+      try {
+        const result = await sender(sub, payload, vapid);
+        if (result.gone) gone.push(sub.endpoint);
+        else if (result.status >= 200 && result.status < 300) summary.sent++;
+        else summary.failed++;
+      } catch {
+        summary.failed++;
+      }
+    }
+    if (gone.length > 0) {
+      const { error: delError } = await db.from("push_subscriptions").delete().in("endpoint", gone);
+      if (!delError) summary.removed += gone.length;
+    }
+  } catch (err) {
+    console.error("[Push] aviso de pausa falhou:", err instanceof Error ? err.message : String(err));
+  }
+  return summary;
+}

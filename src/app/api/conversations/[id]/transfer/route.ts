@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { pausedAgentIds } from '@/lib/pausas/availability'
 
 // POST /api/conversations/[id]/transfer  { agent_id?, team_id?, reason? }
 //
@@ -17,6 +18,10 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 // `agent_id`/`team_id` ausentes = não mexer; null = remover.
 // A mensagem de "assumi o atendimento" ao cliente continua no cliente
 // (sendTakeoverMessage), igual à atribuição pelo dropdown.
+//
+// Atendente EM PAUSA (migration 370, decisão do dono 15/10): a atribuição manual a ele é permitida só com confirmação, decidida AQUI no servidor:
+// sem `confirm_paused: true` no corpo a resposta é 409 { code: 'agent_paused', agent, pause } e nada é gravado; confirmada, atribui e o motivo
+// registrado na auditoria leva a marca "(atendente em pausa, confirmado)". A atribuição automática nunca escolhe pausado (src/lib/pausas/availability.ts).
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const REASON_MAX = 500
@@ -63,6 +68,32 @@ export async function POST(
       if (!data?.[0]) return NextResponse.json({ error: 'Equipe inválida' }, { status: 400 })
     }
 
+    // Pausa: só confere quando há um atendente de destino (null = remover o atendente).
+    let confirmedPaused = false
+    if (agentId) {
+      const admin = supabaseAdmin()
+      if ((await pausedAgentIds(admin, [agentId])).has(agentId)) {
+        if (body.confirm_paused !== true) {
+          const [{ data: open }, { data: prof }] = await Promise.all([
+            admin.from('agent_pauses').select('reason_name, started_at').eq('user_id', agentId).is('ended_at', null).limit(1),
+            admin.from('profiles').select('full_name').eq('user_id', agentId).limit(1),
+          ])
+          const name = ((prof?.[0] as { full_name?: string | null } | undefined)?.full_name ?? '').trim() || 'O atendente'
+          const pause = (open?.[0] as { reason_name: string; started_at: string } | undefined) ?? null
+          return NextResponse.json(
+            {
+              error: `${name} está em pausa. Atribuir mesmo assim?`,
+              code: 'agent_paused',
+              agent: { id: agentId, name },
+              pause: pause ? { reason_name: pause.reason_name, started_at: pause.started_at } : null,
+            },
+            { status: 409 },
+          )
+        }
+        confirmedPaused = true
+      }
+    }
+
     const patch: Record<string, string | null> = {}
     if (agentId !== undefined) patch.assigned_agent_id = agentId
     if (teamId !== undefined) patch.team_id = teamId
@@ -79,7 +110,8 @@ export async function POST(
     }
 
     // O motivo entra no registro de auditoria da trigger (migration 131).
-    if (reason) await registerAuditActor({ note: reason })
+    const auditNote = confirmedPaused ? `(atendente em pausa, confirmado)${reason ? ' ' + reason : ''}`.slice(0, REASON_MAX) : reason
+    if (auditNote) await registerAuditActor({ note: auditNote })
     const db = supabaseAdmin()
     const startedAt = new Date().toISOString()
     const { data: updated, error } = await db
@@ -107,7 +139,7 @@ export async function POST(
     if (row) {
       await db
         .from('conversation_assignments')
-        .update({ actor_id: userId, ...(reason ? { reason } : {}) })
+        .update({ actor_id: userId, ...(auditNote ? { reason: auditNote } : {}) })
         .eq('id', row.id)
     }
 

@@ -76,6 +76,9 @@ export const PERMISSION_CATALOG = {
   "reports.export": { label: "Gerar exportações", description: "Gerar e registrar exportações.", group: "Acompanhamento", scope: "none", roles: atLeast("supervisor"), dependsOn: ["reports.view_team"] },
   "exports.manage": { label: "Gerenciar exportações", description: "Listar e apagar exportações geradas.", group: "Acompanhamento", scope: "none", roles: atLeast("admin"), dependsOn: ["reports.export"] },
   "audit.view": { label: "Auditoria e logs", description: "Ver a auditoria e os logs.", group: "Acompanhamento", scope: "account", roles: atLeast("admin") },
+  "presence.pause_self": { label: "Pausar a si mesmo", description: "Entrar em pausa (almoço, banheiro…) e voltar ao atendimento.", group: "Pausas", scope: "own", roles: atLeast("agent"), dependsOn: ["inbox.view"] },
+  "presence.pause_others": { label: "Pausar outros atendentes", description: "Pausar e retomar outros atendentes (supervisor: só das equipes dele; quem vê a organização toda: qualquer um).", group: "Pausas", scope: "team", roles: atLeast("supervisor"), dependsOn: ["presence.pause_self", "monitoring.view_team"] },
+  "presence.reasons_manage": { label: "Gerenciar motivos de pausa", description: "Criar, editar e desativar os motivos de pausa e o tempo máximo de cada um.", group: "Pausas", scope: "none", roles: atLeast("admin") },
 
   // ── Intelligence ────────────────────────────────────────
   "intelligence.use": { label: "DDM Intelligence", description: "Chat, ferramentas e MCP (escopo das equipes dele).", group: "Intelligence", scope: "team", roles: atLeast("supervisor") },

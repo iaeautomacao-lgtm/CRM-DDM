@@ -552,6 +552,14 @@
     {
       "version": "366_dispatch_engine_flags",
       "kind": "registry"
+    },
+    {
+      "version": "370_pausas_atendimento",
+      "kind": "registry"
+    },
+    {
+      "version": "371_pausas_distribuicao",
+      "kind": "registry"
     }
   ]
 }
