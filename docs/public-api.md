@@ -13,6 +13,9 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | --- | --- | --- |
 | `GET /api/v1/me` | nenhum | Conta e escopos da chave |
 | `POST /api/v1/whatsapp/send` | `messages:send` | Mensagem avulsa (texto/mídia); `Idempotency-Key` obrigatório |
+| `GET /api/v1/contacts`, `GET /api/v1/contacts/{id}` | `contacts:read` (ou `contacts:write`) | Busca por telefone, CPF, e-mail, nome, etiqueta ou data; CPF só mascarado; 60/min por chave |
+| `POST /api/v1/contacts` | `contacts:write` | Upsert por CPF/telefone: cria ou preenche só os vazios |
+| `PATCH /api/v1/contacts/{id}` | `contacts:write` | Sobrescreve campos; `tags {add,remove}`; `custom_fields` em merge |
 | `POST /api/v1/whatsapp/send-template` | `messages:send` | Um template aprovado da Meta a um número (só canal Meta; WAHA → 422); `Idempotency-Key` obrigatório; 60/min por chave |
 | `GET /api/v1/templates` | `templates:read` (ou `messages:send` / `campaigns:write`) | Catálogo de templates: nome, idioma, nº de variáveis, `sendable_via_api` |
 | `POST /api/v1/disparador/campaigns` | `campaigns:write` | Cria e enfileira campanha (até 20.000 contatos); idempotência opcional |

@@ -11,6 +11,7 @@
 
 import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
+import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
 import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
 
 type Json = Record<string, unknown>;
@@ -144,7 +145,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + TEMPLATES_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -154,11 +155,13 @@ export const openApiSpec = {
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
     ...webhookTags,
     ...extractTags,
+    ...contactsTags,
   ],
   security: SECURITY,
   paths: {
     ...webhookPaths,
     ...extractPaths,
+    ...contactsPaths,
     ...templatesPaths,
     '/me': {
       get: {
@@ -837,6 +840,7 @@ export const openApiSpec = {
     schemas: {
       ...webhookSchemas,
       ...extractSchemas,
+      ...contactsSchemas,
       ...templatesSchemas,
       Scope: {
         type: 'string',
@@ -896,6 +900,7 @@ export const openApiSpec = {
                   properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] }, label: { type: ['string', 'null'], description: 'Nas rotas de template: o número do canal.' } },
                 },
               },
+              unknown_custom_fields: { type: 'array', items: { type: 'string' }, description: 'Só em 422 de contato: campos personalizados que não existem na conta.' },
               meta_code: { type: ['integer', 'null'], description: 'Só em 502 de template: código de erro da Meta.' },
               meta_http_status: { type: 'integer', description: 'Só em 502 de template: HTTP devolvido pela Meta.' },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
