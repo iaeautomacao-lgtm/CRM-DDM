@@ -283,6 +283,8 @@ export const RATE_LIMITS = {
   aiCopilot: { limit: 20, windowMs: 60_000 },
   /** API v1: criar campanha (cada chamada pode enfileirar 20k itens); 6/min por chave (decisão do dono, PRD 11 A9). */
   apiV1CampaignCreate: { limit: 6, windowMs: 60_000 },
+  /** API v1: pausar/retomar/cancelar campanha e tirar destinatários (Onda 1, A2); 30/min por chave, além do limite geral. */
+  apiV1CampaignControl: { limit: 30, windowMs: 60_000 },
   /** Relatórios de violação do CSP (rota pública): 60/min por IP. */
   cspReport: { limit: 60, windowMs: 60_000 },
   /** Webhook de eventos do UTMpay (público, assinado): um único servidor manda todos os cliques/etapas, então o teto é alto; 6000/min por IP. */

@@ -12,6 +12,8 @@ const tables: Record<string, Row[]> = {}
 let failQueueInsertOnCall = 0
 let queueInsertCalls = 0
 let failMetrics = false
+let missingReferenceColumn = false
+let missingSlotColumns = false
 let idCounter = 0
 const storageUploads: Array<{ bucket: string; path: string; bytes: number; contentType?: string }> = []
 const storageRemovals: Array<{ bucket: string; paths: string[] }> = []
@@ -30,6 +32,8 @@ function resetDb() {
   failQueueInsertOnCall = 0
   queueInsertCalls = 0
   failMetrics = false
+  missingReferenceColumn = false
+  missingSlotColumns = false
   idCounter = 0
   storageUploads.length = 0
   storageRemovals.length = 0
@@ -43,8 +47,9 @@ function builder(table: string) {
   let maybe = false
   let range: [number, number] | null = null
   let limitN: number | null = null
+  let selectCols: string | undefined
   const b: any = {}
-  b.select = () => b
+  b.select = (cols?: string) => ((selectCols = cols), b)
   b.order = () => b
   b.in = (c: string, v: unknown[]) => (filters.push((r) => v.includes(r[c])), b)
   b.eq = (c: string, v: unknown) => (filters.push((r) => r[c] === v), b)
@@ -76,6 +81,7 @@ function builder(table: string) {
       }
       if (table === 'campaigns') {
         const p = list[0]
+        if (missingSlotColumns && 'slot_size' in p) return { data: null, error: { code: '42703', message: 'column "slot_size" does not exist' } }
         if (p.idempotency_key && rows.some((r) => r.account_id === p.account_id && r.idempotency_key === p.idempotency_key)) {
           return { data: null, error: { code: '23505', message: 'duplicate' } }
         }
@@ -99,6 +105,9 @@ function builder(table: string) {
     if (op === 'delete') {
       tables[table] = rows.filter((r) => !match(r))
       return { data: null, error: null }
+    }
+    if (table === 'disp_message_queue' && selectCols === 'reference' && missingReferenceColumn) {
+      return { data: null, error: { code: '42703', message: 'column "reference" does not exist' } }
     }
     let out = rows.filter(match)
     if (range) out = out.slice(range[0], range[1] + 1)
@@ -589,6 +598,44 @@ describe('POST /api/v1/disparador/campaigns', () => {
       expect(r.status).toBe(201)
       expect(queueInsertCalls).toBe(20)
       expect(tables.disp_message_queue).toHaveLength(20_000)
+    })
+  })
+
+  describe('A2: reference por contato e ritmo persistido', () => {
+    it('grava a reference na fila e slot_size/slot_interval_minutes na campanha', async () => {
+      const c = contacts(2).map((x, i) => ({ ...x, reference: i === 0 ? 'contrato-8841' : undefined }))
+      const r = await POST(post(base({ contacts: c, slot_size: 500, slot_interval_minutes: 15 })))
+      expect(r.status).toBe(201)
+      expect(tables.disp_message_queue.find((q) => q.reference === 'contrato-8841')).toBeTruthy()
+      expect(tables.disp_message_queue.filter((q) => 'reference' in q)).toHaveLength(1)
+      expect(tables.campaigns[0]).toMatchObject({ slot_size: 500, slot_interval_minutes: 15 })
+    })
+
+    it('reference inválida (não é texto ou passa de 64) invalida só aquele contato', async () => {
+      const c = [
+        { phone: '5511910000001', variables: ['Ana'], reference: 'x'.repeat(65) },
+        { phone: '5511910000002', variables: ['Ana'], reference: 123 },
+        { phone: '5511910000003', variables: ['Ana'], reference: 'ok-1' },
+      ]
+      const r = await POST(post(base({ contacts: c })))
+      expect(r.status).toBe(201)
+      const j = (await r.json()).data
+      expect(j.enqueued).toBe(1)
+      expect(j.invalid).toBe(2)
+      expect(j.invalid_sample.map((x: { reason: string }) => x.reason)).toEqual(['invalid_reference', 'invalid_reference'])
+    })
+
+    it('sem a migration 357: cria igual sem o ritmo; com reference, recusa com 503 sem criar nada', async () => {
+      missingSlotColumns = true
+      const r1 = await POST(post(base()))
+      expect(r1.status).toBe(201)
+      expect(tables.campaigns[0].slot_size).toBeUndefined()
+
+      missingReferenceColumn = true
+      const r2 = await POST(post(base({ contacts: [{ phone: '5511910000009', variables: ['Ana'], reference: 'c-1' }] })))
+      expect(r2.status).toBe(503)
+      expect((await r2.json()).error.code).toBe('unavailable')
+      expect(tables.campaigns).toHaveLength(1)
     })
   })
 

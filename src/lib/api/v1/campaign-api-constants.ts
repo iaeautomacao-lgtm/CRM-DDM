@@ -10,5 +10,12 @@ export const CAMPAIGN_LIST_MAX = 200;
 export const RECIPIENTS_DEFAULT = 100;
 export const RECIPIENTS_MAX = 500;
 
-export const RECIPIENT_STATUSES = ['queued', 'paused', 'sending', 'sent', 'delivered', 'read', 'error', 'blocked', 'cancelled'] as const;
+export const RECIPIENT_STATUSES = ['queued', 'paused', 'sending', 'sent', 'delivered', 'read', 'error', 'blocked', 'cancelled', 'removed'] as const;
 export type RecipientStatus = (typeof RECIPIENT_STATUSES)[number];
+
+// Remoção de destinatários (POST …/recipients/remove).
+export const REMOVE_MAX_RECIPIENTS = 500;
+export const REMOVE_REASONS = ['paid', 'agreement', 'other'] as const;
+export type RemoveReason = (typeof REMOVE_REASONS)[number];
+export const REMOVE_ENTRY_STATUSES = ['removed', 'already_removed', 'in_flight', 'already_sent', 'not_found', 'invalid'] as const;
+export type RemoveEntryStatus = (typeof REMOVE_ENTRY_STATUSES)[number];
