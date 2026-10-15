@@ -65,16 +65,16 @@ describe('/api/disparador/engine', () => {
 
   it('GET: sem linha tudo segue o ambiente (desligado); mostra o efetivo e a origem', async () => {
     const body = await (await GET()).json();
-    expect(body.account).toEqual({ batch_claim: null, tick_chain: null });
-    expect(body.effective).toEqual({ batch_claim: { enabled: false, source: 'default' }, tick_chain: { enabled: false, source: 'default' } });
-    expect(body.env).toEqual({ batch_claim: false, tick_chain: false });
+    expect(body.account).toEqual({ batch_claim: null, tick_chain: null, worker_enabled: null });
+    expect(body.effective).toEqual({ batch_claim: { enabled: false, source: 'default' }, tick_chain: { enabled: false, source: 'default' }, worker_enabled: { enabled: false, source: 'default' } });
+    expect(body.env).toEqual({ batch_claim: false, tick_chain: false, worker_enabled: false });
   });
 
   it('PUT liga o lote para a conta, devolve o efetivo e audita a mudança (antes → depois)', async () => {
     const res = await put({ batch_claim: true });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.account).toEqual({ batch_claim: true, tick_chain: null });
+    expect(body.account).toEqual({ batch_claim: true, tick_chain: null, worker_enabled: null });
     expect(body.effective.batch_claim).toEqual({ enabled: true, source: 'account' });
     expect(hoisted.upserts[0]).toMatchObject({ account_id: A, batch_claim: true, tick_chain: null, updated_by: 'U1' });
     expect(hoisted.audits).toHaveLength(1);

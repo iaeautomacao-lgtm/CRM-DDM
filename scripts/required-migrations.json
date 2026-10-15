@@ -552,6 +552,10 @@
     {
       "version": "366_dispatch_engine_flags",
       "kind": "registry"
+    },
+    {
+      "version": "367_dispatch_worker_leases",
+      "kind": "registry"
     }
   ]
 }

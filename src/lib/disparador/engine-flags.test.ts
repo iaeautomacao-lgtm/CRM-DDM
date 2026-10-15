@@ -60,11 +60,12 @@ describe('envWithEngineFlags: os resolvedores existentes passam a enxergar a dec
 describe('buildEngineFlagsView', () => {
   it('mostra o valor da conta, o efetivo com a origem e o do ambiente', () => {
     const view = buildEngineFlagsView('A', [row('A', true, null), row('B', null, true)], { DISPARADOR_TICK_CHAIN: '0' });
-    expect(view.account).toEqual({ batch_claim: true, tick_chain: null });
+    expect(view.account).toEqual({ batch_claim: true, tick_chain: null, worker_enabled: null });
     expect(view.effective.batch_claim).toEqual({ enabled: true, source: 'account' });
     expect(view.effective.tick_chain).toEqual({ enabled: true, source: 'account' }); // a conta B liga
-    expect(view.env).toEqual({ batch_claim: false, tick_chain: false });
-    expect(buildEngineFlagsView('C', [], {}).account).toEqual({ batch_claim: null, tick_chain: null });
+    expect(view.env).toEqual({ batch_claim: false, tick_chain: false, worker_enabled: false });
+    expect(view.effective.worker_enabled).toEqual({ enabled: false, source: 'default' });
+    expect(buildEngineFlagsView('C', [], {}).account).toEqual({ batch_claim: null, tick_chain: null, worker_enabled: null });
   });
 });
 
@@ -112,11 +113,47 @@ describe('parseEngineFlagsPatch e saveEngineFlags', () => {
     let saved: any;
     const { db } = dbWith({ data: [row('A', true, null)] }, (p) => (saved = p));
     const next = await saveEngineFlags(db, { accountId: 'A', userId: 'U1', patch: { tick_chain: true } });
-    expect(next).toEqual(row('A', true, true));
-    expect(saved).toMatchObject({ account_id: 'A', batch_claim: true, tick_chain: true, updated_by: 'U1' });
+    expect(next).toEqual({ ...row('A', true, true), worker_enabled: null });
+    expect(saved).toMatchObject({ account_id: 'A', batch_claim: true, tick_chain: true, worker_enabled: null, updated_by: 'U1' });
   });
   it('sem a migration 366 = 503 com mensagem clara', async () => {
     const { db } = dbWith({ error: { code: '42P01', message: 'relation "wacrm.dispatch_engine_flags" does not exist' } });
     await expect(saveEngineFlags(db, { accountId: 'A', userId: null, patch: { batch_claim: true } })).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe('chave do worker (migration 367)', () => {
+  it('padrão desligada; segue DISPATCH_WORKER_ENABLED; a conta vence o ambiente', () => {
+    expect(resolveEngineFlag('worker_enabled', [], {})).toEqual({ enabled: false, source: 'default' });
+    expect(resolveEngineFlag('worker_enabled', [], { DISPATCH_WORKER_ENABLED: '1' })).toEqual({ enabled: true, source: 'env' });
+    expect(resolveEngineFlag('worker_enabled', [{ ...row('A', null, null), worker_enabled: false }], { DISPATCH_WORKER_ENABLED: '1' })).toEqual({ enabled: false, source: 'account' });
+    expect(envWithEngineFlags({}, [{ ...row('A', null, null), worker_enabled: true }]).DISPATCH_WORKER_ENABLED).toBe('1');
+  });
+  it('o PUT aceita worker_enabled; sem a coluna (só a 366) = 503 pedindo a 367, e as outras chaves seguem gravando', async () => {
+    expect(parseEngineFlagsPatch({ worker_enabled: true })).toEqual({ worker_enabled: true });
+    expect(() => parseEngineFlagsPatch({ worker_enabled: 'sim' })).toThrow(/true, false ou null/);
+    const missing = { code: '42703', message: 'column "worker_enabled" does not exist' };
+    const calls: string[] = [];
+    const chain: any = {};
+    chain.select = (cols: string) => ((chain.cols = cols), chain);
+    chain.eq = () => chain;
+    chain.limit = () => chain;
+    chain.upsert = (p: unknown) => (calls.push(JSON.stringify(p)), Promise.resolve({ error: null }));
+    chain.then = (resolve: (v: unknown) => void) =>
+      resolve(String(chain.cols).includes('worker_enabled') ? { data: null, error: missing } : { data: [row('A', true, null)], error: null });
+    const db = { from: () => chain } as never;
+    await expect(saveEngineFlags(db, { accountId: 'A', userId: null, patch: { worker_enabled: true } })).rejects.toMatchObject({ status: 503 });
+    const saved = await saveEngineFlags(db, { accountId: 'A', userId: null, patch: { tick_chain: true } });
+    expect(saved).toEqual({ account_id: 'A', batch_claim: true, tick_chain: true });
+    expect(calls.at(-1)).not.toContain('worker_enabled');
+  });
+  it('leitura sem a coluna cai nas duas chaves da 366', async () => {
+    clearEngineFlagCache();
+    const chain: any = {};
+    chain.select = (cols: string) => ((chain.cols = cols), chain);
+    chain.limit = () => chain;
+    chain.then = (resolve: (v: unknown) => void) =>
+      resolve(String(chain.cols).includes('worker_enabled') ? { data: null, error: { code: '42703', message: 'column worker_enabled does not exist' } } : { data: [row('A', true, false)], error: null });
+    expect(await loadEngineFlagRows({ from: () => chain } as never, { ttlMs: 0 })).toEqual([row('A', true, false)]);
   });
 });
