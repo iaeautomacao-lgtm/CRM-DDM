@@ -47,6 +47,7 @@ type RangeDays = 7 | 30 | 90
 type DashboardSection = 'metrics' | 'series' | 'status' | 'responseTime' | 'activity' | 'ai' | 'agreements'
 
 export default function DashboardPage() {
+  const { canManageMembers, profileLoading } = useAuth()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
 
@@ -129,6 +130,9 @@ export default function DashboardPage() {
       })
       .finally(() => setAiPerformanceLoading(false))
 
+  }, [markFailed])
+
+  const loadAgreements = useCallback(() => {
     void fetch('/api/dashboard/agreements', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error('HTTP ' + response.status)
@@ -141,6 +145,10 @@ export default function DashboardPage() {
       })
       .finally(() => setAgreementsLoading(false))
   }, [markFailed])
+
+  useEffect(() => {
+    if (!profileLoading && canManageMembers) loadAgreements()
+  }, [profileLoading, canManageMembers, loadAgreements])
 
   useEffect(() => {
     loadAll()
@@ -156,8 +164,9 @@ export default function DashboardPage() {
     setResponseTimeLoading(true)
     setActivityLoading(true)
     setAiPerformanceLoading(true)
-    setAgreementsLoading(true)
+    if (canManageMembers) setAgreementsLoading(true)
     loadAll()
+    if (canManageMembers) loadAgreements()
     // loadAll só traz a série de 30 dias; o período escolhido (7/90) que
     // falhou precisa ser buscado de novo, senão o gráfico fica no skeleton.
     if (range !== 30) {
@@ -168,7 +177,7 @@ export default function DashboardPage() {
           markFailed('series')
         })
     }
-  }, [loadAll, range, markFailed])
+  }, [loadAll, range, markFailed, loadAgreements, canManageMembers])
 
   const handleRangeChange = useCallback(
     (r: RangeDays) => {
@@ -277,15 +286,17 @@ export default function DashboardPage() {
         <QuickActions />
       </div>
 
-      {/* Acordos formalizados — contagem por tabulação 142 e origem auditada. */}
-      <div className="mt-10">
-        <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Acordos formalizados</h3>
-        {failed.has('agreements') ? (
-          <ErrorState title="Não foi possível carregar os indicadores de acordos" onRetry={retryAll} />
-        ) : (
-          <AgreementPerformance data={agreements} loading={agreementsLoading} />
-        )}
-      </div>
+      {/* Account-wide deal attribution is available to owner/admin only. */}
+      {canManageMembers && (
+        <div className="mt-10">
+          <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Acordos formalizados</h3>
+          {failed.has('agreements') ? (
+            <ErrorState title="Não foi possível carregar os indicadores de acordos" onRetry={retryAll} />
+          ) : (
+            <AgreementPerformance data={agreements} loading={agreementsLoading} />
+          )}
+        </div>
+      )}
 
       {/* Recuperação Financeira */}
       <div className="mt-10">
