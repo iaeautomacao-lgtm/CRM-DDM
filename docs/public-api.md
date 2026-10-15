@@ -15,6 +15,7 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `POST /api/v1/whatsapp/send` | `messages:send` | Mensagem avulsa (texto/mídia); `Idempotency-Key` obrigatório |
 | `GET /api/v1/contacts`, `GET /api/v1/contacts/{id}` | `contacts:read` (ou `contacts:write`) | Busca por telefone, CPF, e-mail, nome, etiqueta ou data; CPF só mascarado; 60/min por chave |
 | `GET /api/v1/tabulations`, `GET /api/v1/agents`, `GET /api/v1/teams` | `conversations:read` (ou `conversations:write`) | Catálogos do atendimento: tabulações (id e código), atendentes (cadastro, status online/ausente/offline e pausa; sem métricas, e-mail ou telefone) e equipes; 60/min por chave |
+| `POST /api/v1/conversations`, `POST /api/v1/conversations/{id}/close`, `POST /api/v1/conversations/{id}/transfer` | `conversations:write` | Controle do atendimento: abrir (com atendente ou equipe, mensagem inicial opcional e `force_transfer`), encerrar com tabulação e transferir; atendente em pausa = 409 `agent_paused` + `confirm_paused`; 30/min por chave |
 | `POST /api/v1/contacts` | `contacts:write` | Upsert por CPF/telefone: cria ou preenche só os vazios |
 | `PATCH /api/v1/contacts/{id}` | `contacts:write` | Sobrescreve campos; `tags {add,remove}`; `custom_fields` em merge |
 | `POST /api/v1/whatsapp/send-template` | `messages:send` | Um template aprovado da Meta a um número (só canal Meta; WAHA → 422); `Idempotency-Key` obrigatório; 60/min por chave |
