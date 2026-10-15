@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
@@ -25,17 +25,27 @@ import type {
 } from '@/lib/dashboard/types'
 import { updatedLabel } from '@/lib/dashboard/view'
 
-import { MetricCard } from '@/components/dashboard/metric-card'
-import { QuickActions } from '@/components/dashboard/quick-actions'
-import { ConversationsChart, type RangeDays } from '@/components/dashboard/conversations-chart'
-import { StatusPanel, type QueueNow } from '@/components/dashboard/status-panel'
-import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
-import { ActivityFeed } from '@/components/dashboard/activity-feed'
-import { AiPerformance } from '@/components/dashboard/ai-performance'
-import { FinancialPerformance } from '@/components/dashboard/financial-performance'
+import { MetricCard as MetricCardBase } from '@/components/dashboard/metric-card'
+import { QuickActions as QuickActionsBase } from '@/components/dashboard/quick-actions'
+import { ConversationsChart as ConversationsChartBase, type RangeDays } from '@/components/dashboard/conversations-chart'
+import { StatusPanel as StatusPanelBase, type QueueNow } from '@/components/dashboard/status-panel'
+import { ResponseTimeChart as ResponseTimeChartBase } from '@/components/dashboard/response-time-chart'
+import { ActivityFeed as ActivityFeedBase } from '@/components/dashboard/activity-feed'
+import { AiPerformance as AiPerformanceBase } from '@/components/dashboard/ai-performance'
+import { FinancialPerformance as FinancialPerformanceBase } from '@/components/dashboard/financial-performance'
 import { ErrorState } from '@/components/dashboard/error-state'
 import { cn } from '@/lib/utils'
 import { PageBody } from '@/components/ddm/page-toolbar'
+
+// O relógio da página ("Atualizado há…") re-renderiza a cada 15 s: os cartões só redesenham quando os próprios dados mudam.
+const MetricCard = memo(MetricCardBase)
+const QuickActions = memo(QuickActionsBase)
+const StatusPanel = memo(StatusPanelBase)
+const ResponseTimeChart = memo(ResponseTimeChartBase)
+const ActivityFeed = memo(ActivityFeedBase)
+const AiPerformance = memo(AiPerformanceBase)
+const FinancialPerformance = memo(FinancialPerformanceBase)
+const ConversationsChart = memo(ConversationsChartBase)
 
 // Seções carregadas por loadAll — usadas para rastrear quais falharam
 // e oferecer "Tentar novamente" em vez de skeletons eternos.
