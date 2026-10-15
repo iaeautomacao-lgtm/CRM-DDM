@@ -46,7 +46,7 @@ describe("mapeamento único de situacao_acordo", () => {
     expect(aggregateStage(["Quitado", "Em aberto"])).toBe("none");
     expect(aggregateStage(["Quitado", "xyz-novo"])).toBe("unknown");
     expect(aggregateStage([null, null])).toBe("none");
-    expect(aggregateStage([])).toBe("paid"); // lista vazia = sem dívida ativa (premissa do dono, EMPTY_LIST_MEANS_PAID)
+    expect(aggregateStage([])).toBe("none"); // lista vazia NÃO é pago (EMPTY_LIST_MEANS_PAID = false, conservador)
   });
 
   it("valor desconhecido é logado UMA vez (sem repetir, sem dado pessoal)", () => {

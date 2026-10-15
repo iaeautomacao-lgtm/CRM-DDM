@@ -164,8 +164,8 @@ describe("recheckPendingPayments", () => {
 });
 
 describe("interpretSituation (API DDM localiza_dev)", () => {
-  it("lista vazia = sem dívida ativa = quitada", () => {
-    expect(interpretSituation([])).toEqual({ situacao_acordo: null, valor_em_aberto: 0, instituicao: null, stage: "paid", settled: true, unknown_values: [] });
+  it("lista vazia NÃO conta como quitada (conservador, EMPTY_LIST_MEANS_PAID = false)", () => {
+    expect(interpretSituation([])).toEqual({ situacao_acordo: null, valor_em_aberto: 0, instituicao: null, stage: "none", settled: false, unknown_values: [] });
   });
   it("lê situacao_acordo, valor_em_aberto (soma) e instituicao", () => {
     const s = interpretSituation([

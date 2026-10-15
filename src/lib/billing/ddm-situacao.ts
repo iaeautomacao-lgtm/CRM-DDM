@@ -10,12 +10,13 @@
 // também aceita as variações óbvias (acordo vigente/ativo/pendente/formalizado, em andamento, pago, liquidado, sem acordo). Valor DESCONHECIDO
 // = `unknown`: não marca nada e é logado UMA vez por valor (reportUnknownSituacao), para a gente completar a tabela com o que a DDM mandar.
 //
-// Lista de dívidas VAZIA (sem dívida ativa): pela premissa do dono (a mesma da régua) = quitada. Ajuste em EMPTY_LIST_MEANS_PAID.
+// Lista de dívidas VAZIA: NÃO é "pago" na atribuição (15/10). A DDM pode tirar da lista dívida cancelada/baixada, o que viraria falso
+// "pagou"/"fechou". Só a situação explícita de quitado/pago marca. Usado só pela integração UTMpay (a régua tem lógica própria).
 
 export type SituacaoStage = "paid" | "agreement" | "none" | "unknown";
 
-/** Lista vazia da DDM = sem dívida ativa = quitada (premissa do dono, a confirmar com a DDM). */
-export const EMPTY_LIST_MEANS_PAID = true;
+/** Lista vazia da DDM conta como quitada? false = conservador (confirmar com a DDM antes de ligar). */
+export const EMPTY_LIST_MEANS_PAID = false;
 
 /** Minúsculas, sem acento, espaços colapsados. */
 export function normalizeSituacao(raw: unknown): string {
