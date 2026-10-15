@@ -568,6 +568,10 @@
     {
       "version": "371_pausas_distribuicao",
       "kind": "registry"
+    },
+    {
+      "version": "375_dashboard_ai_snapshot",
+      "kind": "registry"
     }
   ]
 }

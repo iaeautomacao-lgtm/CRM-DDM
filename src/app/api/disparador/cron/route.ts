@@ -80,6 +80,9 @@ const CRON_LOCK_TTL_SECONDS = 90;
 // Movimentação de itens de campanhas pausadas/encerradas/retomadas (migration 184): tempo máximo por tick.
 const QUEUE_MOVES_BUDGET_MS = 8_000;
 const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
+// Resumo do painel de IA (migration 375): instante da última chamada de refresh neste processo.
+const DASHBOARD_SNAPSHOT_EVERY_MS = 5 * 60_000;
+let lastDashboardSnapshotAt = 0;
 
 /** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
 function meta131026ConfirmMinutes(): number {
@@ -314,6 +317,15 @@ async function runTick(request: Request, chain: ChainContext, tickEnv: Record<st
         }
         const { error: releaseError } = await db.rpc("release_cron_lock", { p_name: "disparador_metrics", p_owner_id: owner });
         if (releaseError) console.error("[Cron] Falha ao liberar o lock de métricas:", releaseError.message);
+      }
+    }
+    // 2c-bis) Resumo do painel de IA do Dashboard (migration 375): recalcula, em lote pequeno, as contas ativas com resumo velho (> 5 min).
+    //     No máximo uma vez por 5 min por processo (a função também só mexe em resumo vencido); falha/RPC ausente não derruba o tick.
+    if (!outOfTime() && Date.now() - lastDashboardSnapshotAt >= DASHBOARD_SNAPSHOT_EVERY_MS) {
+      lastDashboardSnapshotAt = Date.now();
+      const { error: snapshotError } = await db.rpc("refresh_dashboard_ai_snapshots");
+      if (snapshotError && snapshotError.code !== "PGRST202" && snapshotError.code !== "42883") {
+        console.error("[Cron] Falha ao atualizar o resumo do painel de IA:", snapshotError.message);
       }
     }
     // 2d) Itens de campanhas pausadas/encerradas/retomadas: a RPC de stop/resume só trocou o status; os itens
