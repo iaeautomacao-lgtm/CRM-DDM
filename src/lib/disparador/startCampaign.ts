@@ -16,6 +16,7 @@ import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { writeLog } from "@/lib/logger";
 import { findRedChannels, RED_QUALITY_CODE, recordRedConfirmation, redBlockedMessage, type RedChannel, type RedConfirmation } from "@/lib/disparador/red-quality-gate";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
+import { emitCampaignResumed, emitCampaignStarted } from "@/lib/webhooks-out/campaign-events";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
 // lida por este código — reaproveitada para guardar o modo de alternância
@@ -312,7 +313,10 @@ async function prepareCampaign(
       // não roda na retomada: os itens já estão montados.
       if ((campaign.batch_size ?? 1) > 1) {
         const resumed = await resumeBatchedCampaign(campaign, accountId);
-        if (resumed.ok) return { ok: true, enqueued: resumed.resumed };
+        if (resumed.ok) {
+          await emitCampaignResumed(supabaseAdmin(), { accountId, campaignId, by: "user", resumedItems: resumed.resumed }); // webhook campaign.resumed (melhor esforço)
+          return { ok: true, enqueued: resumed.resumed };
+        }
         if (resumed.reason === "state_changed")
           return { ok: false, status: 409, error: "Estado da campanha mudou; atualize antes de retomar" };
         console.error("[startCampaign] Falha ao retomar campanha em lote:", resumed.error);
@@ -335,6 +339,7 @@ async function prepareCampaign(
         };
       // Migration 184: a RPC só trocou o status; os itens voltam a 'agendado' em lotes (o cron termina o que sobrar).
       await drainDispatchMoves(supabaseAdmin(), campaignId, { budgetMs: 15_000 });
+      await emitCampaignResumed(supabaseAdmin(), { accountId, campaignId, by: "user", resumedItems: count }); // webhook campaign.resumed (melhor esforço)
       return { ok: true, enqueued: count };
     }
 
@@ -991,6 +996,7 @@ async function prepareCampaign(
       return { ok: false, status: 500, error: "Falha ao ativar campanha" };
     }
     state.preparing = false;
+    await emitCampaignStarted(supabaseAdmin(), { accountId, campaignId, by: "user" }); // webhook campaign.started (melhor esforço; nunca lança)
 
     if (skippedKnownInvalid > 0) {
       void writeLog({

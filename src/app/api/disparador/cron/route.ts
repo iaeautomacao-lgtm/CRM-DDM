@@ -58,6 +58,7 @@ import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unkn
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
 import { drainMessageInboxLive } from "@/lib/whatsapp/message-inbox-runner";
 import { reconcileShadowInbox } from "@/lib/whatsapp/message-inbox";
+import { emitCampaignCompleted } from "@/lib/webhooks-out/campaign-events";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -413,9 +414,10 @@ async function runTick(request: Request, chain: ChainContext) {
       const recovered = await recoverStaleSendingReservations(db);
       if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.requeuedNeverSent > 0 || recovered.failed > 0) {
         for (const campaignId of recovered.campaignIds) {
-          const { error: completeError } = await db.rpc("complete_dispatch_campaign", {
+          const { data: wdCompleted, error: completeError } = await db.rpc("complete_dispatch_campaign", {
             p_campaign_id: campaignId,
           });
+          if (wdCompleted === true) await emitCampaignCompleted(db, { campaignId }); // webhook campaign.completed (melhor esforço)
           if (completeError)
             console.error("[Cron] Watchdog: falha ao tentar finalizar campanha:", campaignId, completeError.message);
         }
@@ -601,6 +603,7 @@ async function runTick(request: Request, chain: ChainContext) {
         );
         if (completionError) throw completionError;
         if (completed) {
+          await emitCampaignCompleted(db, { accountId: campaign.account_id, campaignId: campaign.id }); // webhook campaign.completed (melhor esforço)
           const { error: recalcError } = await db.rpc("recalculate_campaign_metrics", {
             p_campaign_id: campaign.id,
           });
