@@ -15,6 +15,10 @@ type MethodLower = (typeof METHODS)[number];
 export const OPERATION_SCOPES: Record<string, string[]> = {
   getMe: [],
   sendWhatsappMessage: ['messages:send'],
+  listContacts: ['contacts:read', 'contacts:write'],
+  getContact: ['contacts:read', 'contacts:write'],
+  upsertContact: ['contacts:write'],
+  updateContact: ['contacts:write'],
   sendWhatsappTemplate: ['messages:send'],
   listTemplates: ['templates:read', 'messages:send', 'campaigns:write'],
   createCampaign: ['campaigns:write'],
