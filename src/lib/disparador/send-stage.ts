@@ -47,7 +47,9 @@ export async function buildChannelWork(
   db: AdminDb,
   planned: PlannedCampaign[],
   config: ThroughputConfig,
-  telemetry: TickTelemetry
+  telemetry: TickTelemetry,
+  /** Números que um worker vivo envia (worker-ownership.ts): o cron os pula; vazio/ausente = comportamento de sempre. */
+  skipChannels?: ReadonlySet<string>,
 ): Promise<{
   channels: ChannelWork<QueueItem>[];
   defaultMaxInFlight: Map<string, number | undefined>;
@@ -129,6 +131,7 @@ export async function buildChannelWork(
   for (const [channelId, campaigns] of byChannel) {
     const channelInfo = info.get(channelId);
     if (channelInfo?.paused) continue;
+    if (skipChannels?.has(channelId)) continue;
     const provider = channelInfo?.provider ?? null;
     const inCooldown = isInCooldown(channelId, now, channelInfo?.cooldownUntil);
     let maxConcurrency = resolveChannelConcurrency({
@@ -229,13 +232,15 @@ export interface SendStageInput {
   outOfTime: () => boolean;
   health: ReturnType<typeof startHealthMonitor> | undefined;
   autoPauseConfig: ReturnType<typeof autoPauseConfigFromEnv>;
+  /** Números com worker vivo: ficam fora deste estágio (o cron só os pula com a chave do worker ligada). */
+  skipChannels?: ReadonlySet<string>;
 }
 
 /** Envia o que foi planejado: números em paralelo, campanhas do mesmo número em round-robin, teto por número e global. */
 export async function runSendStage(input: SendStageInput): Promise<SchedulerReport> {
-  const { db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig } = input;
+  const { db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipChannels } = input;
   const [channelWork, blacklistLookup] = await Promise.all([
-    buildChannelWork(db, planned, config, telemetry),
+    buildChannelWork(db, planned, config, telemetry, skipChannels),
     // Revalidação da blacklist de todos os candidatos do tick numa leitura
     // (tick-preload.ts); sem ela, cada envio consulta como antes.
     preloadBlacklist(

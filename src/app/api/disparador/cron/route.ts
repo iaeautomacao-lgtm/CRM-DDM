@@ -22,7 +22,8 @@ import { isPrepareInTickEnabled, prepareDueCampaigns, recoverStuckPreparing } fr
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
-import { envWithEngineFlags, loadEngineFlagRows } from "@/lib/disparador/engine-flags";
+import { envWithEngineFlags, isWorkerEnabled, loadEngineFlagRows } from "@/lib/disparador/engine-flags";
+import { loadLiveWorkerSessions } from "@/lib/disparador/worker-ownership";
 import { isBatchClaimEnabled, planClaimTokens } from "@/lib/disparador/batch-claim";
 
 import {
@@ -457,7 +458,10 @@ async function runTick(request: Request, chain: ChainContext, tickEnv: Record<st
     //     e teto global. O SELECT acima não reserva nada: cada item ainda
     //     passa pelo claim atômico dentro de processQueueItem
     //     (claim_dispatch_item), que pode recusá-lo.
-    schedule = await runSendStage({ db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig });
+    // Convivência com o worker de envio (W1): só pula os números que têm worker VIVO e só com a chave do worker ligada (padrão: desligada).
+    // Sem worker vivo (ou sem a migration 367) o cron envia todos os números, como sempre.
+    const skipChannels = isWorkerEnabled(tickEnv) ? await loadLiveWorkerSessions(db) : undefined;
+    schedule = await runSendStage({ db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipChannels });
     const results = planned.map((entry) => entry.result);
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
