@@ -3,7 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { ConversationOriginBanner } from "./conversation-origin";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permission";
@@ -67,6 +67,14 @@ import {
   assignSelf,
 } from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
+import {
+  THREAD_PAGE_SIZE,
+  cacheThread,
+  getCachedThread,
+  mergeLatestPage,
+  messageStamp,
+  prependOlder,
+} from "@/lib/inbox/thread-pages";
 import { PausedAgentConfirm } from "@/components/pausas/paused-agent-confirm";
 import { usePausedUserIds } from "@/hooks/use-pauses";
 import type { PausedAgentInfo } from "@/lib/pausas/pause";
@@ -484,6 +492,24 @@ export function MessageThread({
   // rolagem inicial; com erro, sem isso a rolagem nunca era liberada.
   const settledConversationIdRef = useRef<string | null>(null);
 
+  // Histórico em blocos: abre com as mensagens mais recentes (THREAD_PAGE_SIZE); as antigas vêm ao rolar para cima.
+  // As últimas conversas abertas ficam na memória (lib/inbox/thread-pages): a troca é instantânea e a lista é
+  // atualizada em segundo plano, sem esqueleto. Refs para os efeitos lerem o valor atual sem depender dele.
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  });
+  const conversationIdRef = useRef<string | undefined>(conversationId);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  });
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  // Posição da rolagem antes de entrarem mensagens antigas: a leitura não pula (ver useLayoutEffect abaixo).
+  const prependAnchorRef = useRef<{ height: number; top: number } | null>(null);
+  const skipAutoScrollRef = useRef(false);
+
   // Fetch messages whenever the selected conversation changes. Kept
   // separate from the unread-reset effect so that incoming messages
   // arriving while the thread is open don't trigger a full refetch —
@@ -494,7 +520,16 @@ export function MessageThread({
     const supabase = createClient();
     let cancelled = false;
 
-    const showInitialLoading = loadedConversationIdRef.current !== conversationId;
+    const firstOpen = loadedConversationIdRef.current !== conversationId;
+    const cached = firstOpen ? getCachedThread(conversationId) : null;
+    if (cached) {
+      // Já vista nesta sessão: mostra na hora e atualiza em segundo plano.
+      onMessagesLoadedRef.current(cached);
+      loadedConversationIdRef.current = conversationId;
+      settledConversationIdRef.current = conversationId;
+      setHasOlder(true);
+    }
+    const showInitialLoading = firstOpen && !cached;
 
     (async () => {
       // Only a first successful load for this conversation uses the main
@@ -506,14 +541,18 @@ export function MessageThread({
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
-        .order("received_at", { ascending: true });
+        .order("received_at", { ascending: false })
+        .limit(THREAD_PAGE_SIZE);
 
       if (cancelled) return;
 
       if (error) {
         console.error("Failed to fetch messages:", error);
       } else {
-        onMessagesLoadedRef.current(data ?? []);
+        const latest = (data ?? []).slice().reverse();
+        const mine = messagesRef.current.filter((m) => m.conversation_id === conversationId);
+        onMessagesLoadedRef.current(mergeLatestPage(mine, latest));
+        setHasOlder(latest.length === THREAD_PAGE_SIZE);
         loadedConversationIdRef.current = conversationId;
       }
       settledConversationIdRef.current = conversationId;
@@ -529,6 +568,56 @@ export function MessageThread({
     // realtime is best-effort and any message events sent while the WS
     // was disconnected or throttled are otherwise lost.
   }, [conversationId, resyncToken]);
+
+  // Guarda a conversa na memória a cada mudança (só depois do 1º carregamento e só se as mensagens são dela).
+  useEffect(() => {
+    if (!conversationId || loading || settledConversationIdRef.current !== conversationId) return;
+    if (messages.length === 0 || messages[0].conversation_id !== conversationId) return;
+    cacheThread(conversationId, messages);
+  }, [messages, conversationId, loading]);
+
+  // Mensagens antigas: ao chegar perto do topo (ou pelo botão) busca o bloco anterior ao mais antigo já carregado.
+  const loadOlder = useCallback(async () => {
+    const convId = conversationIdRef.current;
+    if (!convId || loadingOlderRef.current) return;
+    const first = messagesRef.current.find((m) => !m.id.startsWith("temp-"));
+    if (!first) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const { data, error } = await createClient()
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", convId)
+        .lt("received_at", messageStamp(first))
+        .order("received_at", { ascending: false })
+        .limit(THREAD_PAGE_SIZE);
+      if (error) {
+        console.error("Failed to fetch older messages:", error);
+        toast.error("Não foi possível carregar as mensagens anteriores.");
+        return;
+      }
+      if (conversationIdRef.current !== convId) return;
+      const older = (data ?? []).slice().reverse();
+      setHasOlder(older.length === THREAD_PAGE_SIZE);
+      const el = scrollRef.current;
+      if (el) prependAnchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      skipAutoScrollRef.current = true;
+      onMessagesLoadedRef.current(prependOlder(messagesRef.current, older));
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, []);
+
+  // Depois de entrarem mensagens antigas no topo, devolve a rolagem ao mesmo ponto (a leitura não pula).
+  useLayoutEffect(() => {
+    const anchor = prependAnchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el) return;
+    prependAnchorRef.current = null;
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+  }, [messages]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
@@ -1245,7 +1334,8 @@ export function MessageThread({
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_NEAR_BOTTOM_PX;
     nearBottomRef.current = near;
     if (near) setShowNewMessages(false);
-  }, []);
+    if (el.scrollTop < 160 && hasOlder) void loadOlder();
+  }, [hasOlder, loadOlder]);
 
   const pendingCount = pendingSends.length;
   useEffect(() => {
@@ -1253,6 +1343,12 @@ export function MessageThread({
     const grewPending = pendingCount > prevPendingCountRef.current;
     prevMsgCountRef.current = messages.length;
     prevPendingCountRef.current = pendingCount;
+
+    // Entrada de mensagens antigas no topo: não é novidade nem manda rolar para o fim.
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false;
+      return;
+    }
 
     if (!scrollRef.current || loading || !conversationId) return;
 
@@ -1433,7 +1529,7 @@ export function MessageThread({
   };
 
   const displayName = contact.name || contact.phone || "Contato";
-  const messageGroups = groupMessagesByDate(messages);
+  const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
@@ -1818,6 +1914,19 @@ export function MessageThread({
             </div>
           ) : (
             <div className="space-y-4">
+              {hasOlder && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadOlder()}
+                    disabled={loadingOlder}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium text-foreground-2 hover:bg-surface-hover disabled:opacity-70"
+                  >
+                    {loadingOlder && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
+                    {loadingOlder ? "Carregando…" : "Ver mensagens anteriores"}
+                  </button>
+                </div>
+              )}
               {messageGroups.map((group) => (
                 <div key={group.date}>
                   {/* Date separator */}
