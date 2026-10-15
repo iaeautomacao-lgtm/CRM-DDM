@@ -50,8 +50,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageBubble } from "./message-bubble";
-import { MessageActions } from "./message-actions";
 import {
   MessageComposer,
   type SendMediaPayload,
@@ -75,6 +73,7 @@ import {
   messageStamp,
   prependOlder,
 } from "@/lib/inbox/thread-pages";
+import { MessageRow } from "./message-row";
 import { PausedAgentConfirm } from "@/components/pausas/paused-agent-confirm";
 import { usePausedUserIds } from "@/hooks/use-pauses";
 import type { PausedAgentInfo } from "@/lib/pausas/pause";
@@ -1439,6 +1438,16 @@ export function MessageThread({
     [conversation, user?.id],
   );
 
+  // Funções estáveis para as linhas memoizadas (MessageRow): sempre chamam a versão mais recente.
+  const rowHandlersRef = useRef({ handleStartReply, postReaction });
+  useEffect(() => {
+    rowHandlersRef.current = { handleStartReply, postReaction };
+  });
+  const rowOnReply = useCallback((m: Message) => rowHandlersRef.current.handleStartReply(m), []);
+  const rowOnReact = useCallback((id: string, emoji: string) => {
+    void rowHandlersRef.current.postReaction(id, emoji);
+  }, []);
+
   // Atribuir a quem está em pausa: o servidor responde 409 e a pessoa confirma.
   const [pausedAssign, setPausedAssign] = useState<{ agentId: string; info: PausedAgentInfo } | null>(null);
   const pausedIds = usePausedUserIds(!!conversation);
@@ -1952,37 +1961,18 @@ export function MessageThread({
                             preview: buildReplyPreview(parent),
                           }
                         : null;
-                      const msgReactions = reactionsByMessageId.get(msg.id);
-                      // Toggle is computed at the call site — `msgReactions`
-                      // and `user?.id` are already in scope, no extra hook.
-                      const handlePillToggle = (emoji: string) => {
-                        const own = msgReactions?.find(
-                          (r) =>
-                            r.actor_type === "agent" &&
-                            r.actor_id === user?.id,
-                        );
-                        const next = own?.emoji === emoji ? "" : emoji;
-                        void postReaction(msg.id, next);
-                      };
                       return (
-                        <MessageActions
+                        <MessageRow
                           key={msg.id}
                           message={msg}
-                          onReply={() => handleStartReply(msg)}
-                          onReact={(emoji) => {
-                            if (emoji) void postReaction(msg.id, emoji);
-                          }}
-                        >
-                          <MessageBubble
-                            message={msg}
-                            reply={reply}
-                            reactions={msgReactions}
-                            currentUserId={user?.id}
-                            onToggleReaction={handlePillToggle}
-                            campaign={campaignFor(msg)}
-                            author={author}
-                          />
-                        </MessageActions>
+                          author={author}
+                          reply={reply}
+                          reactions={reactionsByMessageId.get(msg.id)}
+                          campaign={campaignFor(msg)}
+                          currentUserId={user?.id}
+                          onReply={rowOnReply}
+                          onReact={rowOnReact}
+                        />
                       );
                     })}
                   </div>
