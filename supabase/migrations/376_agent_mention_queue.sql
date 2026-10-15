@@ -175,6 +175,8 @@ BEGIN
   WHERE p.account_id = p_account_id
     AND p.account_role = 'agent'::wacrm.account_role_enum
     AND p.mention_alias = p_alias
+    -- V2 (311) has deactivated_at; V1 does not. Missing JSON key = NULL.
+    AND (to_jsonb(p) ->> 'deactivated_at') IS NULL
   LIMIT 1;
   IF v_agent_id IS NULL THEN RETURN NULL; END IF;
 
