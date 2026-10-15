@@ -1030,6 +1030,9 @@ async function processMessage(
     replyPhoneNormalized: senderPhone,
   }).catch(() => {})
 
+  const { tryMentionAgentHandoff } = await import('@/lib/inbox/agent-mention-server')
+  const mentionedHandoff = await tryMentionAgentHandoff({ accountId, conversationId: conversation.id, text: contentType === 'text' ? contentText : null })
+
   // ============================================================
   // Flow runner dispatch.
   //
@@ -1053,7 +1056,7 @@ async function processMessage(
   // Webchat" ligada recebe o convite e conta como tratada (sem fluxo
   // receptivo, sem IA global) — ver src/lib/webchat/campaign.ts.
   // ============================================================
-  const movedToWebchat = await maybeStartCampaignWebchat({
+  const movedToWebchat = mentionedHandoff || await maybeStartCampaignWebchat({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
