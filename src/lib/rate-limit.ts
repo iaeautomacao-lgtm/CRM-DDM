@@ -291,6 +291,10 @@ export const RATE_LIMITS = {
   utmpayTest: { limit: 6, windowMs: 60_000 },
   /** API v1: extração de conversas e mensagens (TASK38); 60/min por chave nas três rotas, além do limite geral. */
   apiV1Extract: { limit: 60, windowMs: 60_000 },
+  /** POST /api/v1/whatsapp/send-template: envio unitário de template (não passa pelo ritmo do Disparador); 60/min por chave, além do limite geral. Volume vai por campanha. */
+  apiV1TemplateSend: { limit: 60, windowMs: 60_000 },
+  /** GET/POST/PATCH /api/v1/contacts: leitura de dado pessoal (busca por CPF/telefone) 60/min por chave, além do limite geral. */
+  apiV1ContactsRead: { limit: 60, windowMs: 60_000 },
   /** Plano de segurança 13/10 (Âncora 1): rotas que gastam IA, banco ou a Meta/WAHA. Por usuário (ou conta, nas de admin). */
   aiSuggestTag: { limit: 20, windowMs: 60_000 },
   campaignStart: { limit: 10, windowMs: 60_000 },
