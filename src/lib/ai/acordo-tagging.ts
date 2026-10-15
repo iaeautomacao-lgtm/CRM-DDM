@@ -115,7 +115,7 @@ export async function autoTagAcordoRealizado(
     if (!historyText) return;
 
     const isFormalized = await classifyAcordoFormalizado(historyText, (prompt) =>
-      callLlmForAnalysis(provider, apiKey, prompt),
+      callLlmForAnalysis(provider, apiKey, prompt, model, accountId),
     );
     if (!isFormalized) return;
 
