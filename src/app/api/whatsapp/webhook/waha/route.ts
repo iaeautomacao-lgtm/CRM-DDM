@@ -770,8 +770,8 @@ export async function POST(request: Request) {
           | 'keyword_match'
         )[] = []
         if (!flowConsumed) automationTriggers.push('new_message_received', 'keyword_match')
-        if (contactWasCreated) automationTriggers.unshift('new_contact_created')
-        if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
+        if (contactWasCreated && !mentionedHandoff) automationTriggers.unshift('new_contact_created')
+        if (isFirstInboundMessage && !mentionedHandoff) automationTriggers.unshift('first_inbound_message')
         for (const triggerType of automationTriggers) {
           runAutomationsForTrigger({
             accountId,
