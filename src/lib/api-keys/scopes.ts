@@ -22,6 +22,8 @@ export const API_SCOPES = [
   'campaigns:write',
   'campaigns:read',
   'reports:read',
+  // Templates (Onda 1 da API, 15/10): listar os templates aprovados e seus placeholders. Também aceitos por GET /templates: messages:send e campaigns:write.
+  'templates:read',
   // Webhooks de saída (PRD 15, 15.14): cadastrar endpoints assinados e ler o histórico de entregas.
   'webhooks:read',
   'webhooks:write',
@@ -43,6 +45,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'campaigns:write': 'Create and enqueue Disparador campaigns',
   'campaigns:read': 'Read Disparador campaign status and metrics',
   'reports:read': 'Read aggregated CRM reporting and operational metrics',
+  'templates:read': 'List approved WhatsApp templates and their placeholders',
   'webhooks:read': 'Read outbound webhook endpoints and their delivery history',
   'webhooks:write': 'Create, change and delete outbound webhook endpoints (and replay failed deliveries)',
   'intelligence:read':

@@ -34,6 +34,7 @@ export type ApiErrorCode =
   | 'forbidden' // valid key, but missing the required scope
   | 'rate_limited' // per-key budget exhausted
   | 'bad_request' // malformed input
+  | 'unprocessable' // regra de negócio que impede o pedido e não é opt-out (ex.: template em canal WAHA, template não aprovado) — 422
   | 'not_found'
   | 'recipient_blocked' // destinatário na blacklist/opt-out (422)
   | 'unavailable' // dependência indisponível (503)
@@ -96,6 +97,11 @@ export function badRequest(message: string): ApiError {
 /** 400 com campos extras no objeto `error`. */
 export function badRequestWith(message: string, extra: Record<string, unknown>): ApiError {
   return new ApiError('bad_request', message, 400, undefined, undefined, extra);
+}
+
+/** 422 — pedido bem formado, mas uma regra de negócio impede (não é opt-out: isso é `recipient_blocked`). Dados extras em `error`. */
+export function unprocessable(message: string, extra?: Record<string, unknown>): ApiError {
+  return new ApiError('unprocessable', message, 422, undefined, undefined, extra);
 }
 
 /** 409 — conflito de idempotência. */
