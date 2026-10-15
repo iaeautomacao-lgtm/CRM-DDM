@@ -460,8 +460,10 @@ async function runTick(request: Request, chain: ChainContext, tickEnv: Record<st
     //     (claim_dispatch_item), que pode recusá-lo.
     // Convivência com o worker de envio (W1): só pula os números que têm worker VIVO e só com a chave do worker ligada (padrão: desligada).
     // Sem worker vivo (ou sem a migration 367) o cron envia todos os números, como sempre.
-    const skipChannels = isWorkerEnabled(tickEnv) ? await loadLiveWorkerSessions(db) : undefined;
-    schedule = await runSendStage({ db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipChannels });
+    // Campanha SEQUENCIAL (batch_size 1, cadência por reserve_campaign_tick) fica sempre com o cron: o worker só envia campanha em lote.
+    const liveWorkers = isWorkerEnabled(tickEnv) ? await loadLiveWorkerSessions(db) : undefined;
+    const skipSend = liveWorkers?.size ? (campaign: Campaign, channelId: string) => liveWorkers.has(channelId) && !shouldReserveCampaignCadence(campaign.batch_size) : undefined;
+    schedule = await runSendStage({ db, planned, config, telemetry, batchMode, outOfTime, health, autoPauseConfig, skipSend });
     const results = planned.map((entry) => entry.result);
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
