@@ -13,6 +13,7 @@ import { EXPORT_SYNC_MAX_ROWS } from "@/lib/disparador/export-jobs";
 import {
   attachLegacyCsvNames,
   attachUtmpayResults,
+  loadContactConversationIds,
   SELECT_COLUMNS,
   SELECT_COLUMNS_REPLIED,
   toDetailRow,
@@ -61,19 +62,8 @@ async function attachConversations(
   accountId: string,
   campaignId: string,
 ): Promise<QueueDetailRow[]> {
-  const contactIds = [...new Set(rows.map((r) => r.contact_id).filter(Boolean))] as string[];
-  if (contactIds.length === 0) return rows;
-  const { data } = await supabaseAdmin()
-    .from("conversations")
-    .select("id, contact_id, origin_campaign_id, last_message_at")
-    .eq("account_id", accountId)
-    .in("contact_id", contactIds)
-    .order("last_message_at", { ascending: false, nullsFirst: false });
-  const rowsByRecency = (data ?? []) as Array<{ id: string; contact_id: string; origin_campaign_id: string | null }>;
-  const byContact = new Map<string, string>();
-  // Mais recente de cada contato; a conversa desta campanha tem prioridade.
-  for (const c of rowsByRecency) if (!byContact.has(c.contact_id)) byContact.set(c.contact_id, c.id);
-  for (const c of rowsByRecency) if (c.origin_campaign_id === campaignId) byContact.set(c.contact_id, c.id);
+  const byContact = await loadContactConversationIds(accountId, campaignId, rows.map((r) => r.contact_id).filter(Boolean) as string[]);
+  if (byContact.size === 0) return rows;
   return rows.map((r) => ({ ...r, conversation_id: r.contact_id ? byContact.get(r.contact_id) ?? null : null }));
 }
 

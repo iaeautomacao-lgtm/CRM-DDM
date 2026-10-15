@@ -12,6 +12,7 @@
 import { requireApiKey } from "@/lib/auth/api-context";
 import { ok, notFound, toApiErrorResponse, type ApiCallLogContext } from "@/lib/api/v1/respond";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { CAMPAIGN_DETAIL_COLUMNS, CAMPAIGN_DETAIL_COLUMNS_BASE, foldQueueStats, loadCampaignDetailExtras, type CampaignDetailRow } from "@/lib/api/v1/campaign-api";
 
 export async function GET(
   request: Request,
@@ -29,12 +30,13 @@ export async function GET(
     logCtx.keyId = ctx.keyId;
     const db = supabaseAdmin();
 
-    const { data: campaign, error: campaignError } = await db
-      .from("campaigns")
-      .select("id, nome, status, created_at, janela_inicio, janela_fim")
-      .eq("id", campaignId)
-      .eq("account_id", ctx.accountId)
-      .maybeSingle();
+    // Colunas novas (migration 336) ainda ausentes no banco (42703): lê sem elas — o detalhe nunca pode quebrar por isso.
+    const readCampaign = (columns: string) =>
+      db.from("campaigns").select(columns).eq("id", campaignId).eq("account_id", ctx.accountId).limit(1);
+    let campaignRes = await readCampaign(CAMPAIGN_DETAIL_COLUMNS);
+    if (campaignRes.error?.code === "42703") campaignRes = await readCampaign(CAMPAIGN_DETAIL_COLUMNS_BASE);
+    const { error: campaignError } = campaignRes;
+    const campaign = (campaignRes.data?.[0] ?? null) as unknown as (CampaignDetailRow & { id: string }) | null;
 
     if (campaignError) throw campaignError;
     if (!campaign) {
@@ -55,12 +57,9 @@ export async function GET(
 
     if (statsError) throw statsError;
 
-    const queue = { agendado: 0, enviando: 0, entregue: 0, erro: 0, cancelado: 0 };
-    for (const row of (statsRows ?? []) as Array<{ status: string; qty: number }>) {
-      if (row.status in queue) {
-        queue[row.status as keyof typeof queue] = Number(row.qty);
-      }
-    }
+    // As 5 chaves de sempre + as que faltavam (pendente, pausado, lido, bloqueado): aditivo.
+    const queue = foldQueueStats((statsRows ?? []) as Array<{ status: string; qty: number }>);
+    const extras = await loadCampaignDetailExtras(db, ctx.accountId, campaign as unknown as CampaignDetailRow, (queue.entregue ?? 0) + (queue.lido ?? 0));
 
     return ok(
       {
@@ -84,6 +83,7 @@ export async function GET(
           pending: queue.agendado,
         },
         queue,
+        ...extras,
       },
       200,
       logCtx

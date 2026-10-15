@@ -22,6 +22,8 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getMe: 'comece',
   createCampaign: 'campanha',
   getCampaign: 'acompanhar',
+  listCampaigns: 'acompanhar',
+  listCampaignRecipients: 'acompanhar',
   sendWhatsappMessage: 'avulso',
   getReportOperationsCurrent: 'relatorios',
   getReportOperationsSummary: 'relatorios',
@@ -51,7 +53,7 @@ export interface ScopeRow {
 
 export const SCOPE_ROWS: ScopeRow[] = [
   { scope: 'campaigns:write', paraQue: 'Disparar campanha (e também consultar campanhas)', endpoints: 'POST /disparador/campaigns' },
-  { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns/{id}' },
+  { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns, GET /disparador/campaigns/{id}, GET /disparador/campaigns/{id}/recipients' },
   { scope: 'messages:send', paraQue: 'Enviar mensagem avulsa', endpoints: 'POST /whatsapp/send' },
   { scope: 'reports:read', paraQue: 'Relatórios para Power BI, Metabase, n8n', endpoints: 'GET /reports/*' },
   { scope: 'webhooks:write', paraQue: 'Cadastrar/alterar webhooks de saída e reenviar entregas (também lê)', endpoints: 'POST/PATCH/DELETE /webhooks…' },

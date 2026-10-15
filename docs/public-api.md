@@ -15,11 +15,14 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `POST /api/v1/whatsapp/send` | `messages:send` | Mensagem avulsa (texto/mídia); `Idempotency-Key` obrigatório |
 | `POST /api/v1/disparador/campaigns` | `campaigns:write` | Cria e enfileira campanha (até 20.000 contatos); idempotência opcional |
 | `GET /api/v1/disparador/campaigns/{id}` | `campaigns:read` ou `campaigns:write` | Status e métricas |
+| `GET /api/v1/disparador/campaigns` | `campaigns:read` ou `campaigns:write` | Lista campanhas (filtros `status`, `source`, `external_id`, período; cursor) |
+| `GET /api/v1/disparador/campaigns/{id}/recipients` | `campaigns:read` ou `campaigns:write` | Status por destinatário (`queued`…`read`, `error`, `blocked`, `cancelled`), `replied` e funil `clicked`/`closed`/`paid` do UTMpay; 60/min, auditado; nunca CPF |
 | `GET /api/v1/reports/*` (`operations/current`, `operations/summary`, `teams`, `agents`, `tabulations`) | `reports:read` | Reporting API: métricas agregadas para BI (Power BI, Metabase, n8n). Detalhes em [`reporting-api.md`](./reporting-api.md) |
 
 - **Autenticação:** `Authorization: Bearer wacrm_live_…`. Crie a chave em **Configurações → API keys** (owner/admin); o valor aparece uma única vez e só o hash é guardado. A chave age apenas na conta onde foi criada.
 - **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `recipient_blocked`, `internal`…).
 - **Limite:** 120 requisições por minuto por chave (`429` com `Retry-After`). O limitador é em memória, por processo.
+- **Detalhe da campanha:** além de status e métricas, `GET …/campaigns/{id}` traz `source`, `external_id`, canal, template, motivo da pausa (`pause`), `replied` e, com o UTMpay ativo, o `funnel` (clicou/fechou/pagou com atribuição `direct`/`ai`/`human`). Campos novos são aditivos.
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
 - **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.
 
