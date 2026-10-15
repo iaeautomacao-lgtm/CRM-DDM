@@ -733,7 +733,9 @@ export async function POST(request: Request) {
 
         // Resposta a campanha com "enviar para o Webchat": convite no lugar
         // do fluxo receptivo (mesma regra do webhook Meta).
-        const movedToWebchat = await maybeStartCampaignWebchat({
+        const { tryMentionAgentHandoff } = await import('@/lib/inbox/agent-mention-server')
+        const mentionedHandoff = await tryMentionAgentHandoff({ accountId, conversationId, text: contentType === 'text' ? contentText : null })
+        const movedToWebchat = mentionedHandoff || await maybeStartCampaignWebchat({
           accountId,
           userId: config.user_id,
           contactId,
