@@ -16,16 +16,7 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  Legend,
-} from "recharts";
+import dynamic from "next/dynamic";
 
 import { apiFetch } from "@/lib/api-fetch";
 import { useDisparadorLive } from "@/hooks/use-disparador-live";
@@ -50,7 +41,13 @@ import type {
   WindowMetricsSummary,
 } from "@/lib/disparador/desempenho";
 
-type PerfTone = "default" | "ok" | "warn" | "bad";
+// Recharts (~547 KB) só é baixado quando há série para desenhar; até lá, esqueleto do tamanho do gráfico.
+const ThroughputChart = dynamic(() => import("@/components/disparador/throughput-chart").then((m) => m.ThroughputChart), {
+  ssr: false,
+  loading: () => <Skeleton className="h-72 w-full" />,
+});
+
+type PerfTone ="default" | "ok" | "warn" | "bad";
 
 /** Célula da faixa de indicadores (desenho do KpiStrip, com fundo de alerta e linha de apoio). */
 function PerfKpi(props: { title: string; value: ReactNode; sub?: ReactNode; tone?: PerfTone }) {
@@ -545,46 +542,7 @@ export default function DisparadorDesempenhoPage() {
                 </div>
               ) : (
                 <div className="h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={throughputSeries} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
-                      <XAxis
-                        dataKey="displayTime"
-                        tick={{ fontSize: 11 }}
-                        stroke="currentColor"
-                        opacity={0.5}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 11 }}
-                        stroke="currentColor"
-                        opacity={0.5}
-                        allowDecimals={false}
-                      />
-                      <RechartsTooltip
-                        contentStyle={{
-                          backgroundColor: "var(--popover)",
-                          borderColor: "var(--border)",
-                          borderRadius: "8px",
-                          fontSize: "12px",
-                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                        }}
-                        labelStyle={{ fontWeight: "bold", marginBottom: "4px" }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "12px" }} />
-                      {channelDataKeys.map((keyName, idx) => (
-                        <Line
-                          key={keyName}
-                          type="monotone"
-                          dataKey={keyName}
-                          name={keyName}
-                          stroke={PALETTE[idx % PALETTE.length]}
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                        />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <ThroughputChart data={throughputSeries} keys={channelDataKeys} palette={PALETTE} />
                 </div>
               )}
             </CardContent>
