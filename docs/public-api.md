@@ -16,12 +16,14 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 | `GET /api/v1/contacts`, `GET /api/v1/contacts/{id}` | `contacts:read` (ou `contacts:write`) | Busca por telefone, CPF, e-mail, nome, etiqueta ou data; CPF só mascarado; 60/min por chave |
 | `POST /api/v1/contacts` | `contacts:write` | Upsert por CPF/telefone: cria ou preenche só os vazios |
 | `PATCH /api/v1/contacts/{id}` | `contacts:write` | Sobrescreve campos; `tags {add,remove}`; `custom_fields` em merge |
+| `POST /api/v1/whatsapp/send-template` | `messages:send` | Um template aprovado da Meta a um número (só canal Meta; WAHA → 422); `Idempotency-Key` obrigatório; 60/min por chave |
+| `GET /api/v1/templates` | `templates:read` (ou `messages:send` / `campaigns:write`) | Catálogo de templates: nome, idioma, nº de variáveis, `sendable_via_api` |
 | `POST /api/v1/disparador/campaigns` | `campaigns:write` | Cria e enfileira campanha (até 20.000 contatos); idempotência opcional |
 | `GET /api/v1/disparador/campaigns/{id}` | `campaigns:read` ou `campaigns:write` | Status e métricas |
 | `GET /api/v1/reports/*` (`operations/current`, `operations/summary`, `teams`, `agents`, `tabulations`) | `reports:read` | Reporting API: métricas agregadas para BI (Power BI, Metabase, n8n). Detalhes em [`reporting-api.md`](./reporting-api.md) |
 
 - **Autenticação:** `Authorization: Bearer wacrm_live_…`. Crie a chave em **Configurações → API keys** (owner/admin); o valor aparece uma única vez e só o hash é guardado. A chave age apenas na conta onde foi criada.
-- **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `recipient_blocked`, `internal`…).
+- **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `unprocessable`, `recipient_blocked`, `internal`…).
 - **Limite:** 120 requisições por minuto por chave (`429` com `Retry-After`). O limitador é em memória, por processo.
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
 - **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.

@@ -19,6 +19,8 @@ export const OPERATION_SCOPES: Record<string, string[]> = {
   getContact: ['contacts:read', 'contacts:write'],
   upsertContact: ['contacts:write'],
   updateContact: ['contacts:write'],
+  sendWhatsappTemplate: ['messages:send'],
+  listTemplates: ['templates:read', 'messages:send', 'campaigns:write'],
   createCampaign: ['campaigns:write'],
   getCampaign: ['campaigns:read', 'campaigns:write'],
   getReportOperationsCurrent: ['reports:read'],

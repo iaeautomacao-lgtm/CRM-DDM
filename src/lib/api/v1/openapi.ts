@@ -12,6 +12,7 @@
 import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
 import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
+import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
 
 type Json = Record<string, unknown>;
 
@@ -132,11 +133,11 @@ export const openApiSpec = {
       'Sucesso: `{ "data": … }`. Falha: `{ "error": { "code": "…", "message": "…" } }`. Ramifique pelo `code` (estável); a `message` é para humanos e pode mudar.',
       '',
       '## Limite de requisições',
-      '**120 requisições por minuto por chave** (as rotas de extração têm ainda **60/min** próprios). Ao exceder: `429` com `Retry-After` (segundos) e `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.',
+      '**120 requisições por minuto por chave** (as rotas de extração têm ainda **60/min** próprios, e `POST /whatsapp/send-template` também **60/min**). Ao exceder: `429` com `Retry-After` (segundos) e `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.',
       '**`POST /disparador/campaigns` tem um limite próprio de 6 criações por minuto por chave** (cada chamada pode enfileirar até 20.000 itens), além dos 120/min gerais. Ao exceder: `429` com `Retry-After` (segundos até poder criar de novo); respeite o valor em vez de repetir em laço. A repetição idempotente que devolve a campanha já criada não consome esse limite.',
       '',
       '## Idempotência',
-      '- `POST /whatsapp/send`: o header `Idempotency-Key` é **obrigatório**. Erros 400 de validação (antes de chamar o provedor) **não consomem** a chave: corrija e reenvie com a mesma chave.',
+      '- `POST /whatsapp/send` e `POST /whatsapp/send-template`: o header `Idempotency-Key` é **obrigatório**. Erros 400 de validação (antes de chamar o provedor) **não consomem** a chave: corrija e reenvie com a mesma chave.',
       '- `POST /disparador/campaigns`: `Idempotency-Key` (header) ou `external_id` (corpo) são **opcionais**; sem eles cada chamada cria uma campanha nova.',
       '',
       '## Fuso e janela de envio',
@@ -144,12 +145,12 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CONTACTS_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
     { name: 'Conta', description: 'Identidade da chave.' },
-    { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
+    { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp, envio de um template da Meta e catálogo de templates.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
     ...webhookTags,
@@ -161,6 +162,7 @@ export const openApiSpec = {
     ...webhookPaths,
     ...extractPaths,
     ...contactsPaths,
+    ...templatesPaths,
     '/me': {
       get: {
         tags: ['Conta'],
@@ -839,6 +841,7 @@ export const openApiSpec = {
       ...webhookSchemas,
       ...extractSchemas,
       ...contactsSchemas,
+      ...templatesSchemas,
       Scope: {
         type: 'string',
         enum: [
@@ -846,6 +849,7 @@ export const openApiSpec = {
           'messages:read',
           'contacts:read',
           'contacts:write',
+          'templates:read',
           'conversations:read',
           'campaigns:write',
           'campaigns:read',
@@ -893,10 +897,12 @@ export const openApiSpec = {
                 description: 'Só em 409 `red_quality_owner_required`: números em qualidade vermelha.',
                 items: {
                   type: 'object',
-                  properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] } },
+                  properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] }, label: { type: ['string', 'null'], description: 'Nas rotas de template: o número do canal.' } },
                 },
               },
               unknown_custom_fields: { type: 'array', items: { type: 'string' }, description: 'Só em 422 de contato: campos personalizados que não existem na conta.' },
+              meta_code: { type: ['integer', 'null'], description: 'Só em 502 de template: código de erro da Meta.' },
+              meta_http_status: { type: 'integer', description: 'Só em 502 de template: HTTP devolvido pela Meta.' },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
               duplicates: { type: 'integer' },
               skipped: { type: 'integer' },

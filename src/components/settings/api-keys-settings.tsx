@@ -83,7 +83,8 @@ function keyStatus(k: ApiKey): 'active' | 'revoked' | 'expired' {
 const INTELLIGENCE_SCOPE: ApiScope = 'intelligence:read';
 
 const SCOPE_DESCRIPTIONS_PT: Partial<Record<ApiScope, string>> = {
-  'messages:send': 'Enviar mensagens no WhatsApp',
+  'messages:send': 'Enviar mensagens e templates no WhatsApp',
+  'templates:read': 'Listar os templates da Meta (nome, variáveis)',
   'messages:read': 'Ler mensagens e status de entrega',
   'contacts:read': 'Listar e ler contatos',
   'contacts:write': 'Criar e atualizar contatos',
