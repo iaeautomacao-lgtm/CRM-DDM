@@ -14,7 +14,7 @@
 -- PRÉ-CHECK (rodar ANTES; schema vivo):
 --   SELECT to_regclass('wacrm.dispatch_channel_ownership'), to_regclass('wacrm.dispatch_worker_leases');             -- NULL, NULL na 1ª vez
 --   SELECT to_regclass('wacrm.whatsapp_config'), to_regclass('wacrm.accounts'), to_regclass('wacrm.dispatch_engine_flags');   -- não nulos (366)
---   SELECT to_regprocedure('wacrm.has_perm(text)'), to_regprocedure('wacrm.is_account_member(uuid, text)');           -- não nulos
+--   SELECT to_regprocedure('wacrm.has_perm(text)'), (SELECT count(*) FROM pg_proc WHERE proname = 'is_account_member');    -- não nulo / ≥ 1
 -- VERIFICAÇÃO:
 --   SELECT to_regprocedure('wacrm.acquire_dispatch_leases(text,uuid[],integer)');
 --   SELECT column_name FROM information_schema.columns WHERE table_schema='wacrm' AND table_name='dispatch_engine_flags' AND column_name='worker_enabled';
@@ -43,7 +43,9 @@ BEGIN
   IF to_regclass('wacrm.dispatch_engine_flags') IS NULL THEN
     RAISE EXCEPTION '367: falta wacrm.dispatch_engine_flags — aplique a 366 antes';
   END IF;
-  IF to_regprocedure('wacrm.has_perm(text)') IS NULL OR to_regprocedure('wacrm.is_account_member(uuid, text)') IS NULL THEN
+  -- is_account_member: a assinatura real é (uuid, account_role_enum) — procura pelo NOME (regra: pré-check com assinatura real ou por nome).
+  IF to_regprocedure('wacrm.has_perm(text)') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'wacrm' AND p.proname = 'is_account_member') THEN
     RAISE EXCEPTION '367: faltam wacrm.has_perm / wacrm.is_account_member';
   END IF;
 END $$;
