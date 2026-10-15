@@ -5,7 +5,7 @@ import { OPERATION_SCOPES, buildReference } from './docs-reference';
 import { toPython } from './docs-examples';
 
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
-const specOperations = Object.entries(openApiSpec.paths as Record<string, Record<string, { operationId: string }>>).flatMap(([path, item]) =>
+const specOperations = Object.entries(openApiSpec.paths as unknown as Record<string, Record<string, { operationId: string }>>).flatMap(([path, item]) =>
   METHODS.filter((m) => item[m]).map((method) => ({ path, method: method.toUpperCase(), id: item[method].operationId })),
 );
 

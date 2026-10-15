@@ -37,7 +37,7 @@ describe('/docs/api — renderiza sem sessão', () => {
 
   it('todo grupo e toda rota da spec têm âncora na página (falha se surgir rota sem bloco)', () => {
     for (const tag of openApiSpec.tags) expect(text).toContain(tag.name);
-    for (const item of Object.values(openApiSpec.paths as Record<string, Record<string, { operationId?: string }>>)) {
+    for (const item of Object.values(openApiSpec.paths as unknown as Record<string, Record<string, { operationId?: string }>>)) {
       for (const method of METHODS) {
         const op = item[method];
         if (!op) continue;
