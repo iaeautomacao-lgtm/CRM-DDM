@@ -223,6 +223,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   disp("disparador/utm/metricas", "GET"),
   disp("disparador/limits", "GET", "campaigns.rate_limit"),
   disp("disparador/limits", "PUT", "campaigns.rate_limit"),
+  disp("disparador/engine", "GET", "campaigns.rate_limit"),
+  disp("disparador/engine", "PUT", "campaigns.rate_limit"),
   disp("disparador/rate-limits", "GET", "campaigns.rate_limit"),
   disp("disparador/rate-limits", "PUT", "campaigns.rate_limit"),
   disp("disparador/rate-limits/acknowledge", "POST", "campaigns.rate_limit"),

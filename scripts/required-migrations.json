@@ -536,6 +536,10 @@
       "version": "365b_deals_contact_idx",
       "kind": "index",
       "index": "idx_deals_contact"
+    },
+    {
+      "version": "366_dispatch_engine_flags",
+      "kind": "registry"
     }
   ]
 }
