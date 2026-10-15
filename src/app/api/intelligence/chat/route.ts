@@ -5,6 +5,7 @@ import { createToolExecutor } from '@/lib/intelligence/chat/execute'
 import type { ChatStreamEvent } from '@/lib/intelligence/chat/labels'
 import { runChatLoop } from '@/lib/intelligence/chat/loop'
 import { createOpenAiChatClient, intelligenceModel } from '@/lib/intelligence/chat/openai-client'
+import { recordAiTokenUsage } from '@/lib/billing/usage'
 import { buildSystemPrompt, chatToolDefinitions, scopeLabel } from '@/lib/intelligence/chat/prompt'
 import {
   chatTitleFrom,
@@ -126,7 +127,10 @@ export async function POST(request: Request) {
     return intelligenceErrorResponse(err)
   }
 
-  const llm = createOpenAiChatClient({ apiKey, model: intelligenceModel() })
+  const llm = createOpenAiChatClient({
+    apiKey, model: intelligenceModel(),
+    onUsage: (response) => recordAiTokenUsage({ accountId: scope.accountId, provider: 'openai', model: intelligenceModel(), feature: 'intelligence', response }),
+  })
   const encoder = new TextEncoder()
   const chatId = chat.id
 
