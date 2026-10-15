@@ -3,6 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Pausar / cancelar / retomar (campaign-control.ts): estado, idempotência, guardas do resume e gravação do motivo.
 const approved = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => true));
 vi.mock('@/lib/disparador/template-pause', async (orig) => ({ ...(await orig<typeof import('@/lib/disparador/template-pause')>()), allTemplatesApproved: approved }));
+const events = vi.hoisted(() => ({
+  paused: vi.fn(async (..._a: unknown[]) => 1),
+  resumed: vi.fn(async (..._a: unknown[]) => 1),
+  cancelled: vi.fn(async (..._a: unknown[]) => 1),
+}));
+vi.mock('@/lib/webhooks-out/campaign-events', () => ({
+  emitCampaignPaused: events.paused,
+  emitCampaignResumed: events.resumed,
+  emitCampaignCancelled: events.cancelled,
+}));
 vi.mock('@/lib/disparador/queue-moves', () => ({ drainDispatchMoves: vi.fn(async () => ({ ok: true, moved: 0, partial: false })) }));
 
 import { cancelCampaign, pauseCampaign, resumeCampaign } from './campaign-control';
@@ -51,6 +61,7 @@ beforeEach(() => {
   updateError = null;
   afterRpcStatus = null;
   approved.mockResolvedValue(true);
+  for (const f of Object.values(events)) f.mockClear();
 });
 
 describe('pauseCampaign', () => {
@@ -161,5 +172,56 @@ describe('resumeCampaign', () => {
     expect(await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, start)).toMatchObject({ ok: false, kind: 'conflict' });
     start.mockResolvedValue({ ok: false, status: 500, error: 'x' });
     expect(await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, start)).toMatchObject({ ok: false, kind: 'internal' });
+  });
+});
+
+describe('eventos de webhook do ciclo de vida (só com changed:true)', () => {
+  it('pausa: emite campaign.paused com by api por padrão, o motivo e o estado do movimento dos itens', async () => {
+    await pauseCampaign(makeDb(), { ...input, reason: ' conferir ' });
+    expect(events.paused).toHaveBeenCalledTimes(1);
+    expect(events.paused).toHaveBeenCalledWith(expect.anything(), { accountId: 'ACC', campaignId: 'CAMP', by: 'api', reason: 'conferir', itemsPendingMove: false });
+    events.paused.mockClear();
+    await pauseCampaign(makeDb(), { ...input, by: 'user' });
+    expect(events.paused).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ by: 'user', reason: null }));
+  });
+  it('pausa idempotente, em estado errado ou com falha da RPC: não emite', async () => {
+    state = base('pausada');
+    await pauseCampaign(makeDb(), input);
+    state = base('encerrada');
+    await pauseCampaign(makeDb(), input);
+    state = base('em_execucao');
+    rpcResult = { data: null, error: { message: 'boom' } };
+    await pauseCampaign(makeDb(), input);
+    expect(events.paused).not.toHaveBeenCalled();
+  });
+  it('cancelamento: emite campaign.cancelled com o motivo e by api (cancelled_api) ou user (cancelled)', async () => {
+    await cancelCampaign(makeDb(), { ...input, motive: 'cancelled_api' });
+    expect(events.cancelled).toHaveBeenCalledWith(expect.anything(), { accountId: 'ACC', campaignId: 'CAMP', by: 'api', reason: 'cancelled_api', itemsPendingMove: false });
+    events.cancelled.mockClear();
+    await cancelCampaign(makeDb(), { ...input, motive: 'cancelled' });
+    expect(events.cancelled).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ by: 'user', reason: 'cancelled' }));
+  });
+  it('cancelamento de campanha já encerrada ou em rascunho: não emite', async () => {
+    state = base('encerrada');
+    await cancelCampaign(makeDb(), { ...input, motive: 'cancelled_api' });
+    state = base('rascunho');
+    await cancelCampaign(makeDb(), { ...input, motive: 'cancelled_api' });
+    expect(events.cancelled).not.toHaveBeenCalled();
+  });
+  it('retomada: emite campaign.resumed só quando mudou; bloqueios e já em execução não emitem', async () => {
+    const start = vi.fn(async () => ({ ok: true as const }));
+    state = base('pausada');
+    await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, start);
+    expect(events.resumed).toHaveBeenCalledTimes(1);
+    expect(events.resumed).toHaveBeenCalledWith(expect.anything(), { accountId: 'ACC', campaignId: 'CAMP', by: 'api' });
+    events.resumed.mockClear();
+    state = base('em_execucao');
+    await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, start);
+    state = base('pausada', { pausa_automatica_motivo: 'Taxa de erro' });
+    await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, start);
+    const red = vi.fn(async () => ({ ok: false as const, status: 403, error: 'RED', code: 'red_quality_owner_required' }));
+    state = base('pausada');
+    await resumeCampaign(makeDb(), { ...input, acknowledgeAutoPause: false }, red);
+    expect(events.resumed).not.toHaveBeenCalled();
   });
 });
