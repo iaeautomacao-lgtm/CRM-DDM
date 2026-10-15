@@ -42,6 +42,7 @@ import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
 import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 import { flowTokenForQueueItem, loadFlowTemplate } from "@/lib/disparador/flow-button";
+import { timedClaim } from "@/lib/disparador/claim-latency";
 import { trackDispatchText, trackDispatchVariables, UTMPAY_UNAVAILABLE_ERROR } from "@/lib/utmpay/dispatch";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
@@ -157,10 +158,10 @@ async function claimItemAtomically(itemId: string, defaultMaxInFlight?: number):
     defaultMaxInFlight !== DB_DEFAULT_MAX_IN_FLIGHT &&
     !cappedClaimUnavailable
   ) {
-    const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item_capped", {
+    const { data, error } = await timedClaim(() => supabaseAdmin().rpc("claim_dispatch_item_capped", {
       p_item_id: itemId,
       p_default_max_in_flight: defaultMaxInFlight,
-    });
+    }));
     if (!error) return data === true;
     if (!isMissingFunction(error)) throw error;
     cappedClaimUnavailable = true;
@@ -168,9 +169,9 @@ async function claimItemAtomically(itemId: string, defaultMaxInFlight?: number):
       "[Disparador] claim_dispatch_item_capped indisponível (migration 164 não aplicada); usando o teto padrão do banco (4 por número)."
     );
   }
-  const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item", {
+  const { data, error } = await timedClaim(() => supabaseAdmin().rpc("claim_dispatch_item", {
     p_item_id: itemId,
-  });
+  }));
   if (error) throw error;
   return data === true;
 }

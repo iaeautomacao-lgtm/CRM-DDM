@@ -2,6 +2,7 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { BackoffEvent, HealthSample, SchedulerReport } from "@/lib/disparador/dispatch-scheduler";
 import type { DispatchProvider, ThroughputConfig } from "@/lib/disparador/throughput-config";
 import type { ProcessResult } from "@/lib/disparador/processQueue";
+import { drainClaimLatencies } from "@/lib/disparador/claim-latency";
 
 // ============================================================
 // Telemetria do tick do disparador: UMA linha em wacrm.system_logs por
@@ -61,6 +62,11 @@ export function summarizeLatency(samples: readonly number[]): LatencySummary {
 }
 
 export class TickTelemetry {
+  constructor() {
+    // Amostras de claim de um tick anterior (ou de fora do tick) não entram neste.
+    drainClaimLatencies();
+  }
+
   private readonly channels = new Map<string, ChannelCounters>();
   private readonly latencies: Record<DispatchProvider, number[]> = { meta: [], waha: [] };
   private readonly providerErrors: Record<string, number> = {};
@@ -147,6 +153,8 @@ export class TickTelemetry {
         meta: summarizeLatency(this.latencies.meta),
         waha: summarizeLatency(this.latencies.waha),
       },
+      // Latência das chamadas de claim (por item ou em lote) deste tick; p95 é o critério da bancada (< 10 ms).
+      claim_ms: summarizeLatency(drainClaimLatencies()),
       provider_errors: this.providerErrors,
       event_loop_lag_p99_ms: Math.round(params.health.eventLoopLagP99Ms * 10) / 10,
       rss_mb: params.health.rssMb,
