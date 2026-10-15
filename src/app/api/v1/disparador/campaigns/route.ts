@@ -595,6 +595,14 @@ export async function POST(request: Request) {
       }
     };
 
+    // 'reference' por contato (migration 357): sem a coluna, recusa com 503 em vez de criar a campanha sem a referência.
+    if (validContacts.some((c) => c.reference)) {
+      const { error: referenceColumnError } = await db.from("disp_message_queue").select("reference").limit(0);
+      if (referenceColumnError) {
+        throw new ApiError("unavailable", "'reference' ainda não está disponível neste ambiente (aplique a migration 357)", 503);
+      }
+    }
+
     // scheduled_at pelo relógio de janela: o que cai fora da janela/dia
     // permitido continua na próxima abertura, mantendo o espaçamento.
     const scheduleTimes = scheduleApiContacts(validContacts.length, {
@@ -605,9 +613,7 @@ export async function POST(request: Request) {
     });
 
     // Criar campanha
-    const { data: campaign, error: campaignError } = await db
-      .from("campaigns")
-      .insert({
+    const campaignRow: Record<string, unknown> = {
         nome: body.campaign_name.trim(),
         objetivo: body.objective ?? null,
         status: "rascunho",
@@ -645,9 +651,12 @@ export async function POST(request: Request) {
                 },
               ],
         created_by: ctx.createdBy,
-      })
-      .select("id")
-      .single();
+    };
+    const insertCampaign = (row: Record<string, unknown>) => db.from("campaigns").insert(row).select("id").single();
+    // slot_size/slot_interval_minutes (migration 357) guardam o ritmo do create para "adicionar contatos" manter o espaçamento.
+    // Sem a coluna (42703) a campanha é criada igual, só sem esse registro.
+    let { data: campaign, error: campaignError } = await insertCampaign({ ...campaignRow, slot_size: slotSize, slot_interval_minutes: slotIntervalMinutes });
+    if (campaignError?.code === "42703") ({ data: campaign, error: campaignError } = await insertCampaign(campaignRow));
 
     if (campaignError?.code === "23505" && idem.key) {
       // Corrida: outra requisição com a mesma chave criou a campanha primeiro.
@@ -685,6 +694,7 @@ export async function POST(request: Request) {
             template_name: body.template_name,
             template_language: templateLanguage,
             template_variables: contact.variables,
+            ...(contact.reference ? { reference: contact.reference } : {}),
           };
         }
         // WAHA — texto livre com variáveis {{1}}, {{2}}... resolvidas em
@@ -706,6 +716,7 @@ export async function POST(request: Request) {
           template_name: EXTERNAL_WAHA_TEXT_MARKER,
           template_language: null,
           template_variables: [resolvedMessage],
+          ...(contact.reference ? { reference: contact.reference } : {}),
         };
       });
 

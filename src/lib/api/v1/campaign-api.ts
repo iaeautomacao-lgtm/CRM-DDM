@@ -48,9 +48,14 @@ export const API_TO_QUEUE: Record<RecipientStatus, string[]> = {
   error: ['erro'],
   blocked: ['bloqueado'],
   cancelled: ['cancelado'],
+  removed: ['cancelado'],
 };
 
-export function recipientStatusOf(queueStatus: string): RecipientStatus {
+/** Prefixo de cancel_reason gravado por remove_campaign_recipients (migration 357). */
+export const REMOVED_REASON_PREFIX = 'removed_api:';
+
+export function recipientStatusOf(queueStatus: string, cancelReason?: string | null): RecipientStatus {
+  if (queueStatus === 'cancelado' && cancelReason?.startsWith(REMOVED_REASON_PREFIX)) return 'removed';
   return QUEUE_TO_API[queueStatus] ?? 'queued';
 }
 
@@ -160,10 +165,16 @@ interface CampaignListRow {
   session_ids: string[] | null;
   mensagens: Array<{ tipo?: string; template_name?: string }> | null;
   pausa_automatica_motivo: string | null;
+  pause_reason?: string | null;
 }
 
-export const CAMPAIGN_LIST_COLUMNS =
+export const CAMPAIGN_LIST_COLUMNS_BASE =
   'id, nome, status, source, idempotency_key, created_at, janela_inicio, janela_fim, session_ids, mensagens, pausa_automatica_motivo';
+/** Com pause_reason (migration 357). */
+export const CAMPAIGN_LIST_COLUMNS = `${CAMPAIGN_LIST_COLUMNS_BASE}, pause_reason`;
+
+const isMissingColumn = (e: { code?: string; message?: string } | null | undefined) =>
+  !!e && (e.code === '42703' || /column .* does not exist|schema cache/i.test(e.message ?? ''));
 
 /** Tipo de mensagem da campanha a partir do 1º item de `mensagens` (template Meta, imagem ou texto). */
 export function messageTypeOf(mensagens: CampaignListRow['mensagens']): ApiCampaignSummary['message_type'] {
@@ -210,22 +221,29 @@ export function toMetrics(m: Partial<MetricsRow> | null | undefined, pending: nu
   };
 }
 
-export async function loadCampaignPage(
-  db: Db,
-  opts: { accountId: string; filters: CampaignListFilters; cursor: string[] | null; limit: number },
-): Promise<{ items: ApiCampaignSummary[]; next_cursor: string | null }> {
-  const { accountId, filters: f, limit } = opts;
-  let q = db.from('campaigns').select(CAMPAIGN_LIST_COLUMNS).eq('account_id', accountId);
+async function queryCampaignPage(db: Db, accountId: string, f: CampaignListFilters, cursor: string[] | null, limit: number, columns: string) {
+  let q = db.from('campaigns').select(columns).eq('account_id', accountId);
   if (f.statuses.length > 0) q = q.in('status', f.statuses);
   if (f.source) q = q.eq('source', f.source);
   if (f.externalId) q = q.eq('idempotency_key', f.externalId);
   if (f.createdFrom) q = q.gte('created_at', f.createdFrom);
   if (f.createdTo) q = q.lt('created_at', f.createdTo);
-  if (opts.cursor) {
-    const [at, id] = opts.cursor;
+  if (cursor) {
+    const [at, id] = cursor;
     q = q.or(`created_at.lt."${at}",and(created_at.eq."${at}",id.lt."${id}")`);
   }
-  const { data, error } = await q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+  return q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+}
+
+export async function loadCampaignPage(
+  db: Db,
+  opts: { accountId: string; filters: CampaignListFilters; cursor: string[] | null; limit: number },
+): Promise<{ items: ApiCampaignSummary[]; next_cursor: string | null }> {
+  const { accountId, filters: f, limit } = opts;
+  let res = await queryCampaignPage(db, accountId, f, opts.cursor, limit, CAMPAIGN_LIST_COLUMNS);
+  // Sem a coluna pause_reason (migration 357 ainda não aplicada): lê sem ela.
+  if (isMissingColumn(res.error)) res = await queryCampaignPage(db, accountId, f, opts.cursor, limit, CAMPAIGN_LIST_COLUMNS_BASE);
+  const { data, error } = res;
   if (error) throw error;
   const all = (data ?? []) as unknown as CampaignListRow[];
   const rows = all.slice(0, limit);
@@ -258,7 +276,7 @@ export async function loadCampaignPage(
     provider: channelRows.get(r.session_ids?.[0] ?? '') ?? null,
     message_type: messageTypeOf(r.mensagens),
     metrics: toMetrics(metrics.get(r.id), foldQueueStats(statsByCampaign.get(r.id) ?? []).agendado),
-    paused_reason: r.status === 'pausada' ? r.pausa_automatica_motivo : null,
+    paused_reason: r.status === 'pausada' ? (r.pause_reason ?? r.pausa_automatica_motivo) : null,
   }));
   const last = rows[rows.length - 1];
   return { items, next_cursor: all.length > limit ? encodeCursor([new Date(last.created_at).toISOString(), last.id]) : null };
@@ -312,11 +330,17 @@ export interface CampaignDetailExtras {
   started_at: string | null;
   callback_configured: boolean;
   pause: { automatic: boolean; reason: string | null; template: { name: string; language: string | null } | null } | null;
+  /** Só com a campanha encerrada: concluída ou cancelada (e por quem). */
+  ended_reason: 'completed' | 'cancelled' | 'cancelled_api' | null;
   replied: number;
   funnel: ApiCampaignFunnel | null;
 }
 
+/** Completo: pausa por template (336) + motivo da pausa, encerramento e ritmo (357). */
 export const CAMPAIGN_DETAIL_COLUMNS =
+  'id, nome, status, created_at, janela_inicio, janela_fim, source, idempotency_key, session_ids, mensagens, agendamento, callback_url, pausa_automatica_motivo, pausa_template_nome, pausa_template_idioma, pause_reason, encerramento_motivo';
+/** Sem as colunas da 357 (mas com as da 336). */
+export const CAMPAIGN_DETAIL_COLUMNS_336 =
   'id, nome, status, created_at, janela_inicio, janela_fim, source, idempotency_key, session_ids, mensagens, agendamento, callback_url, pausa_automatica_motivo, pausa_template_nome, pausa_template_idioma';
 
 /** Sem as colunas de pausa por template (migration 336). */
@@ -339,9 +363,18 @@ export interface CampaignDetailRow {
   pausa_automatica_motivo: string | null;
   pausa_template_nome?: string | null;
   pausa_template_idioma?: string | null;
+  pause_reason?: string | null;
+  encerramento_motivo?: string | null;
 }
 
-export async function loadCampaignDetailExtras(db: Db, accountId: string, c: CampaignDetailRow, delivered: number): Promise<CampaignDetailExtras> {
+/** Motivo do encerramento: o gravado (357); sem ele, encerrada com itens cancelados = cancelada, senão concluída. */
+export function endedReasonOf(c: Pick<CampaignDetailRow, 'status' | 'encerramento_motivo'>, cancelledItems: number): CampaignDetailExtras['ended_reason'] {
+  if (c.status !== 'encerrada') return null;
+  if (c.encerramento_motivo === 'cancelled' || c.encerramento_motivo === 'cancelled_api') return c.encerramento_motivo;
+  return cancelledItems > 0 ? 'cancelled' : 'completed';
+}
+
+export async function loadCampaignDetailExtras(db: Db, accountId: string, c: CampaignDetailRow, delivered: number, cancelledItems = 0): Promise<CampaignDetailExtras> {
   const sessionId = c.session_ids?.[0] ?? null;
   const [channels, repliedRes, funnel] = await Promise.all([
     sessionId ? loadChannelIdentities(db as never, accountId, { sessionId }).catch(() => []) : Promise.resolve([]),
@@ -363,11 +396,12 @@ export async function loadCampaignDetailExtras(db: Db, accountId: string, c: Cam
     pause:
       c.status === 'pausada'
         ? {
-            automatic: !!c.pausa_automatica_motivo,
-            reason: c.pausa_automatica_motivo,
+            automatic: !!c.pausa_automatica_motivo && !c.pause_reason,
+            reason: c.pausa_automatica_motivo ?? c.pause_reason ?? null,
             template: c.pausa_template_nome ? { name: c.pausa_template_nome, language: c.pausa_template_idioma ?? null } : null,
           }
         : null,
+    ended_reason: endedReasonOf(c, cancelledItems),
     replied: repliedRes.error ? 0 : (repliedRes.count ?? 0),
     funnel: funnel ? toApiFunnel(funnel) : null,
   };
@@ -382,6 +416,8 @@ async function wahaSessionOf(db: Db, accountId: string, channelId: string): Prom
 // ── Destinatários ──────────────────────────────────────────────────────────
 
 export interface RecipientRow {
+  cancel_reason?: string | null;
+  reference?: string | null;
   id: string;
   contact_id: string | null;
   mensagem_final: string | null;
@@ -394,14 +430,18 @@ export interface RecipientRow {
   contacts: { name: string | null; phone: string | null } | null;
 }
 
-export const RECIPIENT_COLUMNS =
+export const RECIPIENT_COLUMNS_BASE =
   'id, contact_id, mensagem_final, erro, erro_codigo, status, scheduled_at, sent_at, replied_at, contacts!contact_id(name, phone)';
+/** Com cancel_reason e reference (migration 357). */
+export const RECIPIENT_COLUMNS = `${RECIPIENT_COLUMNS_BASE}, cancel_reason, reference`;
 
 export interface ApiRecipient {
   recipient_id: string;
   phone: string | null;
   contact_id: string | null;
   name: string | null;
+  /** Texto opaco que o integrador mandou no create (migration 357); nulo se não houve. */
+  reference: string | null;
   status: RecipientStatus;
   status_raw: string;
   scheduled_at: string | null;
@@ -440,7 +480,8 @@ export function toApiRecipient(
     phone: recipientPhone(row),
     contact_id: row.contact_id,
     name: row.contacts?.name ?? null,
-    status: recipientStatusOf(row.status),
+    reference: row.reference ?? null,
+    status: recipientStatusOf(row.status, row.cancel_reason),
     status_raw: row.status,
     scheduled_at: row.scheduled_at ? new Date(row.scheduled_at).toISOString() : null,
     sent_at: row.sent_at ? new Date(row.sent_at).toISOString() : null,
@@ -486,6 +527,26 @@ function decodeCursorAny(raw: string): string[] {
   throw badRequest("'cursor' inválido");
 }
 
+/**
+ * Filtro de status da fila a partir dos status da API. `removed` e `cancelled` compartilham o status `cancelado` e se separam por
+ * cancel_reason (migration 357); sem a coluna (`extended` falso) `removed` não existe e `cancelled` é todo `cancelado`.
+ */
+function applyStatusFilter<Q extends { in: (c: string, v: string[]) => Q; like: (c: string, v: string) => Q; or: (f: string) => Q }>(
+  q: Q,
+  statuses: readonly RecipientStatus[],
+  extended: boolean,
+): Q {
+  if (statuses.length === 0) return q;
+  const raw = [...new Set(statuses.flatMap((s) => API_TO_QUEUE[s]))];
+  let out = q.in('status', raw);
+  if (!extended) return out;
+  const wantsRemoved = statuses.includes('removed');
+  const wantsCancelled = statuses.includes('cancelled');
+  if (wantsRemoved && !wantsCancelled) out = out.like('cancel_reason', `${REMOVED_REASON_PREFIX}%`);
+  if (wantsCancelled && !wantsRemoved) out = out.or(`cancel_reason.is.null,cancel_reason.not.like.${REMOVED_REASON_PREFIX}%`);
+  return out;
+}
+
 export interface RecipientPage {
   items: ApiRecipient[];
   next_cursor: string | null;
@@ -509,11 +570,8 @@ export async function loadRecipientPage(
   const { accountId, campaignId, filters: f, limit } = opts;
   if (hasFunnelFilter(f)) return loadFunnelDriven(db, opts);
 
-  let q = db.from('disp_message_queue').select(RECIPIENT_COLUMNS).eq('campaign_id', campaignId);
-  if (f.statuses.length > 0) q = q.in('status', f.statuses.flatMap((s) => API_TO_QUEUE[s]));
-  if (f.replied) q = q.not('replied_at', 'is', null);
-
   let phoneKeyFilter: string | null = null;
+  let phoneOr: string | null = null;
   if (f.phone) {
     phoneKeyFilter = phoneKey(f.phone);
     const suffix = f.phone.slice(-8);
@@ -521,13 +579,23 @@ export async function loadRecipientPage(
     if (cErr) throw cErr;
     const contactIds = ((contacts ?? []) as Array<{ id: string }>).map((c) => c.id);
     const external = `and(contact_id.is.null,mensagem_final.like.%${suffix})`;
-    q = q.or(contactIds.length > 0 ? `contact_id.in.(${contactIds.join(',')}),${external}` : external);
+    phoneOr = contactIds.length > 0 ? `contact_id.in.(${contactIds.join(',')}),${external}` : external;
   }
-  if (opts.cursor) {
-    const [at, id] = opts.cursor;
-    q = q.or(`scheduled_at.gt."${at}",and(scheduled_at.eq."${at}",id.gt."${id}")`);
-  }
-  const { data, error } = await q.order('scheduled_at', { ascending: true }).order('id', { ascending: true }).limit(limit + 1);
+  const run = (extended: boolean) => {
+    let q = db.from('disp_message_queue').select(extended ? RECIPIENT_COLUMNS : RECIPIENT_COLUMNS_BASE).eq('campaign_id', campaignId);
+    q = applyStatusFilter(q, f.statuses, extended);
+    if (f.replied) q = q.not('replied_at', 'is', null);
+    if (phoneOr) q = q.or(phoneOr);
+    if (opts.cursor) {
+      const [at, id] = opts.cursor;
+      q = q.or(`scheduled_at.gt."${at}",and(scheduled_at.eq."${at}",id.gt."${id}")`);
+    }
+    return q.order('scheduled_at', { ascending: true }).order('id', { ascending: true }).limit(limit + 1);
+  };
+  // Sem cancel_reason/reference (migration 357 ainda não aplicada): repete a consulta sem elas.
+  let res = await run(true);
+  if (isMissingColumn(res.error)) res = await run(false);
+  const { data, error } = res;
   if (error) throw error;
   const all = (data ?? []) as unknown as RecipientRow[];
   const pageRows = all.slice(0, limit);
@@ -563,10 +631,15 @@ async function loadFunnelDriven(
   const last = page[page.length - 1];
   const nextCursor = links.length > limit ? encodeCursor(['f', new Date(last.created_at).toISOString(), last.tid]) : null;
 
-  let rowsQ = db.from('disp_message_queue').select(RECIPIENT_COLUMNS).eq('campaign_id', campaignId).in('id', page.map((l) => l.tid));
-  if (f.statuses.length > 0) rowsQ = rowsQ.in('status', f.statuses.flatMap((s) => API_TO_QUEUE[s]));
-  if (f.replied) rowsQ = rowsQ.not('replied_at', 'is', null);
-  const { data: rowData, error: rowErr } = await rowsQ;
+  const runRows = (extended: boolean) => {
+    let rowsQ = db.from('disp_message_queue').select(extended ? RECIPIENT_COLUMNS : RECIPIENT_COLUMNS_BASE).eq('campaign_id', campaignId).in('id', page.map((l) => l.tid));
+    rowsQ = applyStatusFilter(rowsQ, f.statuses, extended);
+    if (f.replied) rowsQ = rowsQ.not('replied_at', 'is', null);
+    return rowsQ;
+  };
+  let rowsRes = await runRows(true);
+  if (isMissingColumn(rowsRes.error)) rowsRes = await runRows(false);
+  const { data: rowData, error: rowErr } = rowsRes;
   if (rowErr) throw rowErr;
   const byId = new Map(((rowData ?? []) as unknown as RecipientRow[]).map((r) => [r.id, r]));
   const rows = page.map((l) => byId.get(l.tid)).filter((r): r is RecipientRow => !!r);
