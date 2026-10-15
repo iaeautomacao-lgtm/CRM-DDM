@@ -7,6 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { allTemplatesApproved, templatesOfCampaign } from "@/lib/disparador/template-pause";
+import { emitCampaignCancelled, emitCampaignPaused, emitCampaignResumed } from "@/lib/webhooks-out/campaign-events";
 
 type Db = Pick<SupabaseClient, "from" | "rpc">;
 
@@ -67,8 +68,10 @@ export async function pauseCampaign(db: Db, input: { accountId: string; campaign
   const moves = await drainDispatchMoves(db as SupabaseClient, input.campaignId, { budgetMs: 15_000 });
   const reason = input.reason?.trim();
   if (reason) await bestEffortUpdate(db, input.accountId, input.campaignId, "pausada", { pause_reason: reason });
-  // EVENTO campaign.paused: emitir aqui (só com changed:true), com by = input.by ?? "api", reason e itemsPendingMove.
-  return { ok: true, changed: true, previous: "em_execucao", status: "pausada", itemsPendingMove: moves.partial || !moves.ok };
+  const itemsPendingMove = moves.partial || !moves.ok;
+  // Webhook campaign.paused (só aqui, com changed:true; melhor esforço: nunca lança e nunca atrasa a resposta além de 1 consulta).
+  await emitCampaignPaused(db as SupabaseClient, { accountId: input.accountId, campaignId: input.campaignId, by: input.by ?? "api", reason: reason || null, itemsPendingMove });
+  return { ok: true, changed: true, previous: "em_execucao", status: "pausada", itemsPendingMove };
 }
 
 /** Cancela (encerra) uma campanha. Irreversível: itens agendados/pausados viram `cancelado`. Já encerrada = sucesso sem mudança. */
@@ -85,8 +88,16 @@ export async function cancelCampaign(db: Db, input: { accountId: string; campaig
   if (!changed) return NOT_FOUND;
   const moves = await drainDispatchMoves(db as SupabaseClient, input.campaignId, { budgetMs: 15_000 });
   await bestEffortUpdate(db, input.accountId, input.campaignId, "encerrada", { encerramento_motivo: input.motive });
-  // EVENTO campaign.cancelled: emitir aqui (só com changed:true), com by = input.by ?? (motive === "cancelled_api" ? "api" : "user") e previous.
-  return { ok: true, changed: true, previous: state.status, status: "encerrada", itemsPendingMove: moves.partial || !moves.ok };
+  const itemsPendingMove = moves.partial || !moves.ok;
+  // Webhook campaign.cancelled (só com changed:true). O resumo por status vai no próprio evento; a quantidade cancelada ainda pode estar em movimento.
+  await emitCampaignCancelled(db as SupabaseClient, {
+    accountId: input.accountId,
+    campaignId: input.campaignId,
+    by: input.by ?? (input.motive === "cancelled_api" ? "api" : "user"),
+    reason: input.motive,
+    itemsPendingMove,
+  });
+  return { ok: true, changed: true, previous: state.status, status: "encerrada", itemsPendingMove };
 }
 
 export type StartFn = (campaignId: string, accountId: string) => Promise<{ ok: true } | { ok: false; status: number; error: string; code?: string }>;
@@ -148,6 +159,7 @@ export async function resumeCampaign(
     return { ok: false, kind: "internal", message: "Falha ao retomar a campanha" };
   }
   await bestEffortUpdate(db, input.accountId, input.campaignId, "em_execucao", { pause_reason: null });
-  // EVENTO campaign.resumed: emitir aqui (só com changed:true), com by = input.by ?? "api".
+  // Webhook campaign.resumed (só com changed:true).
+  await emitCampaignResumed(db as SupabaseClient, { accountId: input.accountId, campaignId: input.campaignId, by: input.by ?? "api" });
   return { ok: true, changed: true, previous: "pausada", status: "em_execucao", itemsPendingMove: false };
 }
