@@ -6,10 +6,14 @@
 // devolve; o tempo logado vem de agent_sessions e fica "—" sem sessão.
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { Coffee, Loader2, Search } from "lucide-react";
+import { Coffee, Download, FileSpreadsheet, Loader2, Search } from "lucide-react";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermission } from "@/hooks/use-permission";
+import { exportWithHistory } from "@/lib/relatorios/export-with-history";
+import { PAUSE_EXPORT_COLUMNS, toPauseExportRows } from "@/lib/pausas/report-export";
 import { apiFetch } from "@/lib/api-fetch";
 import { pausasApi } from "@/lib/pausas/client";
 import {
@@ -37,6 +41,8 @@ import type { AccountMember } from "@/types";
 
 const ALL = "all";
 const PAGE_LIMIT = 100;
+const EXPORT_PAGE = 500;
+const EXPORT_MAX_PAGES = 20;
 
 function today() {
   return format(new Date(), "yyyy-MM-dd");
@@ -49,6 +55,8 @@ function initialFilters(): PauseReportFilters {
 export default function RelatorioPausasPage() {
   const uid = useId();
   const { accountId } = useAuth();
+  const canExport = usePermission("reports.export");
+  const [exporting, setExporting] = useState<"xlsx" | "csv" | null>(null);
   const [draft, setDraft] = useState<PauseReportFilters>(initialFilters);
   const [applied, setApplied] = useState<PauseReportFilters>(initialFilters);
   const [detail, setDetail] = useState(false);
@@ -146,6 +154,45 @@ export default function RelatorioPausasPage() {
     }
   }
 
+  // Uma linha por pausa do recorte aplicado (todas as páginas), registrada em Exportações como "pausas".
+  async function exportReport(kind: "xlsx" | "csv") {
+    setExporting(kind);
+    try {
+      const all: Pause[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < EXPORT_MAX_PAGES; page++) {
+        const res = await apiFetch(
+          `/api/pausas/relatorio?${buildPauseReportQuery(applied, { detail: true, limit: EXPORT_PAGE, cursor })}`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as PauseReportResponse;
+        all.push(...(json.items ?? []));
+        cursor = json.next_cursor;
+        if (!cursor) break;
+      }
+      if (all.length === 0) {
+        toast.info("Não há pausas no período para exportar.");
+        return;
+      }
+      await exportWithHistory({
+        data: toPauseExportRows(all),
+        columns: [...PAUSE_EXPORT_COLUMNS],
+        exportType: "pausas",
+        description: `Pausas - ${format(new Date(`${applied.dateFrom}T00:00:00`), "dd/MM/yyyy")} a ${format(new Date(`${applied.dateTo}T00:00:00`), "dd/MM/yyyy")}`,
+        periodFrom: new Date(`${applied.dateFrom}T00:00:00`),
+        periodTo: new Date(`${applied.dateTo}T23:59:59`),
+        format: kind,
+      });
+      if (cursor) toast.warning("O arquivo tem só as primeiras 10 mil pausas. Reduza o período para ver o resto.");
+    } catch (err) {
+      console.error("[relatorio-pausas] export failed:", err);
+      toast.error("Falha ao exportar as pausas. Tente novamente.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   const rangeMsg = pauseReportRangeError(draft.dateFrom, draft.dateTo);
 
   return (
@@ -199,6 +246,18 @@ export default function RelatorioPausasPage() {
             <Search className="size-4" />
             Pesquisar
           </Button>
+          {canExport && (
+            <>
+              <Button variant="outline" disabled={exporting !== null} onClick={() => void exportReport("xlsx")}>
+                <FileSpreadsheet className="size-3.5" />
+                {exporting === "xlsx" ? "Gerando…" : "Planilha (xlsx)"}
+              </Button>
+              <Button variant="outline" disabled={exporting !== null} onClick={() => void exportReport("csv")}>
+                <Download className="size-3.5" />
+                {exporting === "csv" ? "Gerando…" : "CSV"}
+              </Button>
+            </>
+          )}
         </div>
         {rangeMsg && (
           <p role="alert" className="mt-2 text-xs text-danger">

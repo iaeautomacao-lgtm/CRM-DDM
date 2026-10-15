@@ -9,25 +9,17 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permission";
 import { pausasApi, type PauseApiError } from "@/lib/pausas/client";
-import type { Permission } from "@/lib/auth/permissions";
 import type { Pause, PauseReason, TeamPause } from "@/lib/pausas/pause";
 
 const REFRESH_MS = 60_000;
-
-/** Permissões novas das pausas (catálogo do backend). */
-export const PAUSE_PERMISSIONS = {
-  self: "presence.pause_self",
-  others: "presence.pause_others",
-  reasons: "presence.reasons_manage",
-} as const;
 
 /** Atalho para as permissões das pausas (o servidor decide de novo em cada rota). */
 export function usePausePermissions() {
   const { can } = usePermissions();
   return {
-    canPauseSelf: can(PAUSE_PERMISSIONS.self as Permission),
-    canPauseOthers: can(PAUSE_PERMISSIONS.others as Permission),
-    canManageReasons: can(PAUSE_PERMISSIONS.reasons as Permission),
+    canPauseSelf: can("presence.pause_self"),
+    canPauseOthers: can("presence.pause_others"),
+    canManageReasons: can("presence.reasons_manage"),
   };
 }
 

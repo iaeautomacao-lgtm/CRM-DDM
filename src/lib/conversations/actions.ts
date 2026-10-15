@@ -23,17 +23,11 @@ export async function assignConversationAgent(
   conversationId: string,
   agentId: string | null,
   agentFullName?: string | null,
-): Promise<{ error: string | null }> {
-  const { error } = await db
-    .from("conversations")
-    .update({ assigned_agent_id: agentId })
-    .eq("id", conversationId);
-
-  if (error) return { error: error.message };
-
-  if (agentId) await sendTakeoverMessage(conversationId, agentFullName);
-
-  return { error: null };
+): Promise<{ error: string | null; paused?: PausedAgentInfo }> {
+  // Pela rota de transferência (e não UPDATE direto): o banco recusa, para o navegador, atribuir a quem está em pausa.
+  // Quem chama trata `paused` (pede confirmação) e repete com confirmPaused.
+  void db;
+  return transferConversation(conversationId, { agentId }, agentFullName);
 }
 
 /**
