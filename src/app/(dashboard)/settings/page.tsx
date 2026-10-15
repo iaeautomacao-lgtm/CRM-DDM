@@ -1,6 +1,7 @@
 'use client';
 
 import { PanelHeadingLevel } from "@/components/settings/settings-panel-head";
+import dynamic from 'next/dynamic';
 import { Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -8,10 +9,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
-import { OrganizationPanel } from '@/components/settings/organization-panel';
-import { PauseReasonsPanel } from '@/components/settings/pause-reasons-panel';
-import { AgentsSettings } from '@/components/settings/agents/agents-settings';
-import { IntegrationsSettings } from '@/components/settings/integrations/integrations-settings';
 import {
   canSeeSection,
   isIntegrationTab,
@@ -23,6 +20,13 @@ import {
 } from '@/components/settings/settings-sections';
 import { PageBody } from '@/components/ddm/page-toolbar';
 import { PageHeader } from '@/components/ddm/page-header';
+
+// Cada seção é um módulo grande: só a que está aberta é baixada (a Visão geral é a única no JS inicial).
+const PanelSkeleton = () => <Skeleton className="h-96 w-full rounded-card" aria-busy="true" />;
+const OrganizationPanel = dynamic(() => import('@/components/settings/organization-panel').then((m) => m.OrganizationPanel), { ssr: false, loading: PanelSkeleton });
+const PauseReasonsPanel = dynamic(() => import('@/components/settings/pause-reasons-panel').then((m) => m.PauseReasonsPanel), { ssr: false, loading: PanelSkeleton });
+const AgentsSettings = dynamic(() => import('@/components/settings/agents/agents-settings').then((m) => m.AgentsSettings), { ssr: false, loading: PanelSkeleton });
+const IntegrationsSettings = dynamic(() => import('@/components/settings/integrations/integrations-settings').then((m) => m.IntegrationsSettings), { ssr: false, loading: PanelSkeleton });
 
 function SettingsContent() {
   const router = useRouter();

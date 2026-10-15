@@ -29,7 +29,14 @@ import { Eye, Lock } from "lucide-react";
 import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
-import { FlowCanvas } from "./flow-canvas";
+import dynamic from "next/dynamic";
+import { Skeleton } from "@/components/ddm/states";
+
+// @xyflow/react (~186 KB) só é baixado ao abrir o editor; até lá, esqueleto do canvas.
+const FlowCanvas = dynamic(() => import("./flow-canvas").then((m) => m.FlowCanvas), {
+  ssr: false,
+  loading: () => <Skeleton className="h-full min-h-96 w-full" />,
+});
 import { FlowSimulatorPanel } from "./flow-simulator-panel";
 import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
 import { EditorHeader, type EditorView } from "./header";
