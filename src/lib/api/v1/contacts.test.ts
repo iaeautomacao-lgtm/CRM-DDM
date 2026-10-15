@@ -13,7 +13,7 @@ describe('contatos da API (puro)', () => {
   })
 
   it('serializa sem CPF em claro', () => {
-    const out = serializeApiContact({ id: '1', phone: '55', name: 'A', email: null, company: null, instituicao: 'Fac', cpf: '529.982.247-25', created_at: null, updated_at: null }, { phones: [], tags: [], customFields: {} })
+    const out = serializeApiContact({ id: '1', phone: '55', name: 'A', email: null, company: null, instituicao: 'Fac', cpf: '529.982.247-25', created_at: null, updated_at: null }, { phones: [], tags: [], customFields: {}, owner: null })
     expect(out).toMatchObject({ institution: 'Fac', cpf_masked: '***.***.***-25', has_cpf: true })
     expect(JSON.stringify(out)).not.toContain('52998224725')
     expect(out).not.toHaveProperty('instituicao')
