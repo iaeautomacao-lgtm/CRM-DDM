@@ -11,6 +11,7 @@
 
 import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
+import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
 
 type Json = Record<string, unknown>;
 
@@ -143,7 +144,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CONTACTS_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -153,11 +154,13 @@ export const openApiSpec = {
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
     ...webhookTags,
     ...extractTags,
+    ...contactsTags,
   ],
   security: SECURITY,
   paths: {
     ...webhookPaths,
     ...extractPaths,
+    ...contactsPaths,
     '/me': {
       get: {
         tags: ['Conta'],
@@ -835,6 +838,7 @@ export const openApiSpec = {
     schemas: {
       ...webhookSchemas,
       ...extractSchemas,
+      ...contactsSchemas,
       Scope: {
         type: 'string',
         enum: [
@@ -860,6 +864,7 @@ export const openApiSpec = {
           'rate_limited',
           'bad_request',
           'not_found',
+          'unprocessable',
           'conflict',
           'payload_too_large',
           'recipient_blocked',
@@ -867,7 +872,7 @@ export const openApiSpec = {
           'internal',
         ],
         description:
-          '`unauthorized` 401 · `forbidden` 403 · `rate_limited` 429 · `bad_request` 400 · `not_found` 404 · `conflict` 409 · `payload_too_large` 413 · `recipient_blocked` 422 · `unavailable` 503 · `internal` 500/502.',
+          '`unauthorized` 401 · `forbidden` 403 · `rate_limited` 429 · `bad_request` 400 · `not_found` 404 · `conflict` 409 · `payload_too_large` 413 · `unprocessable` 422 · `recipient_blocked` 422 · `unavailable` 503 · `internal` 500/502.',
       },
       ErrorEnvelope: {
         type: 'object',
@@ -891,6 +896,7 @@ export const openApiSpec = {
                   properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] } },
                 },
               },
+              unknown_custom_fields: { type: 'array', items: { type: 'string' }, description: 'Só em 422 de contato: campos personalizados que não existem na conta.' },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
               duplicates: { type: 'integer' },
               skipped: { type: 'integer' },
