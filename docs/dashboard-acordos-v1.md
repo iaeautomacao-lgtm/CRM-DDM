@@ -22,11 +22,11 @@ O card antigo Acordos ganhos (total) do funil foi renomeado Negócios ganhos (fu
 
 ## Segurança e implementação
 
-A rota GET /api/dashboard/agreements exige sessão autenticada e usa o account_id do servidor. Consultas ao Supabase com service_role são explicitamente restritas à conta autenticada e não retornam dados pessoais; a resposta inclui apenas contagens agregadas. Cache: private, no-store.
+A rota GET /api/dashboard/agreements exige sessão autenticada e papel owner/admin (escopo global da conta), e usa o account_id do servidor. Consultas ao Supabase com service_role são explicitamente restritas à conta autenticada e não retornam dados pessoais; a resposta inclui apenas contagens agregadas. Cache: private, no-store.
 
 O carregador pagina conversas e auditorias para não truncar as métricas no limite padrão de 1000 linhas do PostgREST. Acima de 50.000 acordos devolve erro, em vez de um total parcialmente errado; nesse porte deve-se substituir por agregação no PostgreSQL.
 
-O Dashboard carrega a seção de acordos independentemente dos demais widgets. Não há migration nem alterações em escrita ou no motor da IA.
+O Dashboard exibe a seção exclusivamente a owner/admin e carrega os acordos independentemente dos demais widgets. Não há migration nem alterações em escrita ou no motor da IA.
 
 ## Validação
 
