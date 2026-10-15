@@ -1050,6 +1050,9 @@ export function MessageThread({
 
   // Build a quick id → Message map so reply quotes can be rendered without
   // an extra fetch — the thread already holds the full conversation.
+  // Agrupamento por dia: só refaz quando a lista de mensagens muda (fica antes de qualquer retorno antecipado).
+  const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
+
   const messagesById = useMemo(() => {
     const map = new Map<string, Message>();
     for (const m of messages) map.set(m.id, m);
@@ -1529,7 +1532,6 @@ export function MessageThread({
   };
 
   const displayName = contact.name || contact.phone || "Contato";
-  const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
