@@ -16,6 +16,7 @@ import type {
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
+import { clearCachedThread, getCachedThread } from "@/lib/inbox/thread-pages";
 import { MyPauseBar } from "@/components/pausas/my-pause-bar";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { ContactSearchPicker } from "@/components/inbox/contact-search-picker";
@@ -535,7 +536,7 @@ export default function InboxPage() {
       if (activeConversation?.id === conv.id) return;
       setActiveConversation(conv);
       setActiveContact(conv.contact ?? null);
-      setMessages([]);
+      setMessages(getCachedThread(conv.id) ?? []);
       // Optimistically clear the unread badge for this conv. The
       // server-side reset is fired by the unread-reset effect inside
       // MessageThread (which reads activeConversation.unread_count, not
@@ -685,6 +686,7 @@ export default function InboxPage() {
       setActiveConversation(null);
       setActiveContact(null);
       setMessages([]);
+      clearCachedThread(conversationId);
       
       const params = new URLSearchParams(window.location.search);
       params.delete("c");

@@ -69,6 +69,7 @@ import type { ConversationCardActions } from "@/components/monitoramento/card-ac
 import { useTeamPauses, usePausePermissions } from "@/hooks/use-pauses";
 import { pausasApi } from "@/lib/pausas/client";
 import type { PauseReason } from "@/lib/pausas/pause";
+import { PatchQueue, applyPatches } from "@/lib/monitoramento/patch-batch";
 import { ConversationModal } from "@/components/monitoramento/conversation-modal";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 import { ErrorState } from "@/components/dashboard/error-state";
@@ -155,15 +156,6 @@ function MonitoramentoBoard() {
     knownIdsRef.current = new Set(conversations.keys());
   }, [conversations]);
 
-  const dropConversation = useCallback((id: string) => {
-    setConversations((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
   const hydrateConversation = useCallback(async (id: string) => {
     const db = createClient();
     const row = await loadConversationById(db, id);
@@ -181,11 +173,35 @@ function MonitoramentoBoard() {
     });
   }, []);
 
+  // Eventos em tempo real entram numa fila e são aplicados de uma vez a cada 250 ms: uma renderização por lote
+  // em vez de uma por evento (lib/monitoramento/patch-batch). O resultado é o mesmo: vale o último de cada conversa.
+  const patchQueueRef = useRef(new PatchQueue());
+  const patchTimerRef = useRef<number | null>(null);
+  const flushPatches = useCallback(() => {
+    patchTimerRef.current = null;
+    const batch = patchQueueRef.current.drain();
+    if (batch.size === 0) return;
+    setConversations((prev) => applyPatches(prev, batch));
+  }, []);
+  const queuePatch = useCallback(
+    (id: string, patch: Parameters<PatchQueue["push"]>[1]) => {
+      patchQueueRef.current.push(id, patch);
+      if (patchTimerRef.current === null) patchTimerRef.current = window.setTimeout(flushPatches, 250);
+    },
+    [flushPatches],
+  );
+  useEffect(
+    () => () => {
+      if (patchTimerRef.current !== null) window.clearTimeout(patchTimerRef.current);
+    },
+    [],
+  );
+
   const handleConversationEvent = useCallback(
     (event: { eventType: string; new: Conversation; old: Partial<Conversation> }) => {
       if (event.eventType === "DELETE") {
         const oldId = event.old?.id;
-        if (oldId) dropConversation(oldId);
+        if (oldId) queuePatch(oldId, { kind: "drop" });
         return;
       }
 
@@ -195,17 +211,14 @@ function MonitoramentoBoard() {
       // Closed conversations don't belong on this board regardless of
       // whether we already knew about them.
       if (conv.status === "closed") {
-        dropConversation(conv.id);
+        queuePatch(conv.id, { kind: "drop" });
         return;
       }
 
       if (knownIdsRef.current.has(conv.id)) {
-        setConversations((prev) => {
-          const existing = prev.get(conv.id);
-          if (!existing) return prev;
-          const next = new Map(prev);
-          next.set(conv.id, {
-            ...existing,
+        queuePatch(conv.id, {
+          kind: "update",
+          fields: {
             status: conv.status,
             assigned_agent_id: conv.assigned_agent_id ?? null,
             // Nothing writes team_id in this phase, but carrying it
@@ -214,8 +227,7 @@ function MonitoramentoBoard() {
             // automation action starts setting it on tracked rows.
             team_id: conv.team_id ?? null,
             updated_at: conv.updated_at,
-          });
-          return next;
+          },
         });
       } else {
         // New to this board, or an UPDATE that raced ahead of its own
@@ -224,7 +236,7 @@ function MonitoramentoBoard() {
         void hydrateConversation(conv.id);
       }
     },
-    [dropConversation, hydrateConversation],
+    [queuePatch, hydrateConversation],
   );
 
   // Reuses the same Realtime hook the Inbox subscribes with — one
