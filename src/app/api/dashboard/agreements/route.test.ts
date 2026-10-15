@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getCurrentAccount: vi.fn(),
+  requireRole: vi.fn(),
   supabaseAdmin: vi.fn(),
   loadAgreementDashboardMetrics: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/account", () => ({
-  getCurrentAccount: mocks.getCurrentAccount,
+  requireRole: mocks.requireRole,
   toErrorResponse: (error: Error) =>
     Response.json(
-      { error: error.message === "Unauthorized" ? "Unauthorized" : "Internal server error" },
-      { status: error.message === "Unauthorized" ? 401 : 500 },
+      { error: error.message === "Unauthorized" ? "Unauthorized" : error.message === "Forbidden" ? "Forbidden" : "Internal server error" },
+      { status: error.message === "Unauthorized" ? 401 : error.message === "Forbidden" ? 403 : 500 },
     ),
 }));
 
@@ -30,7 +30,7 @@ describe("GET /api/dashboard/agreements", () => {
   const db = { name: "service-client" };
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getCurrentAccount.mockResolvedValue({ accountId, userId: "staff-user" });
+    mocks.requireRole.mockResolvedValue({ accountId, userId: "staff-user" });
     mocks.supabaseAdmin.mockReturnValue(db);
     mocks.loadAgreementDashboardMetrics.mockResolvedValue({
       total: 15, ai: 2, human: 10, unknown: 3,
@@ -40,9 +40,17 @@ describe("GET /api/dashboard/agreements", () => {
   });
 
   it("requires an authenticated account before querying the privileged database", async () => {
-    mocks.getCurrentAccount.mockRejectedValue(new Error("Unauthorized"));
+    mocks.requireRole.mockRejectedValue(new Error("Unauthorized"));
     const response = await GET();
     expect(response.status).toBe(401);
+    expect(mocks.supabaseAdmin).not.toHaveBeenCalled();
+    expect(mocks.loadAgreementDashboardMetrics).not.toHaveBeenCalled();
+  });
+
+  it("rejects agents or supervisors requesting account-wide totals", async () => {
+    mocks.requireRole.mockRejectedValue(new Error("Forbidden"));
+    const response = await GET();
+    expect(response.status).toBe(403);
     expect(mocks.supabaseAdmin).not.toHaveBeenCalled();
     expect(mocks.loadAgreementDashboardMetrics).not.toHaveBeenCalled();
   });
@@ -52,6 +60,7 @@ describe("GET /api/dashboard/agreements", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("no-store");
     expect(mocks.loadAgreementDashboardMetrics).toHaveBeenCalledWith(db, accountId);
+    expect(mocks.requireRole).toHaveBeenCalledWith("admin");
     const body = await response.json();
     expect(body.data).toMatchObject({ total: 15, ai: 2, human: 10, unknown: 3 });
     expect(JSON.stringify(body)).not.toContain("staff-user");
