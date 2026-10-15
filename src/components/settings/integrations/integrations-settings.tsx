@@ -6,17 +6,23 @@
 // então os links antigos seguem funcionando. Abas sem permissão nem aparecem (o servidor continua bloqueando).
 
 import type { ReactNode } from 'react';
+import dynamic from 'next/dynamic';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
-import { SecretsSettings } from '@/components/settings/secrets-settings';
-import { ToolsSettings } from '@/components/settings/tools-settings';
-import { AiProvidersPanel } from '@/components/settings/ai-providers-panel';
-import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SECTION_META, type IntegrationTab } from '@/components/settings/settings-sections';
-import { AcorditoSettingsSection } from '@/components/settings/acordito-settings-section';
-import { UtmpaySettings } from '@/components/settings/utmpay-settings';
-import { WebhooksSettings } from './webhooks-settings';
+
+// Cada aba é carregada só quando é aberta (chaves, credenciais, ferramentas, webhooks, UTMpay, IA, docs).
+const PanelSkeleton = () => <Skeleton className="h-72 w-full rounded-card" aria-busy="true" />;
+const lazy = <P extends object>(load: () => Promise<React.ComponentType<P>>) => dynamic(load, { ssr: false, loading: PanelSkeleton });
+const ApiKeysSettings = lazy(() => import('@/components/settings/api-keys-settings').then((m) => m.ApiKeysSettings));
+const SecretsSettings = lazy(() => import('@/components/settings/secrets-settings').then((m) => m.SecretsSettings));
+const ToolsSettings = lazy(() => import('@/components/settings/tools-settings').then((m) => m.ToolsSettings));
+const AiProvidersPanel = lazy(() => import('@/components/settings/ai-providers-panel').then((m) => m.AiProvidersPanel));
+const ApiDocsPanel = lazy(() => import('@/components/settings/api-docs-panel').then((m) => m.ApiDocsPanel));
+const AcorditoSettingsSection = lazy(() => import('@/components/settings/acordito-settings-section').then((m) => m.AcorditoSettingsSection));
+const UtmpaySettings = lazy(() => import('@/components/settings/utmpay-settings').then((m) => m.UtmpaySettings));
+const WebhooksSettings = lazy(() => import('./webhooks-settings').then((m) => m.WebhooksSettings));
 
 const PANELS: Record<IntegrationTab, () => ReactNode> = {
   api: () => <ApiKeysSettings />,
