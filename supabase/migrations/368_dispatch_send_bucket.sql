@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS wacrm.dispatch_send_bucket (
 ALTER TABLE wacrm.dispatch_send_bucket ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON wacrm.dispatch_send_bucket FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.dispatch_send_bucket TO service_role;
+-- Tabela posterior à 310: aplica a política de MFA (aal2) se a função existir (mesmo padrão da 367).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'wacrm' AND p.proname = 'apply_mfa_policy'
+  ) THEN
+    PERFORM wacrm.apply_mfa_policy('wacrm.dispatch_send_bucket'::regclass);
+  END IF;
+END $$;
 
 -- Quantas fichas (≤ p_n) podem ser usadas agora. Sem taxa (NULL/≤ 0) = sem limite (devolve p_n). Rajada máxima p_burst_seconds (0,1–5).
 CREATE OR REPLACE FUNCTION wacrm.reserve_send_slots(p_session_id uuid, p_n integer, p_rate numeric, p_burst_seconds numeric DEFAULT 1)
