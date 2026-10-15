@@ -64,6 +64,10 @@ export function summarizeAgreements(
   // Choose the most recent event setting the CURRENT agreement tag.
   const latest = new Map<string, AgreementAudit>();
   for (const e of auditEvents) {
+    // Ignore status/assignment updates: they are not evidence of who
+    // registered the agreement (even if the operator closed the chat).
+    if (!e.changes || typeof e.changes !== "object" || Array.isArray(e.changes)
+      || !Object.prototype.hasOwnProperty.call(e.changes, "outcome_tag_id")) continue;
     const prior = latest.get(e.resource_id);
     if (!prior || Date.parse(e.created_at) > Date.parse(prior.created_at)
       || (e.created_at === prior.created_at && e.id > prior.id)) {
