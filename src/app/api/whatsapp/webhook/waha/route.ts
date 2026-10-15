@@ -421,7 +421,7 @@ export async function POST(request: Request) {
       let conversationId: string | null = null
       const { data: convsList, error: convFetchError } = await db
         .from('conversations')
-        .select('id, status, unread_count, assigned_agent_id')
+        .select('id, status, unread_count, assigned_agent_id, requested_agent_id')
         .eq('account_id', accountId)
         .eq('contact_id', contactId!)
         .eq('waha_session', session)
@@ -735,7 +735,7 @@ export async function POST(request: Request) {
         // do fluxo receptivo (mesma regra do webhook Meta).
         const { tryMentionAgentHandoff } = await import('@/lib/inbox/agent-mention-server')
         const mentionedHandoff = await tryMentionAgentHandoff({ accountId, conversationId, text: contentType === 'text' ? contentText : null })
-        const movedToWebchat = mentionedHandoff || await maybeStartCampaignWebchat({
+        const movedToWebchat = mentionedHandoff || Boolean(conversation?.requested_agent_id) || await maybeStartCampaignWebchat({
           accountId,
           userId: config.user_id,
           contactId,
