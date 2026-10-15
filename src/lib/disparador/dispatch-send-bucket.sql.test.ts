@@ -21,6 +21,9 @@ const reserve = async (session: string, n: number, rate: number | null, burst = 
 // "Passou t segundos": o instante teórico do balde anda para trás.
 const elapse = (session: string, seconds: number) =>
   db.exec(`UPDATE wacrm.dispatch_send_bucket SET next_slot_at = next_slot_at - interval '${seconds} seconds' WHERE session_id = '${session}'`);
+// Esgota o balde de forma determinística: o próximo slot fica 1 h à frente, então nenhuma chamada seguinte ganha ficha por mais lenta que a máquina seja.
+const drain = (session: string) =>
+  db.exec(`UPDATE wacrm.dispatch_send_bucket SET next_slot_at = clock_timestamp() + interval '1 hour' WHERE session_id = '${session}'`);
 const seed = (n: number, session = ch) =>
   db.exec(`
     INSERT INTO wacrm.disp_message_queue(id, campaign_id, account_id, session_id, status, scheduled_at, mensagem_final)
@@ -89,15 +92,20 @@ describe('migration 368 — balde GCRA durável e claim com fencing', { timeout:
 
   describe('reserve_send_slots (GCRA)', () => {
     it('a 1ª chamada concede a rajada de 1 s (taxa × 1) e a seguinte, na hora, quase nada: o limite vale entre chamadas', async () => {
+      const t0 = performance.now();
       expect(await reserve(ch, 200, 80)).toBe(80);
-      expect(await reserve(ch, 200, 80)).toBeLessThanOrEqual(2);
+      const second = await reserve(ch, 200, 80);
+      // Só pode ganhar o que o tempo REAL entre as chamadas rende (80/s): o teto acompanha a velocidade da máquina, sem folga fixa.
+      expect(second).toBeLessThanOrEqual(Math.ceil(((performance.now() - t0) / 1000) * 80) + 1);
     });
     it('ao passar o tempo concede a proporção certa: 0,25 s a 80/s = 20 fichas', async () => {
+      const t0 = performance.now();
       await reserve(ch, 200, 80);
       await elapse(ch, 0.25);
       const g = await reserve(ch, 200, 80);
+      const extra = Math.ceil(((performance.now() - t0) / 1000) * 80) + 1; // fichas que o tempo real entre as chamadas também rende
       expect(g).toBeGreaterThanOrEqual(19);
-      expect(g).toBeLessThanOrEqual(22);
+      expect(g).toBeLessThanOrEqual(20 + extra);
     });
     it('nunca passa de p_n e nunca acumula crédito além da rajada, mesmo depois de muito tempo parado', async () => {
       await reserve(ch, 10, 80);
@@ -115,7 +123,8 @@ describe('migration 368 — balde GCRA durável e claim com fencing', { timeout:
     });
     it('cada número tem o SEU balde: um número esgotado não atrasa o outro (justiça)', async () => {
       expect(await reserve(ch, 200, 80)).toBe(80);
-      expect(await reserve(ch, 200, 80)).toBeLessThanOrEqual(2);
+      await drain(ch);
+      expect(await reserve(ch, 200, 80)).toBe(0);
       expect(await reserve(ch2, 200, 40)).toBe(40);
     });
   });
@@ -126,9 +135,11 @@ describe('migration 368 — balde GCRA durável e claim com fencing', { timeout:
       const first = await rated(ch, 100, 80);
       expect(claimed(first)).toHaveLength(80);
       expect(await enviando()).toBe(80);
+      await drain(ch); // balde esgotado de verdade (sem depender do relógio da máquina)
       const second = await rated(ch, 100, 80);
-      expect(claimed(second).length).toBeLessThanOrEqual(2);
-      if (claimed(second).length === 0) expect(second.map((r) => r.outcome)).toEqual(['throttled']);
+      expect(claimed(second)).toHaveLength(0);
+      expect(second.map((r) => r.outcome)).toEqual(['throttled']);
+      expect(await enviando()).toBe(80); // nada além do que o balde concedeu foi marcado
     });
     it('passou o tempo: reivindica a próxima faixa; itens não se repetem entre chamadas', async () => {
       await seed(300);
