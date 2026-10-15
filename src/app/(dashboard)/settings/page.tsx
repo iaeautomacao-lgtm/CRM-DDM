@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
 import { OrganizationPanel } from '@/components/settings/organization-panel';
+import { PauseReasonsPanel } from '@/components/settings/pause-reasons-panel';
 import { AgentsSettings } from '@/components/settings/agents/agents-settings';
 import { IntegrationsSettings } from '@/components/settings/integrations/integrations-settings';
 import {
@@ -76,6 +77,7 @@ function SettingsContent() {
   const panel: Partial<Record<SettingsSection, ReactNode>> = {
     overview: <SettingsOverview onSelect={go} />,
     organization: <OrganizationPanel />,
+    pauses: <PauseReasonsPanel />,
     agents: <AgentsSettings />,
   };
   const integrationActive = isIntegrationTab(section);

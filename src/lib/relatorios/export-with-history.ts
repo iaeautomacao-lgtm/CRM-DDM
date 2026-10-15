@@ -9,7 +9,7 @@ export interface ExportColumn {
 export interface ExportOptions {
   data: Record<string, unknown>[];
   columns: ExportColumn[];
-  exportType: "conversas" | "envio-em-lote" | "atendimentos" | "tabulacoes";
+  exportType: "conversas" | "envio-em-lote" | "atendimentos" | "tabulacoes" | "pausas";
   description: string;
   periodFrom?: Date;
   periodTo?: Date;

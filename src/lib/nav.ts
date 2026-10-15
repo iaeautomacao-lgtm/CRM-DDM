@@ -19,6 +19,7 @@ import {
   Shield,
   Tags,
   UserCheck,
+  Coffee,
   Users,
   UsersRound,
   Wifi,
@@ -88,6 +89,7 @@ export const navItems: NavItem[] = [
 export const reportNavItems: NavItem[] = [
   { href: "/relatorios/atendimentos", label: "Desempenho do atendimento", icon: Headphones },
   { href: "/relatorios/agentes", label: "Sessões de atendentes", icon: UserCheck },
+  { href: "/relatorios/pausas", label: "Pausas", icon: Coffee },
   { href: "/relatorios/tabulacoes", label: "Tabulações", icon: Tags },
   { href: "/relatorios/envio-em-lote", label: "Campanhas", icon: Megaphone },
   { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },

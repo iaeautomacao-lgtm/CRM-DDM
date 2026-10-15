@@ -163,7 +163,6 @@ const MANUAL: Record<string, string> = {
   "app/api/whatsapp/send/route.ts": "quem responde assume a conversa",
   "lib/conversations/batch.ts": "transferir para mim (lote)",
   "lib/conversations/outcome.ts": "quem tabula assume",
-  "lib/conversations/actions.ts": "UPDATE direto do navegador: barrado no banco pela trava trg_guard_paused_assignment (migration 371)",
 };
 
 describe("cobertura: toda atribuição de conversa está classificada", () => {

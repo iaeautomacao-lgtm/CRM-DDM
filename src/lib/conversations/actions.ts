@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Tag } from "@/types";
+import type { PausedAgentInfo } from "@/lib/pausas/pause";
 
 type DB = SupabaseClient;
 
@@ -22,17 +23,11 @@ export async function assignConversationAgent(
   conversationId: string,
   agentId: string | null,
   agentFullName?: string | null,
-): Promise<{ error: string | null }> {
-  const { error } = await db
-    .from("conversations")
-    .update({ assigned_agent_id: agentId })
-    .eq("id", conversationId);
-
-  if (error) return { error: error.message };
-
-  if (agentId) await sendTakeoverMessage(conversationId, agentFullName);
-
-  return { error: null };
+): Promise<{ error: string | null; paused?: PausedAgentInfo }> {
+  // Pela rota de transferência (e não UPDATE direto): o banco recusa, para o navegador, atribuir a quem está em pausa.
+  // Quem chama trata `paused` (pede confirmação) e repete com confirmPaused.
+  void db;
+  return transferConversation(conversationId, { agentId }, agentFullName);
 }
 
 /**
@@ -68,9 +63,9 @@ export async function sendTakeoverMessage(
  */
 export async function transferConversation(
   conversationId: string,
-  target: { agentId?: string | null; teamId?: string | null; reason?: string },
+  target: { agentId?: string | null; teamId?: string | null; reason?: string; confirmPaused?: boolean },
   agentFullName?: string | null,
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; paused?: PausedAgentInfo }> {
   try {
     const res = await apiFetch(`/api/conversations/${conversationId}/transfer`, {
       method: "POST",
@@ -79,10 +74,22 @@ export async function transferConversation(
         agent_id: target.agentId,
         team_id: target.teamId,
         reason: target.reason ?? "",
+        ...(target.confirmPaused ? { confirm_paused: true } : {}),
       }),
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
+      // 409 agent_paused: o atendente está em pausa; quem chamou pergunta e repete com confirmPaused.
+      if (res.status === 409 && json.code === "agent_paused") {
+        return {
+          error: json.error ?? "Atendente em pausa",
+          paused: {
+            agentName: json.agent?.name ?? agentFullName ?? "Atendente",
+            reasonName: json.pause?.reason_name ?? "pausa",
+            startedAt: json.pause?.started_at ?? new Date().toISOString(),
+          },
+        };
+      }
       return { error: json.error ?? `HTTP ${res.status}` };
     }
   } catch (err) {
