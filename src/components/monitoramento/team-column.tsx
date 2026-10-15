@@ -164,6 +164,7 @@ export function TeamColumn({
               onTransferClick={actions.onTransferClick}
               onFinalizeClick={actions.onFinalizeClick}
               onHistoryClick={actions.onHistoryClick}
+              onOpenClick={actions.onOpenClick}
             />
           ))
         )}

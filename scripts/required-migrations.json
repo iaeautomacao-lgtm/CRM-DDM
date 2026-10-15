@@ -554,6 +554,10 @@
       "kind": "registry"
     },
     {
+      "version": "367_dispatch_worker_leases",
+      "kind": "registry"
+    },
+    {
       "version": "370_pausas_atendimento",
       "kind": "registry"
     },

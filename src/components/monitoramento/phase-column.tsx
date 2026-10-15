@@ -108,6 +108,7 @@ export function PhaseColumn({
               onTransferClick={actions.onTransferClick}
               onFinalizeClick={actions.onFinalizeClick}
               onHistoryClick={actions.onHistoryClick}
+              onOpenClick={actions.onOpenClick}
             />
           ))
         )}

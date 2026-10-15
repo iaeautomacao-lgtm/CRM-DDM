@@ -1,7 +1,6 @@
 "use client";
 
 import { memo } from "react";
-import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ArrowLeftRight, Eye, History, MoreVertical, Star, UserRound, XCircle } from "lucide-react";
@@ -34,6 +33,7 @@ export const ConversationCard = memo(function ConversationCard({
   onTransferClick,
   onFinalizeClick,
   onHistoryClick,
+  onOpenClick,
 }: {
   conversation: MonitorConversation;
   phase: MonitorPhase;
@@ -52,6 +52,7 @@ export const ConversationCard = memo(function ConversationCard({
   onTransferClick: (conversation: MonitorConversation) => void;
   onFinalizeClick: (conversation: MonitorConversation) => void;
   onHistoryClick: (conversation: MonitorConversation) => void;
+  onOpenClick: (conversation: MonitorConversation) => void;
 }) {
   const { accountId } = useAuth();
   // O servidor exige inbox.transfer em /api/conversations/[id]/transfer e inbox.close em .../close.
@@ -90,9 +91,11 @@ export const ConversationCard = memo(function ConversationCard({
         className="mt-1"
       />
 
-      <Link
-        href={`/inbox?c=${conversation.id}`}
-        className="flex min-w-0 flex-1 items-center gap-3 hover:opacity-90"
+      <button
+        type="button"
+        onClick={() => onOpenClick(conversation)}
+        aria-label={`Abrir conversa com ${displayName}`}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-90"
       >
         <Avatar>
           {contact?.avatar_url ? (
@@ -141,7 +144,7 @@ export const ConversationCard = memo(function ConversationCard({
             )}
           </div>
         </div>
-      </Link>
+      </button>
 
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -152,7 +155,7 @@ export const ConversationCard = memo(function ConversationCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[200px] bg-popover text-popover-foreground">
           <DropdownMenuItem
-            render={<Link href={`/inbox?c=${conversation.id}`} />}
+            onClick={() => onOpenClick(conversation)}
             className="whitespace-nowrap text-popover-foreground"
           >
             <Eye className="size-4" />

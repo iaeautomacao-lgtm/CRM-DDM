@@ -123,6 +123,7 @@ export function AgentColumn({
               onTransferClick={actions.onTransferClick}
               onFinalizeClick={actions.onFinalizeClick}
               onHistoryClick={actions.onHistoryClick}
+              onOpenClick={actions.onOpenClick}
             />
           ))
         )}

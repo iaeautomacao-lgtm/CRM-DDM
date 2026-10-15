@@ -66,6 +66,7 @@ import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
 import { SlaPanel } from "@/components/monitoramento/sla-panel";
 import { DayPanel } from "@/components/monitoramento/day-panel";
 import type { ConversationCardActions } from "@/components/monitoramento/card-actions";
+import { ConversationModal } from "@/components/monitoramento/conversation-modal";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 import { ErrorState } from "@/components/dashboard/error-state";
 
@@ -664,6 +665,12 @@ function MonitoramentoBoard() {
     setTimelineModal({ open: true, contactId: conversation.contact_id, contactName });
   }, []);
 
+  // Conversa aberta em gaveta (o supervisor não sai do painel).
+  const [openConversationId, setOpenConversationId] = useState<string | null>(null);
+  const handleOpenClick = useCallback((conversation: MonitorConversation) => {
+    setOpenConversationId(conversation.id);
+  }, []);
+
   function makeCardActions(selection: typeof fasesSelection): ConversationCardActions {
     return {
       selectedIds: selection.selected,
@@ -672,6 +679,7 @@ function MonitoramentoBoard() {
       onTransferClick: setTransferTarget,
       onFinalizeClick: handleFinalizeClick,
       onHistoryClick: handleHistoryClick,
+      onOpenClick: handleOpenClick,
       getTeamName,
       getAgentName,
     };
@@ -1171,6 +1179,14 @@ function MonitoramentoBoard() {
 
       {/* Finalização em lote: a tabulação é obrigatória, como na ação unitária. */}
       <OutcomeTagPicker open={batchPickerOpen} onOpenChange={setBatchPickerOpen} onSelect={handleBatchFinalize} />
+
+      {openConversationId && (
+        <ConversationModal
+          key={openConversationId}
+          conversationId={openConversationId}
+          onClose={() => setOpenConversationId(null)}
+        />
+      )}
 
       {timelineModal && (
         <ContactTimelineModal
