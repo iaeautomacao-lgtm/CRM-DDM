@@ -34,6 +34,7 @@ import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
+import { envWithEngineFlags, loadEngineFlagRows } from "@/lib/disparador/engine-flags";
 import { ChannelClaimer, isBatchClaimEnabled, isClaimToken, planClaimTokens } from "@/lib/disparador/batch-claim";
 import { ConfirmBatcher, registerShutdownDrain, singleConfirm } from "@/lib/disparador/confirm-batcher";
 import {
@@ -311,8 +312,9 @@ export async function GET(request: Request) {
 }
 
 // Um tick. `chain` diz em que hop da cadeia estamos (hop 0 = cron externo): a manutenção pesada só roda a cada N hops.
-async function runTick(request: Request, chain: ChainContext) {
-  const maintenanceHop = isMaintenanceHop(chain.hop, resolveTickChainConfig().maintenanceEvery);
+// `tickEnv` = ambiente + chaves por conta (engine-flags.ts: claim em lote e encadeamento ligáveis pela tela, sem reinício).
+async function runTick(request: Request, chain: ChainContext, tickEnv: Record<string, string | undefined> = process.env) {
+  const maintenanceHop = isMaintenanceHop(chain.hop, resolveTickChainConfig(tickEnv).maintenanceEvery);
   // Auditoria: escritas desta requisição saem como "system" (cron_disparador).
   await registerAuditActor({ actorType: 'system', source: 'cron_disparador' })
   const rejection = authorize(request);
@@ -327,7 +329,7 @@ async function runTick(request: Request, chain: ChainContext) {
   let renewFailures = 0;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   // Botões de vazão (throughput-config.ts). Padrões = comportamento antigo.
-  const config = resolveThroughputConfig();
+  const config = resolveThroughputConfig(tickEnv);
   const autoPauseConfig = autoPauseConfigFromEnv();
   const tickStartedAt = Date.now();
   // Orçamento de tempo do tick: nenhum trabalho novo começa depois dele
@@ -536,7 +538,7 @@ async function runTick(request: Request, chain: ChainContext) {
     const candidateCap = resolveCronCandidateCap(config);
     // Claim em lote (migration 188, DISPARADOR_BATCH_CLAIM=0 desliga): fichas por campanha×número no planejamento e itens reivindicados
     // em lotes por número. Se as RPCs não existirem, volta sozinho ao caminho por item (fetchDueCandidates + claim unitário).
-    let batchMode = isBatchClaimEnabled();
+    let batchMode = isBatchClaimEnabled(tickEnv);
     // D-08: planejamento por campanha com concorrência limitada (plan-concurrency.ts); a ordem do resultado é a da lista (fairness).
     let tokenPlanned = 0;
     const planCampaign = async (campaign: Campaign): Promise<PlannedCampaign | null> => {
@@ -839,7 +841,11 @@ async function runTick(request: Request, chain: ChainContext) {
 // próximo hop via after() — sem esperar. O hop encadeado (header x-cron-hop) responde 202 na hora e roda o tick em after(), então
 // nenhuma requisição fica presa ao proxy; o cron externo (hop 0) continua síncrono e é o ressuscitador da cadeia.
 async function handlePost(request: Request) {
-  const chainConfig = resolveTickChainConfig();
+  // Segredo primeiro: só requisição autorizada lê o banco (as chaves do motor vêm de dispatch_engine_flags, com o ambiente como fallback).
+  const unauthorized = authorize(request);
+  if (unauthorized) return unauthorized;
+  const tickEnv = envWithEngineFlags(process.env, await loadEngineFlagRows(supabaseAdmin()));
+  const chainConfig = resolveTickChainConfig(tickEnv);
   const ctx = readChainContext(request.headers);
   const secret = process.env.CRON_SECRET ?? "";
 
@@ -857,7 +863,7 @@ async function handlePost(request: Request) {
     const rejection = authorize(request);
     if (rejection) return rejection;
     after(async () => {
-      const response = await runTick(request, ctx);
+      const response = await runTick(request, ctx, tickEnv);
       const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
       const decision = shouldChainNext({ config: chainConfig, ctx, tickStatus: status });
       if (decision.chain) await fireNextHop({ config: chainConfig, ctx, secret });
@@ -865,7 +871,7 @@ async function handlePost(request: Request) {
     return NextResponse.json({ status: "chained", hop: ctx.hop }, { status: 202 });
   }
 
-  const response = await runTick(request, ctx);
+  const response = await runTick(request, ctx, tickEnv);
   if (!chainConfig.enabled) return response;
   const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
   return chainAfter(response, status);

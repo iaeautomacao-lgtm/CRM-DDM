@@ -10,6 +10,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueItem } from "@/lib/disparador/processQueue";
+import { timedClaim } from "@/lib/disparador/claim-latency";
 import type { BlacklistLookup } from "@/lib/disparador/tick-preload";
 
 type Db = Pick<SupabaseClient, "rpc">;
@@ -131,12 +132,12 @@ export class ChannelClaimer {
 
   private async refill(state: SlotState, channelId: string, campaignId: string, free: number): Promise<void> {
     const n = Math.min(this.deps.maxBatch ?? BATCH_CLAIM_MAX, Math.max(1, Math.floor(free)));
-    const { data, error } = await this.deps.db.rpc("claim_dispatch_batch", {
+    const { data, error } = await timedClaim(() => this.deps.db.rpc("claim_dispatch_batch", {
       p_session_id: channelId,
       p_n: n,
       p_campaign_ids: [campaignId],
       p_default_max_in_flight: this.deps.defaultMaxInFlight(channelId) ?? null,
-    });
+    }));
     if (error) throw new Error(error.message);
     const items = ((data ?? []) as Array<{ item: QueueItem }>).map((row) => row.item).filter(Boolean);
     if (items.length === 0) {
