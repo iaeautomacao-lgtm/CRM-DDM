@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { apiFetch } from '@/lib/api-fetch'
 import { usePermission } from '@/hooks/use-permission'
+import { useAuth } from '@/hooks/use-auth'
 import {
   loadActivity,
   loadConversationsSeries,
@@ -64,6 +65,12 @@ export default function DashboardPage() {
   const gen = useRef(0)
 
   const canSeeQueue = usePermission('monitoring.view_team')
+  // Conta atual só para o feed de atividade usar o índice por conta; ref para não recarregar o painel quando ela chega.
+  const { accountId } = useAuth()
+  const accountIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    accountIdRef.current = accountId
+  }, [accountId])
 
   const track = useCallback(
     <T,>(section: DashboardSection, p: Promise<T>, set: (v: T) => void, g: number): Promise<boolean> =>
@@ -99,7 +106,7 @@ export default function DashboardPage() {
         track('series', loadConversationsSeries(db, r), (s) => setSeries((prev) => ({ ...prev, [r]: s })), g),
         track('status', loadConversationsStatusDonut(db), setStatusData, g),
         track('responseTime', loadResponseTime(db), setResponseTime, g),
-        track('activity', loadActivity(db, 50), setActivity, g),
+        track('activity', loadActivity(db, 50, accountIdRef.current), setActivity, g),
         track('ai', loadAiAnalytics(db), setAi, g),
       ]).then((results) => {
         if (gen.current === g) setUpdatedAt(Date.now())

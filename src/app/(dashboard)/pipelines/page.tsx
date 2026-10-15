@@ -122,7 +122,8 @@ export default function PipelinesPage() {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabase
           .from("deals")
-          .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(id, user_id, full_name, avatar_url)")
+          // O quadro só mostra nome e telefone do contato: trazer contacts(*) (campos personalizados, notas…) de todos os negócios pesava ~3 s.
+          .select("*, contact:contacts(id, name, phone), assignee:profiles!deals_assigned_to_fkey(id, user_id, full_name, avatar_url)")
           .eq("pipeline_id", pipelineId)
           .order("created_at", { ascending: false })
           .order("id")

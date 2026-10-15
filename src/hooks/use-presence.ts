@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
   derivePresence,
+  HEARTBEAT_MS,
   type PresenceRow,
   type PresenceStatus,
   type StoredPresence,
@@ -36,8 +36,8 @@ interface UsePresenceResult {
 
 /**
  * Live presence for every member of the caller's account. Reads the
- * `member_presence` table (RLS-scoped to the account), subscribes to
- * Realtime changes, and re-derives "offline" on a local timer.
+ * `member_presence` table (RLS-scoped to the account), re-reads it every
+ * HEARTBEAT_MS while the tab is visible, and re-derives "offline" on a local timer.
  *
  * Account comes from useAuth; pass `enabled: false` to opt a consumer
  * out (e.g. while a parent sheet is closed).
@@ -61,96 +61,48 @@ export function usePresence(enabled = true): UsePresenceResult {
     const supabase = createClient();
     let cancelled = false;
 
-    const applyRow = (row: {
-      user_id: string;
-      status: StoredPresence;
-      last_seen_at: string;
-    }) => {
-      setRows((prev) => {
-        const next = new Map(prev);
-        next.set(row.user_id, {
-          status: row.status,
-          last_seen_at: row.last_seen_at,
-        });
-        return next;
-      });
-    };
-
-    // Subscribe FIRST, then snapshot. The snapshot MERGES into whatever
-    // Realtime has already delivered (keeping the newer last_seen_at)
-    // rather than replacing the map — so an event that lands while the
-    // fetch is in flight isn't clobbered by a staler snapshot row.
-    const channel: RealtimeChannel = supabase
-      .channel(`presence:${accountId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "member_presence",
-          filter: `account_id=eq.${accountId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { user_id?: string };
-            if (!old.user_id) return;
-            setRows((prev) => {
-              if (!prev.has(old.user_id!)) return prev;
-              const next = new Map(prev);
-              next.delete(old.user_id!);
-              return next;
-            });
+    // Releitura periódica em vez de canal Realtime: o batimento de cada aba (a cada 30 s) escrevia em member_presence e,
+    // com a tabela na publication, cada escrita era avaliada pelo Realtime para todos os assinantes da conta (custo
+    // cresce com batimentos × assinantes). A tela só precisa do estado a cada batimento: uma leitura barata a cada 30 s.
+    const load = () => {
+      supabase
+        .from("member_presence")
+        .select("user_id, status, last_seen_at")
+        .eq("account_id", accountId)
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.error("[usePresence] fetch error:", error.message);
             return;
           }
-          applyRow(
-            payload.new as {
-              user_id: string;
-              status: StoredPresence;
-              last_seen_at: string;
-            },
-          );
-        },
-      )
-      .subscribe();
-
-    supabase
-      .from("member_presence")
-      .select("user_id, status, last_seen_at")
-      .eq("account_id", accountId)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.error("[usePresence] initial fetch error:", error.message);
-          return;
-        }
-        setRows((prev) => {
-          const next = new Map(prev);
+          // Substitui o mapa: quem sumiu da tabela (DELETE) some daqui também.
+          const next: PresenceMap = new Map();
           for (const r of data ?? []) {
-            const userId = r.user_id as string;
-            const incoming: PresenceRow = {
+            next.set(r.user_id as string, {
               status: r.status as StoredPresence,
               last_seen_at: r.last_seen_at as string,
-            };
-            const existing = next.get(userId);
-            // A live event that arrived first must win over a staler
-            // snapshot row.
-            if (
-              !existing ||
-              new Date(incoming.last_seen_at) >= new Date(existing.last_seen_at)
-            ) {
-              next.set(userId, incoming);
-            }
+            });
           }
-          return next;
+          setRows(next);
         });
-      });
+    };
+
+    load();
+    const poll = setInterval(() => {
+      if (!document.hidden) load();
+    }, HEARTBEAT_MS);
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     const tick = setInterval(() => setNow(Date.now()), RE_DERIVE_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(poll);
       clearInterval(tick);
-      supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [active, accountId]);
 

@@ -523,6 +523,19 @@
     {
       "version": "358_campaign_add_recipients",
       "kind": "registry"
+    },
+    {
+      "version": "363_perf_rls_membership_initplan",
+      "kind": "registry"
+    },
+    {
+      "version": "364_disp_live_push",
+      "kind": "registry"
+    },
+    {
+      "version": "365b_deals_contact_idx",
+      "kind": "index",
+      "index": "idx_deals_contact"
     }
   ]
 }

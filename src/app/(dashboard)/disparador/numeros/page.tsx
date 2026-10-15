@@ -19,8 +19,9 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { formatInt, NUMBER_STATUS_LABELS } from "@/lib/disparador/monitor-format";
 import type { MonitorNumberRow, MonitorSnapshot } from "@/lib/disparador/monitor-snapshot";
 import type { LimitsOverview, NumberLimits } from "@/lib/disparador/limits";
+import { useDisparadorLive } from "@/hooks/use-disparador-live";
+import { RECONCILE_RATES_MS, applyDeltaToSnapshot, livePollMs } from "@/lib/disparador/live-delta";
 
-const LIVE_MS = 3000;
 const CONFIG_MS = 15000;
 
 const PROVIDER_LABEL = { meta: "API oficial (Meta)", waha: "WAHA", unknown: "Provedor não definido" } as const;
@@ -76,17 +77,21 @@ export default function NumerosPage() {
     }
   }, []);
 
+  // Empurrado pelo banco (migration 364): o snapshot recebe o delta na hora; a consulta vira reconciliação (10 s; 3 s se o canal cair).
+  const { connected: liveConnected } = useDisparadorLive((delta) => setSnapshot((prev) => (prev ? applyDeltaToSnapshot(prev, delta) : prev)));
+  const liveMs = livePollMs(liveConnected, RECONCILE_RATES_MS);
+
   useEffect(() => {
     void loadLive();
     void loadConfig();
     const visible = () => document.visibilityState === "visible";
-    const a = setInterval(() => visible() && void loadLive(), LIVE_MS);
+    const a = setInterval(() => visible() && void loadLive(), liveMs);
     const b = setInterval(() => visible() && void loadConfig(), CONFIG_MS);
     return () => {
       clearInterval(a);
       clearInterval(b);
     };
-  }, [loadLive, loadConfig]);
+  }, [loadLive, loadConfig, liveMs]);
 
   // "Atualizar dados da Meta": re-consulta nome/telefone/qualidade agora (1 por minuto por conta), sem esperar o cron.
   const [metaRefreshing, setMetaRefreshing] = useState(false);
