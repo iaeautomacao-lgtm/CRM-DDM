@@ -10,6 +10,7 @@
 // ============================================================
 
 import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
+import { campaignDetailProperties, campaignListGet, campaignPaths, campaignSchemas, CAMPAIGN_READ_GUIDE } from './openapi-campaigns';
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
 import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
 import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
@@ -123,7 +124,7 @@ export const openApiSpec = {
       'Cada chave carrega os escopos concedidos na criação. Conceda o mínimo necessário:',
       '- `messages:send` — `POST /whatsapp/send`',
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
-      '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
+      '- `campaigns:read` — `GET /disparador/campaigns`, `GET /disparador/campaigns/{id}` e `GET /disparador/campaigns/{id}/recipients`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
       '- `conversations:read` / `messages:read` — `GET /conversations`, `GET /conversations/{id}/messages` e `GET /messages` (extração para BI/auditoria; veja a seção própria abaixo).',
       '- `webhooks:read` / `webhooks:write` — `/webhooks*` (webhooks de saída assinados; veja a seção própria abaixo).',
@@ -145,7 +146,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -161,6 +162,7 @@ export const openApiSpec = {
   paths: {
     ...webhookPaths,
     ...extractPaths,
+    ...campaignPaths,
     ...contactsPaths,
     ...templatesPaths,
     '/me': {
@@ -377,6 +379,7 @@ export const openApiSpec = {
     },
 
     '/disparador/campaigns': {
+      get: campaignListGet,
       post: {
         tags: ['Disparador'],
         operationId: 'createCampaign',
@@ -840,6 +843,7 @@ export const openApiSpec = {
     schemas: {
       ...webhookSchemas,
       ...extractSchemas,
+      ...campaignSchemas,
       ...contactsSchemas,
       ...templatesSchemas,
       Scope: {
@@ -1204,6 +1208,7 @@ export const openApiSpec = {
       Campaign: {
         type: 'object',
         properties: {
+          ...campaignDetailProperties,
           campaign_id: { type: 'string', format: 'uuid' },
           name: { type: 'string' },
           status: { type: 'string', description: 'Ex.: `rascunho`, `em_execucao`, `pausada`, `encerrada`.' },
@@ -1228,9 +1233,13 @@ export const openApiSpec = {
             description: 'Contagem por status da fila (somente os listados).',
             properties: {
               agendado: { type: 'integer' },
+              pendente: { type: 'integer' },
+              pausado: { type: 'integer' },
               enviando: { type: 'integer' },
               entregue: { type: 'integer' },
+              lido: { type: 'integer' },
               erro: { type: 'integer' },
+              bloqueado: { type: 'integer' },
               cancelado: { type: 'integer' },
             },
           },

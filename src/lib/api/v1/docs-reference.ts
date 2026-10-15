@@ -23,6 +23,8 @@ export const OPERATION_SCOPES: Record<string, string[]> = {
   listTemplates: ['templates:read', 'messages:send', 'campaigns:write'],
   createCampaign: ['campaigns:write'],
   getCampaign: ['campaigns:read', 'campaigns:write'],
+  listCampaigns: ['campaigns:read', 'campaigns:write'],
+  listCampaignRecipients: ['campaigns:read', 'campaigns:write'],
   getReportOperationsCurrent: ['reports:read'],
   getReportOperationsSummary: ['reports:read'],
   getReportTeams: ['reports:read'],

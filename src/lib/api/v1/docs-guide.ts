@@ -22,6 +22,8 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getMe: 'comece',
   createCampaign: 'campanha',
   getCampaign: 'acompanhar',
+  listCampaigns: 'acompanhar',
+  listCampaignRecipients: 'acompanhar',
   sendWhatsappMessage: 'avulso',
   listContacts: 'avulso',
   getContact: 'avulso',
@@ -57,7 +59,7 @@ export interface ScopeRow {
 
 export const SCOPE_ROWS: ScopeRow[] = [
   { scope: 'campaigns:write', paraQue: 'Disparar campanha (e também consultar campanhas)', endpoints: 'POST /disparador/campaigns' },
-  { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns/{id}' },
+  { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns, GET /disparador/campaigns/{id}, GET /disparador/campaigns/{id}/recipients' },
   { scope: 'contacts:read', paraQue: 'Buscar e ler contatos (CPF só mascarado)', endpoints: 'GET /contacts, GET /contacts/{id}' },
   { scope: 'contacts:write', paraQue: 'Criar (upsert) e atualizar contatos (também lê)', endpoints: 'POST /contacts, PATCH /contacts/{id}' },
   { scope: 'messages:send', paraQue: 'Enviar mensagem avulsa ou um template aprovado', endpoints: 'POST /whatsapp/send, POST /whatsapp/send-template' },

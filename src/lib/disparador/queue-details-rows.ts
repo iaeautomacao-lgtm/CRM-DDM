@@ -106,6 +106,27 @@ export async function attachLegacyCsvNames(
 }
 
 
+/**
+ * Conversa de cada contato (contact_id → conversation_id): a que veio desta campanha (origin_campaign_id) ou, sem ela, a mais
+ * recente do contato. Compartilhado pela rota interna (queue-details) e pela API pública (recipients).
+ */
+export async function loadContactConversationIds(accountId: string, campaignId: string, contactIds: readonly string[]): Promise<Map<string, string>> {
+  const byContact = new Map<string, string>();
+  const unique = [...new Set(contactIds.filter(Boolean))];
+  if (unique.length === 0) return byContact;
+  const { data } = await supabaseAdmin()
+    .from("conversations")
+    .select("id, contact_id, origin_campaign_id, last_message_at")
+    .eq("account_id", accountId)
+    .in("contact_id", unique)
+    .order("last_message_at", { ascending: false, nullsFirst: false });
+  const rowsByRecency = (data ?? []) as Array<{ id: string; contact_id: string; origin_campaign_id: string | null }>;
+  // Mais recente de cada contato; a conversa desta campanha tem prioridade.
+  for (const c of rowsByRecency) if (!byContact.has(c.contact_id)) byContact.set(c.contact_id, c.id);
+  for (const c of rowsByRecency) if (c.origin_campaign_id === campaignId) byContact.set(c.contact_id, c.id);
+  return byContact;
+}
+
 export const SELECT_COLUMNS =
   "id, contact_id, mensagem_final, erro, status, scheduled_at, sent_at, contacts!contact_id(name, phone)";
 // Com replied_at (migration 126) só para "Respostas" — as demais métricas

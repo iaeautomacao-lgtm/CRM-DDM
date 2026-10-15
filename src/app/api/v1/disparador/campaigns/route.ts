@@ -1,3 +1,5 @@
+import { decodeCursor, parseLimit } from "@/lib/api/v1/extract";
+import { CAMPAIGN_LIST_DEFAULT, CAMPAIGN_LIST_MAX, loadCampaignPage, parseCampaignListFilters } from "@/lib/api/v1/campaign-api";
 import { findRedChannels, RED_QUALITY_CODE, redBlockedMessage } from "@/lib/disparador/red-quality-gate";
 import { requireApiKey } from "@/lib/auth/api-context";
 import {
@@ -169,6 +171,26 @@ async function replayExisting(
     throw conflict("Criação desta campanha ainda em andamento; aguarde e repita a requisição");
   }
   return ok(existing.idempotency_response as CreationResult, 200, logCtx);
+}
+
+// GET /api/v1/disparador/campaigns — lista as campanhas da conta (campaigns:read ou campaigns:write), mais recentes primeiro.
+// Filtros: status (vírgula), source (api_v1|dashboard), external_id, created_from/created_to (ISO). limit 1..200 (padrão 50), cursor.
+// Sem dado pessoal de cliente: só métricas agregadas (uma agregação para a página inteira, sem N+1).
+export async function GET(request: Request) {
+  const logCtx: ApiCallLogContext = { method: "GET", route: "/api/v1/disparador/campaigns", startedAt: Date.now() };
+  try {
+    const ctx = await requireApiKey(request, ["campaigns:read", "campaigns:write"]);
+    logCtx.accountId = ctx.accountId;
+    logCtx.keyId = ctx.keyId;
+    const params = new URL(request.url).searchParams;
+    const filters = parseCampaignListFilters(params);
+    const limit = parseLimit(params.get("limit"), CAMPAIGN_LIST_DEFAULT, CAMPAIGN_LIST_MAX);
+    const cursor = decodeCursor(params.get("cursor"), 2);
+    const page = await loadCampaignPage(supabaseAdmin(), { accountId: ctx.accountId, filters, cursor, limit });
+    return ok(page, 200, logCtx);
+  } catch (err) {
+    return toApiErrorResponse(err, logCtx);
+  }
 }
 
 export async function POST(request: Request) {
