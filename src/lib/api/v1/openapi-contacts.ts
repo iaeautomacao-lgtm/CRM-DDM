@@ -204,6 +204,7 @@ export const contactsSchemas: Record<string, Json> = {
       has_cpf: { type: 'boolean' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Nomes das etiquetas de contato.' },
       custom_fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Campos personalizados com valor: `{ nome_do_campo: valor }`.' },
+      owner: { oneOf: [{ type: 'null' }, { type: 'object', required: ['id', 'name'], properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } }], description: 'Atendente-dono do contato (carteira fixa; veja `PUT /contacts/{id}/owner`). `null` = sem dono.' },
       created_at: { type: ['string', 'null'], format: 'date-time' },
       updated_at: { type: ['string', 'null'], format: 'date-time' },
     },

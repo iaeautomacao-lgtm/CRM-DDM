@@ -245,6 +245,20 @@ describe('GET /contacts', () => {
   })
 })
 
+describe('carteira fixa no contato', () => {
+  it('GET /contacts/{id} e a busca trazem owner {id,name}; sem dono = null; sem a coluna (migration 372) = null', async () => {
+    h.scopes = ['contacts:read']
+    h.db.profiles = [{ user_id: UUID(5), account_id: A, full_name: 'Ana', account_role: 'agent' }]
+    h.db.contacts[0].owner_user_id = UUID(5)
+    expect((await json(await getOne(UUID(1)))).data.contact.owner).toEqual({ id: UUID(5), name: 'Ana' })
+    expect((await json(await getOne(UUID(2)))).data.contact.owner).toBeNull()
+    const list = (await json(await get('?cpf=' + CPF))).data.items[0]
+    expect(list.owner).toEqual({ id: UUID(5), name: 'Ana' })
+    delete h.db.contacts[0].owner_user_id
+    expect((await json(await getOne(UUID(1)))).data.contact.owner).toBeNull()
+  })
+})
+
 describe('GET /contacts/{id}', () => {
   it('devolve o contato; de outra conta ou id inválido → 404', async () => {
     h.scopes = ['contacts:read']

@@ -30,7 +30,7 @@ const chunks = <T,>(list: T[], size: number): T[][] => {
 
 /** Telefones alternativos, etiquetas e campos personalizados de uma lista de contatos (em blocos, sem passar do teto de linhas do PostgREST). */
 export async function loadExtras(db: Db, rows: ContactDbRow[]): Promise<Map<string, ContactExtras>> {
-  const map = new Map<string, ContactExtras>(rows.map((r) => [r.id, { phones: [], tags: [], customFields: {} }]));
+  const map = new Map<string, ContactExtras>(rows.map((r) => [r.id, { phones: [], tags: [], customFields: {}, owner: null }]));
   for (const ids of chunks(rows.map((r) => r.id), 50)) {
     const [phones, tags, values] = await Promise.all([
       db.from('contact_phones').select('contact_id, phone, status, label, ordem').in('contact_id', ids).gte('ordem', 2).order('ordem', { ascending: true }).limit(1000),
@@ -49,7 +49,25 @@ export async function loadExtras(db: Db, rows: ContactDbRow[]): Promise<Map<stri
     }
   }
   for (const e of map.values()) e.tags.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  await attachOwners(db, rows, map);
   return map;
+}
+
+/** Carteira fixa (migration 372): dono de cada contato. Lido à parte para que a API de contatos continue funcionando sem a migration (coluna ausente = sem dono). */
+async function attachOwners(db: Db, rows: ContactDbRow[], map: Map<string, ContactExtras>): Promise<void> {
+  const owners = new Map<string, string>();
+  for (const ids of chunks(rows.map((r) => r.id), 100)) {
+    const { data, error } = await db.from('contacts').select('id, owner_user_id').in('id', ids);
+    if (error) return;
+    for (const r of (data ?? []) as Array<{ id: string; owner_user_id?: string | null }>) if (r.owner_user_id) owners.set(r.id, r.owner_user_id);
+  }
+  if (owners.size === 0) return;
+  const { data: profiles } = await db.from('profiles').select('user_id, full_name').in('user_id', [...new Set(owners.values())]);
+  const names = new Map(((profiles ?? []) as Array<{ user_id: string; full_name: string | null }>).map((p) => [p.user_id, (p.full_name ?? '').trim() || 'Atendente']));
+  for (const [contactId, userId] of owners) {
+    const extras = map.get(contactId);
+    if (extras) extras.owner = { id: userId, name: names.get(userId) ?? 'Atendente' };
+  }
 }
 
 export async function getContactRow(db: Db, accountId: string, id: string): Promise<ContactDbRow | null> {

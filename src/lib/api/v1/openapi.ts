@@ -15,6 +15,7 @@ import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './open
 import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
 import { catalogosPaths, catalogosSchemas, catalogosTags, CATALOGOS_GUIDE } from './openapi-catalogos';
 import { atendimentoPaths, atendimentoSchemas, conversationsPost, ATENDIMENTO_GUIDE } from './openapi-atendimento';
+import { carteiraPaths, carteiraSchemas, CARTEIRA_GUIDE } from './openapi-carteira';
 import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
 
 type Json = Record<string, unknown>;
@@ -149,7 +150,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE + CATALOGOS_GUIDE + ATENDIMENTO_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE + CATALOGOS_GUIDE + ATENDIMENTO_GUIDE + CARTEIRA_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -170,6 +171,7 @@ export const openApiSpec = {
     ...contactsPaths,
     ...catalogosPaths,
     ...atendimentoPaths,
+    ...carteiraPaths,
     '/conversations': { ...(extractPaths['/conversations'] as Record<string, unknown>), post: conversationsPost },
     ...templatesPaths,
     '/me': {
@@ -854,6 +856,7 @@ export const openApiSpec = {
       ...contactsSchemas,
       ...catalogosSchemas,
       ...atendimentoSchemas,
+      ...carteiraSchemas,
       ...templatesSchemas,
       Scope: {
         type: 'string',

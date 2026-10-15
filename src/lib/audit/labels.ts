@@ -142,6 +142,7 @@ export const FIELD_LABEL: Record<string, string> = {
   cpf: "CPF",
   status: "Status",
   assigned_agent_id: "Atendente",
+  owner_user_id: "Atendente da carteira",
   team_id: "Equipe",
   client_id: "Cliente",
   flow_id: "Fluxo",

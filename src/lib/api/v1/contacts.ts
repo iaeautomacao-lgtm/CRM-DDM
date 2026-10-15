@@ -210,6 +210,8 @@ export interface ContactExtras {
   phones: Array<{ phone: string; status: string | null; label: string | null }>;
   tags: string[];
   customFields: Record<string, string>;
+  /** Carteira fixa (migration 372): atendente-dono do contato. */
+  owner: { id: string; name: string } | null;
 }
 
 export function serializeApiContact(row: ContactDbRow, extras: ContactExtras) {
@@ -226,9 +228,10 @@ export function serializeApiContact(row: ContactDbRow, extras: ContactExtras) {
     has_cpf: digits !== '',
     tags: extras.tags,
     custom_fields: extras.customFields,
+    owner: extras.owner ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
-export const EMPTY_EXTRAS: ContactExtras = { phones: [], tags: [], customFields: {} };
+export const EMPTY_EXTRAS: ContactExtras = { phones: [], tags: [], customFields: {}, owner: null };

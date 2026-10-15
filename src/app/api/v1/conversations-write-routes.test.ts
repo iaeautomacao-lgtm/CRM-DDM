@@ -54,7 +54,7 @@ class Q {
   private run() {
     const rows = h.db[this.table] ?? (h.db[this.table] = [])
     if (this.op === 'insert') {
-      const row = { id: U(1000 + ++h.seq), created_at: new Date().toISOString(), ...this.payload }
+      const row = { id: U(1000 + ++h.seq), created_at: new Date().toISOString(), ...(this.table === 'conversations' ? { channel_type: 'whatsapp' } : {}), ...this.payload }
       rows.push(row)
       return { data: [row], error: null }
     }
@@ -355,6 +355,47 @@ describe('POST /conversations (abrir)', () => {
     h.scopes = ['conversations:write']
     h.rate = false
     expect((await open({ phone: '+5527999991212' })).status).toBe(429)
+  })
+})
+
+describe('carteira fixa ao abrir (fase 1)', () => {
+  beforeEach(() => {
+    h.db.contacts[0].owner_user_id = AGENT
+  })
+
+  it('sem atendente nem equipe: vai para o DONO do contato (via_owner: true)', async () => {
+    const res = await open({ phone: '+5527999991212' })
+    expect(res.status).toBe(201)
+    const data = (await json(res)).data
+    expect(data).toMatchObject({ via_owner: true, conversation: { status: 'open', assignee_id: AGENT, created: true } })
+    expect(h.db.conversations[0].assigned_agent_id).toBe(AGENT)
+  })
+
+  it('dono em pausa, desativado ou que deixou de atender: cai na fila (pending), sem erro', async () => {
+    h.db.agent_pauses.push({ user_id: AGENT, reason_name: 'Almoço', started_at: '2026-10-15T15:00:00Z', ended_at: null })
+    const paused = await json(await open({ phone: '+5527999991212' }))
+    expect(paused.data).toMatchObject({ via_owner: false, conversation: { status: 'pending', assignee_id: null } })
+    h.db.conversations = []
+    h.db.agent_pauses = []
+    h.db.profiles[0].deactivated_at = '2026-02-01'
+    const off = await json(await open({ phone: '+5527999991212' }))
+    expect(off.data).toMatchObject({ via_owner: false, conversation: { status: 'pending', assignee_id: null } })
+  })
+
+  it('atendente OU equipe pedidos vencem o dono; conversa já aberta não é redirecionada', async () => {
+    const team = await json(await open({ phone: '+5527999991212', team_id: TEAM }))
+    expect(team.data).toMatchObject({ via_owner: false, conversation: { assignee_id: null, team_id: TEAM } })
+    h.db.conversations = []
+    const explicit = await json(await open({ phone: '+5527999991212', assignee_id: AGENT2 }))
+    expect(explicit.data).toMatchObject({ via_owner: false, conversation: { assignee_id: AGENT2 } })
+    const again = await open({ phone: '+5527999991212' })
+    expect(again.status).toBe(200)
+    expect((await json(again)).data).toMatchObject({ via_owner: false, conversation: { assignee_id: AGENT2, created: false } })
+  })
+
+  it('contato sem dono: fila, como antes', async () => {
+    h.db.contacts[0].owner_user_id = null
+    expect((await json(await open({ phone: '+5527999991212' }))).data).toMatchObject({ via_owner: false, conversation: { status: 'pending' } })
   })
 })
 

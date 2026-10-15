@@ -23,6 +23,8 @@ export const OPERATION_SCOPES: Record<string, string[]> = {
   openConversation: ['conversations:write'],
   closeConversation: ['conversations:write'],
   transferConversation: ['conversations:write'],
+  setContactOwner: ['contacts:write'],
+  removeContactOwner: ['contacts:write'],
   upsertContact: ['contacts:write'],
   updateContact: ['contacts:write'],
   sendWhatsappTemplate: ['messages:send'],
