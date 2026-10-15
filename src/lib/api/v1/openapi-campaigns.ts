@@ -1,7 +1,7 @@
 // OpenAPI da LEITURA de campanhas (Onda 1, bloco A1): lista, detalhe enriquecido e status por destinatário.
 // Mesclado em openapi.ts (get da lista, propriedades do detalhe, rota de recipients, schemas e guia), no padrão de
 // openapi-extract.ts e openapi-webhooks.ts. Sem segredo: só contrato. Desenho: prd-v2/api-onda1-desenho.md.
-import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES } from './campaign-api-constants';
+import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES, REMOVE_ENTRY_STATUSES, REMOVE_MAX_RECIPIENTS, REMOVE_REASONS } from './campaign-api-constants';
 
 type Json = Record<string, unknown>;
 
@@ -13,6 +13,20 @@ const apiError = (description: string, code: string, message: string) => ({
   content: { 'application/json': { schema: ref('ErrorEnvelope'), example: errorExample(code, message) } },
 });
 const common = { '401': resp('Unauthorized'), '403': resp('Forbidden'), '429': resp('RateLimited'), '500': resp('InternalError') };
+
+export const CAMPAIGN_CONTROL_GUIDE = [
+  '',
+  '## Campanhas: controlar o envio',
+  'Escopo `campaigns:write`. **30 requisições por minuto por chave** nestas rotas (além dos 120/min gerais). Todas são **idempotentes por estado**: repetir devolve `200` com `changed: false`, nunca um erro. Estado que não permite a ação devolve `409 conflict` com o estado atual em `error.details.status`.',
+  '',
+  '- `POST /disparador/campaigns/{id}/pause` pausa uma campanha em execução (corpo opcional `{ "reason": "…" }`, até 200 caracteres, visível no painel). Itens que já estão sendo enviados não são tocados.',
+  '- `POST /disparador/campaigns/{id}/resume` retoma uma pausada. Se o **motor** pausou (taxa de erro etc.), envie `{ "acknowledge_auto_pause": true }` depois de corrigir a causa. Bloqueia **sempre** (409): template da campanha sem aprovação na Meta (`details.code = template_not_approved`) e número em qualidade vermelha (`details.code = red_quality`, a confirmação é do proprietário na tela).',
+  '- `POST /disparador/campaigns/{id}/cancel` encerra a campanha. **Irreversível**: exige `{ "confirm": true }`; os itens agendados e pausados viram `cancelado`. Só cancela campanha em execução, pausada ou agendada.',
+  '- `POST /disparador/campaigns/{id}/recipients` **adiciona** contatos a uma campanha criada pela API que esteja em execução ou pausada (até 20.000 por chamada, 50.000 por campanha; `Idempotency-Key` obrigatória; repetir é seguro e não duplica).',
+  '- `POST /disparador/campaigns/{id}/recipients/remove` tira destinatários **ainda não enviados** (ex.: o cliente pagou), por `phone`, `cpf` ou `reference`. Não é opt-out: a lista de bloqueio não é tocada. Quem já recebeu não se desfaz (`already_sent`); quem está sendo enviado agora volta como `in_flight` (repita depois). O CPF só acha quem já existe como contato no CRM e nunca é devolvido; para campanhas criadas pela API, o jeito mais seguro é mandar um `reference` por contato no `POST /disparador/campaigns` e usá-lo aqui.',
+  '',
+  'No detalhe da campanha, `ended_reason` diz se a encerrada foi `completed`, `cancelled` (tela) ou `cancelled_api`; `pause.reason` traz o motivo da pausa.',
+].join('\n');
 
 export const CAMPAIGN_READ_GUIDE = [
   '',
@@ -98,8 +112,165 @@ const recipientExample = {
   },
 };
 
+const idParam = { name: 'id', in: 'path', required: true, description: 'ID da campanha (`campaign_id`).', schema: { type: 'string', format: 'uuid' } };
+const notFound = apiError('Campanha inexistente ou de outra conta.', 'not_found', 'Campanha não encontrada');
+const stateConflict = (message: string, details: Json) => ({
+  description: 'Estado da campanha não permite a ação, ou a ação está bloqueada (veja `error.details`).',
+  content: { 'application/json': { schema: ref('ErrorEnvelope'), example: { error: { code: 'conflict', message, details } } } },
+});
+const controlOk = (description: string, example: Json) => ({
+  description,
+  content: { 'application/json': { schema: { type: 'object', required: ['data'], properties: { data: ref('CampaignControlResult') } }, example: { data: example } } },
+});
+const jsonBody = (schemaName: string, example: Json, required = false) => ({
+  required,
+  content: { 'application/json': { schema: ref(schemaName), example } },
+});
+
+const addRecipientsPost = {
+  tags: ['Disparador'],
+  operationId: 'addCampaignRecipients',
+  summary: 'Adicionar contatos a uma campanha existente',
+  description: [
+    'Exige `campaigns:write` e o cabeçalho **`Idempotency-Key`** (obrigatório). Só funciona em campanha **criada pela API** que esteja **em execução ou pausada**; nos demais estados responde `409`. Até 20.000 contatos por chamada e no máximo **50.000 contatos por campanha** (`413` acima disso). Limite de 6 chamadas por minuto por chave, o mesmo de criar campanha.',
+    '',
+    'Valem as regras do create: blacklist/opt-out, telefones inválidos, variáveis do template (Meta) ou da mensagem (WAHA), janela e dias da campanha. O ritmo é o da própria campanha (`slot_size` e `slot_interval_minutes` guardados na criação) e os novos entram **depois do último já agendado**. Contato cujo telefone já está na campanha conta em `duplicates` e não é inserido de novo. Número em qualidade vermelha ou template sem aprovação na Meta bloqueiam (`409`).',
+    '',
+    '**Repetir é seguro.** A mesma `Idempotency-Key` com o mesmo corpo devolve a mesma resposta sem inserir. Se uma tentativa falhar no meio (`error.details.added_before_error` informa quantos entraram), repita a chamada completa: a deduplicação contra a campanha só acrescenta o que faltou. Em campanha pausada os itens entram pausados e saem quando ela for retomada.',
+  ].join('\n'),
+  parameters: [idParam, { name: 'Idempotency-Key', in: 'header', required: true, description: '8 a 128 caracteres (letras, números, `.`, `_`, `:`, `-`), uma por intenção de adição.', schema: { type: 'string', minLength: 8, maxLength: 128 } }],
+  requestBody: jsonBody('AddRecipientsRequest', { contacts: [{ phone: '+5521999998888', variables: ['Maria', 'R$ 150,00'], reference: 'contrato-8841' }] }, true),
+  responses: {
+    '200': {
+      description: 'Resultado da adição.',
+      content: {
+        'application/json': {
+          schema: { type: 'object', required: ['data'], properties: { data: ref('AddRecipientsResponse') } },
+          example: { data: { added: 480, duplicates: 12, skipped: 3, invalid: 5, invalid_sample: [{ index: 7, phone: '123', reason: 'invalid_phone' }], total_contacts: 1480, estimated_completion_minutes: 30 } },
+        },
+      },
+    },
+    '400': apiError('Corpo inválido, ou nenhum contato válido.', 'bad_request', "'contacts' é obrigatório e deve ser uma lista"),
+    '404': notFound,
+    '409': stateConflict('Só é possível adicionar contatos a uma campanha em execução ou pausada', { status: 'encerrada' }),
+    '413': apiError('Mais de 20.000 contatos na chamada ou campanha acima de 50.000.', 'payload_too_large', 'A campanha passaria de 50000 contatos (hoje 49800); abra outra campanha'),
+    '503': apiError('Migrations 357/358 ainda não aplicadas.', 'unavailable', 'Adicionar contatos indisponível: aplique as migrations 357 e 358'),
+    ...common,
+  },
+};
+
+export const campaignControlPaths: Record<string, Json> = {
+  '/disparador/campaigns/{id}/pause': {
+    post: {
+      tags: ['Disparador'],
+      operationId: 'pauseCampaign',
+      summary: 'Pausar campanha',
+      description: 'Exige `campaigns:write`. Pausa uma campanha **em execução**; itens já em envio não são tocados. Idempotente: já pausada devolve `200` com `changed: false`. 30 req/min por chave.',
+      parameters: [idParam],
+      requestBody: jsonBody('PauseCampaignRequest', { reason: 'Aguardando conferência da carteira' }),
+      responses: {
+        '200': controlOk('Campanha pausada (ou já estava).', { campaign_id: '7c9e6679-0000-4000-8000-000000000020', status: 'pausada', previous_status: 'em_execucao', changed: true, items_pending_move: false }),
+        '400': apiError('Corpo inválido.', 'bad_request', "'reason' deve ser um texto de até 200 caracteres"),
+        '404': notFound,
+        '409': stateConflict('Só é possível pausar uma campanha em execução', { status: 'encerrada' }),
+        ...common,
+      },
+    },
+  },
+  '/disparador/campaigns/{id}/resume': {
+    post: {
+      tags: ['Disparador'],
+      operationId: 'resumeCampaign',
+      summary: 'Retomar campanha',
+      description: [
+        'Exige `campaigns:write`. Retoma uma campanha **pausada**; já em execução devolve `200` com `changed: false`. 30 req/min por chave.',
+        '',
+        '**Guardas (409):** pausada pelo motor (taxa de erro etc.) só retoma com `acknowledge_auto_pause: true` (`details.code = auto_paused`); template da campanha sem aprovação na Meta (`template_not_approved`); número em qualidade vermelha (`red_quality`: a confirmação é do proprietário, na tela, e a API nunca a dá).',
+      ].join('\n'),
+      parameters: [idParam],
+      requestBody: jsonBody('ResumeCampaignRequest', { acknowledge_auto_pause: true }),
+      responses: {
+        '200': controlOk('Campanha retomada (ou já estava em execução).', { campaign_id: '7c9e6679-0000-4000-8000-000000000020', status: 'em_execucao', previous_status: 'pausada', changed: true }),
+        '400': apiError('Corpo inválido.', 'bad_request', "'acknowledge_auto_pause' deve ser true ou false"),
+        '404': notFound,
+        '409': stateConflict('A campanha foi pausada automaticamente; confirme com acknowledge_auto_pause depois de corrigir a causa', { status: 'pausada', code: 'auto_paused', reason: 'Taxa de erro acima do limite' }),
+        ...common,
+      },
+    },
+  },
+  '/disparador/campaigns/{id}/cancel': {
+    post: {
+      tags: ['Disparador'],
+      operationId: 'cancelCampaign',
+      summary: 'Cancelar campanha',
+      description: 'Exige `campaigns:write`. **Irreversível**: exige `{ "confirm": true }`. Encerra a campanha e cancela os itens agendados/pausados; itens já em envio seguem. Só cancela campanha em execução, pausada ou agendada. Já encerrada devolve `200` com `changed: false`. 30 req/min por chave.',
+      parameters: [idParam],
+      requestBody: jsonBody('CancelCampaignRequest', { confirm: true }, true),
+      responses: {
+        '200': controlOk('Campanha cancelada (ou já estava encerrada).', { campaign_id: '7c9e6679-0000-4000-8000-000000000020', status: 'encerrada', previous_status: 'pausada', changed: true, items_pending_move: false }),
+        '400': apiError('Falta a confirmação.', 'bad_request', 'Cancelar é irreversível: envie { "confirm": true } para confirmar'),
+        '404': notFound,
+        '409': stateConflict('Só é possível cancelar uma campanha em execução, pausada ou agendada', { status: 'rascunho' }),
+        ...common,
+      },
+    },
+  },
+  '/disparador/campaigns/{id}/recipients/remove': {
+    post: {
+      tags: ['Disparador'],
+      operationId: 'removeCampaignRecipients',
+      summary: 'Tirar destinatários da campanha',
+      description: [
+        `Exige \`campaigns:write\`. Tira da campanha destinatários **ainda não enviados** (ex.: o cliente pagou). De 1 a ${REMOVE_MAX_RECIPIENTS} itens por chamada; cada item informa pelo menos um de \`phone\`, \`cpf\` ou \`reference\`. 30 req/min por chave.`,
+        '',
+        '**Não é opt-out:** a lista de bloqueio não é tocada; o cliente pode receber outra campanha. **Idempotente:** repetir devolve `already_removed`.',
+        '',
+        'Resultado por item (na ordem enviada): `removed` (cancelado agora), `already_removed`, `in_flight` (está sendo enviado neste instante; repita depois), `already_sent` (já enviado/entregue/lido, não se desfaz), `not_found` (não está nesta campanha) e `invalid` (entrada inválida; as demais seguem). O `cpf` acha só quem já é contato do CRM e **nunca é devolvido**.',
+      ].join('\n'),
+      parameters: [idParam],
+      requestBody: jsonBody(
+        'RemoveRecipientsRequest',
+        { reason: 'paid', recipients: [{ phone: '+5521999998888' }, { cpf: '123.456.789-09' }, { reference: 'contrato-8841' }] },
+        true,
+      ),
+      responses: {
+        '200': {
+          description: 'Resultado por item.',
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['data'], properties: { data: ref('RemoveRecipientsResponse') } },
+              example: {
+                data: {
+                  results: [
+                    { index: 0, status: 'removed', items: 1 },
+                    { index: 1, status: 'already_sent', items: 1 },
+                    { index: 2, status: 'not_found', items: 0 },
+                  ],
+                  items_removed: 1,
+                  removed: 1,
+                  already_removed: 0,
+                  in_flight: 0,
+                  already_sent: 1,
+                  not_found: 1,
+                  invalid: 0,
+                },
+              },
+            },
+          },
+        },
+        '400': apiError('Corpo inválido.', 'bad_request', "'recipients' é obrigatório e não pode ser vazio"),
+        '404': notFound,
+        '503': apiError('Migration 357 ainda não aplicada no banco.', 'unavailable', 'Remoção de destinatários indisponível: aplique a migration 357'),
+        ...common,
+      },
+    },
+  },
+};
+
 export const campaignPaths: Record<string, Json> = {
+  ...campaignControlPaths,
   '/disparador/campaigns/{id}/recipients': {
+    post: addRecipientsPost,
     get: {
       tags: ['Disparador'],
       operationId: 'listCampaignRecipients',
@@ -171,6 +342,7 @@ export const campaignDetailProperties = {
       template: { type: ['object', 'null'], properties: { name: { type: 'string' }, language: { type: ['string', 'null'] } } },
     },
   },
+  ended_reason: { type: ['string', 'null'], enum: ['completed', 'cancelled', 'cancelled_api', null], description: 'Só com a campanha encerrada: concluída, cancelada na tela ou cancelada pela API.' },
   replied: { type: 'integer', description: 'Destinatários que responderam.' },
   funnel: {
     type: ['object', 'null'],
@@ -187,6 +359,84 @@ export const campaignDetailProperties = {
 };
 
 export const campaignSchemas: Record<string, Json> = {
+  AddRecipientsRequest: {
+    type: 'object',
+    required: ['contacts'],
+    properties: { contacts: { type: 'array', minItems: 1, maxItems: 20000, items: ref('CampaignContact') } },
+  },
+  AddRecipientsResponse: {
+    type: 'object',
+    properties: {
+      added: { type: 'integer', description: 'Contatos inseridos na campanha.' },
+      duplicates: { type: 'integer', description: 'Repetidos na chamada ou já presentes na campanha.' },
+      skipped: { type: 'integer', description: 'Na lista de bloqueio (opt-out).' },
+      invalid: { type: 'integer' },
+      invalid_sample: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, phone: { type: ['string', 'null'] }, reason: { type: 'string' } } } },
+      total_contacts: { type: 'integer', description: 'Itens da campanha depois da adição.' },
+      estimated_completion_minutes: { type: 'integer' },
+    },
+  },
+  CampaignControlResult: {
+    type: 'object',
+    properties: {
+      campaign_id: { type: 'string', format: 'uuid' },
+      status: { type: 'string', enum: [...CAMPAIGN_STATUSES] },
+      previous_status: { type: 'string', enum: [...CAMPAIGN_STATUSES] },
+      changed: { type: 'boolean', description: '`false` = já estava no estado pedido (repetição idempotente).' },
+      items_pending_move: { type: 'boolean', description: 'Só em pause/cancel: os itens ainda estão sendo movidos em segundo plano (campanha grande).' },
+    },
+  },
+  PauseCampaignRequest: { type: 'object', properties: { reason: { type: 'string', maxLength: 200, description: 'Motivo, visível no painel e no detalhe.' } } },
+  ResumeCampaignRequest: {
+    type: 'object',
+    properties: { acknowledge_auto_pause: { type: 'boolean', description: 'Obrigatório para retomar uma campanha pausada pelo motor.' } },
+  },
+  CancelCampaignRequest: { type: 'object', required: ['confirm'], properties: { confirm: { type: 'boolean', enum: [true] } } },
+  RemoveRecipientsRequest: {
+    type: 'object',
+    required: ['recipients'],
+    properties: {
+      reason: { type: 'string', enum: [...REMOVE_REASONS], default: 'other' },
+      recipients: {
+        type: 'array',
+        minItems: 1,
+        maxItems: REMOVE_MAX_RECIPIENTS,
+        items: {
+          type: 'object',
+          description: 'Pelo menos um identificador.',
+          properties: {
+            phone: { type: 'string', description: 'Telefone com DDI; tolera o 9º dígito.' },
+            cpf: { type: 'string', description: 'CPF de um contato do CRM (com ou sem máscara). Nunca é devolvido.' },
+            reference: { type: 'string', maxLength: 64, description: '`reference` enviada no create da campanha.' },
+          },
+        },
+      },
+    },
+  },
+  RemoveRecipientsResponse: {
+    type: 'object',
+    properties: {
+      results: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            index: { type: 'integer' },
+            status: { type: 'string', enum: [...REMOVE_ENTRY_STATUSES] },
+            items: { type: 'integer', description: 'Itens da fila encontrados para o identificador.' },
+            message: { type: 'string', description: 'Só em `invalid`.' },
+          },
+        },
+      },
+      items_removed: { type: 'integer', description: 'Itens da fila cancelados nesta chamada.' },
+      removed: { type: 'integer' },
+      already_removed: { type: 'integer' },
+      in_flight: { type: 'integer' },
+      already_sent: { type: 'integer' },
+      not_found: { type: 'integer' },
+      invalid: { type: 'integer' },
+    },
+  },
   CampaignListItem: {
     type: 'object',
     properties: {
@@ -215,7 +465,8 @@ export const campaignSchemas: Record<string, Json> = {
       phone: { type: ['string', 'null'] },
       contact_id: { type: ['string', 'null'], format: 'uuid', description: 'Nulo em campanha criada pela API (contato externo).' },
       name: { type: ['string', 'null'] },
-      status: { type: 'string', enum: [...RECIPIENT_STATUSES], description: 'Estado atual (não cumulativo).' },
+      reference: { type: ['string', 'null'], description: '`reference` enviada no create da campanha, se houve.' },
+      status: { type: 'string', enum: [...RECIPIENT_STATUSES], description: 'Estado atual (não cumulativo). `removed`: tirado pela API antes do envio; `cancelled`: cancelado com a campanha.' },
       status_raw: { type: 'string', description: 'Valor interno da fila (`agendado`, `entregue`…).' },
       scheduled_at: { type: ['string', 'null'], format: 'date-time' },
       sent_at: { type: ['string', 'null'], format: 'date-time' },
