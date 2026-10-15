@@ -33,6 +33,8 @@ export async function processWithConcurrency<T>(
 
 export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 4;
 export const MAX_DISPATCH_PROCESS_CONCURRENCY = 150;
+/** Teto global do processo WORKER (2–3 números a 80/s ≈ 96 vagas cada); o teto por número (150) e o CHECK do banco não mudam. */
+export const WORKER_MAX_PROCESS_CONCURRENCY = 400;
 
 const warned = new Set<string>();
 function warnOnce(raw: string, message: string): void {
@@ -55,6 +57,7 @@ function warnOnce(raw: string, message: string): void {
  */
 export function resolveDispatchProcessConcurrency(
   raw = process.env.DISPATCH_PROCESS_CONCURRENCY,
+  max: number = MAX_DISPATCH_PROCESS_CONCURRENCY,
 ): number {
   if (raw == null || raw.trim() === "") return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
   const parsed = Number(raw);
@@ -63,9 +66,9 @@ export function resolveDispatchProcessConcurrency(
     return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
   }
   const whole = Math.floor(parsed);
-  const clamped = Math.min(MAX_DISPATCH_PROCESS_CONCURRENCY, Math.max(1, whole));
+  const clamped = Math.min(max, Math.max(1, whole));
   if (clamped !== parsed) {
-    warnOnce(raw, `fora da faixa inteira [1, ${MAX_DISPATCH_PROCESS_CONCURRENCY}]; usando ${clamped}`);
+    warnOnce(raw, `fora da faixa inteira [1, ${max}]; usando ${clamped}`);
   }
   return clamped;
 }

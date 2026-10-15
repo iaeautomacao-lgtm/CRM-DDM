@@ -80,7 +80,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function resolveThroughputConfig(env: Env = process.env): ThroughputConfig {
+export function resolveThroughputConfig(env: Env = process.env, options: { maxGlobalConcurrency?: number } = {}): ThroughputConfig {
   const generic = clamp(
     readInt(env, "DISPARADOR_PER_NUMBER_CONCURRENCY") ?? DB_DEFAULT_MAX_IN_FLIGHT,
     1,
@@ -102,7 +102,7 @@ export function resolveThroughputConfig(env: Env = process.env): ThroughputConfi
   const backoffFlag = (env.DISPARADOR_ADAPTIVE_BACKOFF ?? "").trim().toLowerCase();
   return {
     // Mesmo botão do pool antigo (PR #73): DISPATCH_PROCESS_CONCURRENCY.
-    globalConcurrency: resolveDispatchProcessConcurrency(env.DISPATCH_PROCESS_CONCURRENCY),
+    globalConcurrency: resolveDispatchProcessConcurrency(env.DISPATCH_PROCESS_CONCURRENCY, options.maxGlobalConcurrency),
     perNumber: { meta, waha, unknown: Math.min(meta, waha) },
     // Padrão 35 s; com o tick encadeado ligado (DISPARADOR_TICK_CHAIN) sobe para 50 s (duty ~95%; exige timeout do proxy ≥ 60 s).
     tickBudgetMs: clamp(readInt(env, "DISPARADOR_TICK_BUDGET_MS") ?? (isTickChainEnabled(env) ? 50_000 : 35_000), 5_000, 50_000),

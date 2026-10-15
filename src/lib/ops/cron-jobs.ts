@@ -12,6 +12,8 @@ export const CRON_JOBS = {
   billing: { every: 60, label: "Régua de cobrança" },
   channels_refresh_tokens: { every: 86_400, label: "Renovação de tokens dos canais" },
   conversations_retry_assignment: { every: 300, label: "Redistribuição de conversas" },
+  // Worker de envio (W3): só bate quando existe worker; sem batimento o cartão mostra "indisponível" (não é alarme).
+  dispatch_worker: { every: 30, label: "Worker de envio" },
 } as const;
 
 export type CronJob = keyof typeof CRON_JOBS;
