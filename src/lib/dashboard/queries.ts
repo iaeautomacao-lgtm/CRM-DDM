@@ -331,15 +331,18 @@ export async function legacyLoadResponseTime(db: DB): Promise<ResponseTimeSummar
 
 // --- 5. Activity feed --------------------------------------------------
 
-export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> {
+export async function loadActivity(db: DB, limit = 20, accountId?: string | null): Promise<ActivityItem[]> {
   // Pull ~10 from each source (plenty of headroom after merge-sort),
   // then interleave by timestamp. The individual per-table limits
   // keep the payload small; the final limit is enforced after sort.
+  // `account_id` na mensagem deixa o banco andar pelo índice (account_id, created_at DESC) e parar nas 10 primeiras;
+  // sem ele ordenava todas as mensagens de cliente da base antes de cortar (1,5 s). Mesmo resultado: a RLS já limitava à conta.
+  const msgsQuery = db
+    .from('messages')
+    .select('id, content_text, sender_type, created_at, conversation_id, conversations(contact_id, contacts(name, phone))')
+    .eq('sender_type', 'customer')
   const [msgs, contacts, deals, autoLogs] = await Promise.all([
-    db
-      .from('messages')
-      .select('id, content_text, sender_type, created_at, conversation_id, conversations(contact_id, contacts(name, phone))')
-      .eq('sender_type', 'customer')
+    (accountId ? msgsQuery.eq('account_id', accountId) : msgsQuery)
       .order('created_at', { ascending: false })
       .limit(10),
     db
