@@ -13,6 +13,7 @@ import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './open
 import { campaignDetailProperties, campaignListGet, campaignPaths, campaignSchemas, CAMPAIGN_CONTROL_GUIDE, CAMPAIGN_READ_GUIDE } from './openapi-campaigns';
 import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
 import { contactsPaths, contactsSchemas, contactsTags, CONTACTS_GUIDE } from './openapi-contacts';
+import { catalogosPaths, catalogosSchemas, catalogosTags, CATALOGOS_GUIDE } from './openapi-catalogos';
 import { templatesPaths, templatesSchemas, TEMPLATES_GUIDE } from './openapi-templates';
 
 type Json = Record<string, unknown>;
@@ -126,6 +127,7 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns`, `…/{id}/pause`, `…/{id}/resume`, `…/{id}/cancel` e `…/{id}/recipients/remove` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns`, `GET /disparador/campaigns/{id}` e `GET /disparador/campaigns/{id}/recipients`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+      '- `conversations:write` — controle do atendimento (abrir, encerrar e transferir conversas); os catálogos `GET /tabulations`, `/agents` e `/teams` aceitam `conversations:read` ou `conversations:write`.',
       '- `conversations:read` / `messages:read` — `GET /conversations`, `GET /conversations/{id}/messages` e `GET /messages` (extração para BI/auditoria; veja a seção própria abaixo).',
       '- `webhooks:read` / `webhooks:write` — `/webhooks*` (webhooks de saída assinados; veja a seção própria abaixo).',
       '- `GET /me` não exige escopo.',
@@ -146,7 +148,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE + CAMPAIGN_READ_GUIDE + TEMPLATES_GUIDE + CONTACTS_GUIDE + CAMPAIGN_CONTROL_GUIDE + CATALOGOS_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -157,6 +159,7 @@ export const openApiSpec = {
     ...webhookTags,
     ...extractTags,
     ...contactsTags,
+    ...catalogosTags,
   ],
   security: SECURITY,
   paths: {
@@ -164,6 +167,7 @@ export const openApiSpec = {
     ...extractPaths,
     ...campaignPaths,
     ...contactsPaths,
+    ...catalogosPaths,
     ...templatesPaths,
     '/me': {
       get: {
@@ -845,6 +849,7 @@ export const openApiSpec = {
       ...extractSchemas,
       ...campaignSchemas,
       ...contactsSchemas,
+      ...catalogosSchemas,
       ...templatesSchemas,
       Scope: {
         type: 'string',
@@ -855,6 +860,7 @@ export const openApiSpec = {
           'contacts:write',
           'templates:read',
           'conversations:read',
+          'conversations:write',
           'campaigns:write',
           'campaigns:read',
           'reports:read',

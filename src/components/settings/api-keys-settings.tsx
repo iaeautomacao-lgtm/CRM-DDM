@@ -89,6 +89,7 @@ const SCOPE_DESCRIPTIONS_PT: Partial<Record<ApiScope, string>> = {
   'contacts:read': 'Listar e ler contatos',
   'contacts:write': 'Criar e atualizar contatos',
   'conversations:read': 'Listar e ler conversas',
+  'conversations:write': 'Abrir, encerrar e transferir conversas',
   'campaigns:write': 'Criar e enfileirar campanhas',
   'campaigns:read': 'Ler status e métricas de campanhas',
   'intelligence:read': SCOPE_DESCRIPTIONS['intelligence:read'],

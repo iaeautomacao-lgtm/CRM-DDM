@@ -23,7 +23,7 @@ describe('referência montada da spec', () => {
   });
 
   it('agrupa pelas tags da spec, com âncora estável e sem grupo vazio', () => {
-    expect(ref.groups.map((g) => g.name)).toEqual(['Conta', 'Mensagens', 'Disparador', 'Relatórios', 'Webhooks', 'Extração', 'Contatos']);
+    expect(ref.groups.map((g) => g.name)).toEqual(['Conta', 'Mensagens', 'Disparador', 'Relatórios', 'Webhooks', 'Extração', 'Contatos', 'Atendimento']);
     expect(ref.groups.map((g) => g.id)).toContain('grupo-extracao');
     for (const g of ref.groups) expect(g.operations.length).toBeGreaterThan(0);
   });

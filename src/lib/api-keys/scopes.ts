@@ -19,6 +19,8 @@ export const API_SCOPES = [
   'contacts:read',
   'contacts:write',
   'conversations:read',
+  // Controle do atendimento (Onda 2 da API, 15/10): abrir, encerrar e transferir conversas. Os catálogos (GET /tabulations, /agents, /teams) aceitam também conversations:read.
+  'conversations:write',
   'campaigns:write',
   'campaigns:read',
   'reports:read',
@@ -42,6 +44,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'contacts:read': 'List and read contacts',
   'contacts:write': 'Create and update contacts',
   'conversations:read': 'List and read conversations',
+  'conversations:write': 'Open, close and transfer conversations (assign attendants and teams)',
   'campaigns:write': 'Create and enqueue Disparador campaigns',
   'campaigns:read': 'Read Disparador campaign status and metrics',
   'reports:read': 'Read aggregated CRM reporting and operational metrics',

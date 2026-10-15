@@ -297,6 +297,9 @@ export const RATE_LIMITS = {
   apiV1TemplateSend: { limit: 60, windowMs: 60_000 },
   /** GET/POST/PATCH /api/v1/contacts: leitura de dado pessoal (busca por CPF/telefone) 60/min por chave, além do limite geral. */
   apiV1ContactsRead: { limit: 60, windowMs: 60_000 },
+  // Onda 2: escrita de conversa (abrir/encerrar/transferir) e catálogos (nomes de atendentes), além dos 120/min gerais.
+  apiV1ConversationControl: { limit: 30, windowMs: 60_000 },
+  apiV1Catalog: { limit: 60, windowMs: 60_000 },
   /** Plano de segurança 13/10 (Âncora 1): rotas que gastam IA, banco ou a Meta/WAHA. Por usuário (ou conta, nas de admin). */
   aiSuggestTag: { limit: 20, windowMs: 60_000 },
   campaignStart: { limit: 10, windowMs: 60_000 },
