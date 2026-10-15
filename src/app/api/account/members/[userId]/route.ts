@@ -22,6 +22,7 @@ import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { isAccountRole } from "@/lib/auth/roles";
 import {
   checkRateLimit,
@@ -62,12 +63,13 @@ export async function PATCH(
     const { userId } = await params;
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown; max_simultaneous_chats?: unknown }
+      | { role?: unknown; max_simultaneous_chats?: unknown; mention_alias?: unknown }
       | null;
     const hasRole = body != null && "role" in body;
     const hasMaxChats = body != null && "max_simultaneous_chats" in body;
+    const hasMentionAlias = body != null && 'mention_alias' in body;
 
-    if (!hasRole && !hasMaxChats) {
+    if (!hasRole && !hasMaxChats && !hasMentionAlias) {
       return NextResponse.json(
         { error: "Provide 'role' and/or 'max_simultaneous_chats' to update" },
         { status: 400 },
@@ -125,6 +127,21 @@ export async function PATCH(
       if (error) return rpcErrorToResponse(error);
     }
 
+    if (hasMentionAlias) {
+      const alias = body!.mention_alias;
+      if (alias !== null && (typeof alias !== 'string' || !/^[a-z_][a-z0-9_]{1,31}$/.test(alias))) {
+        return NextResponse.json({ error: 'Alias deve conter 2 a 32 caracteres minúsculos, números ou _' }, { status: 400 });
+      }
+      const db = supabaseAdmin();
+      const { data: target, error: lookupError } = await db.from('profiles')
+        .select('account_role').eq('account_id', ctx.accountId).eq('user_id', userId).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (!target || target.account_role !== 'agent') return NextResponse.json({ error: 'Usuário não é operador desta conta' }, { status: 400 });
+      const { error: aliasError } = await db.from('profiles')
+        .update({ mention_alias: alias }).eq('account_id', ctx.accountId).eq('user_id', userId);
+      if (aliasError?.code === '23505') return NextResponse.json({ error: 'Alias já está em uso nesta conta' }, { status: 409 });
+      if (aliasError) throw aliasError;
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return toErrorResponse(err);
