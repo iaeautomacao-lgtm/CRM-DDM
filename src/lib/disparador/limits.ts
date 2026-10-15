@@ -14,8 +14,7 @@ import {
   resolveThroughputConfig,
   type DispatchProvider,
 } from "./throughput-config";
-import { isTickChainEnabled } from "./tick-chain";
-import { isBatchClaimEnabled } from "./batch-claim";
+import { envWithEngineFlags, loadEngineFlagRows, resolveEngineFlag, type EngineFlagRow } from "./engine-flags";
 import { listRateLimits } from "./rate-limits-service";
 import { loadChannelIdentities, type ChannelIdentity } from "./channel-label";
 
@@ -199,6 +198,9 @@ export interface GlobalSettings {
   tickBudgetSeconds: number;
   tickChainEnabled: boolean;
   batchClaimEnabled: boolean;
+  /** De onde vem cada chave: account = decisão pela tela (migration 366); env = ambiente; default = nada definido (desligado). */
+  tickChainSource: "account" | "env" | "default";
+  batchClaimSource: "account" | "env" | "default";
   adaptiveBackoff: boolean;
   perNumberDefaults: { meta: number; waha: number };
 }
@@ -324,13 +326,18 @@ export async function loadRateHistory(db: LimitsDb, accountId: string, labels: M
   }));
 }
 
-export function readGlobals(env: Record<string, string | undefined> = process.env): GlobalSettings {
-  const cfg = resolveThroughputConfig(env);
+export function readGlobals(env: Record<string, string | undefined> = process.env, flags: readonly EngineFlagRow[] = []): GlobalSettings {
+  const effectiveEnv = envWithEngineFlags(env, flags);
+  const cfg = resolveThroughputConfig(effectiveEnv);
+  const tickChain = resolveEngineFlag("tick_chain", flags, env);
+  const batchClaim = resolveEngineFlag("batch_claim", flags, env);
   return {
     processConcurrency: cfg.globalConcurrency,
     tickBudgetSeconds: Math.round(cfg.tickBudgetMs / 1000),
-    tickChainEnabled: isTickChainEnabled(env),
-    batchClaimEnabled: isBatchClaimEnabled(env),
+    tickChainEnabled: tickChain.enabled,
+    batchClaimEnabled: batchClaim.enabled,
+    tickChainSource: tickChain.source,
+    batchClaimSource: batchClaim.source,
     adaptiveBackoff: cfg.adaptiveBackoff,
     perNumberDefaults: { meta: cfg.perNumber.meta, waha: cfg.perNumber.waha },
   };
@@ -397,7 +404,7 @@ export async function loadLimitsOverview(
   accountId: string,
   env: Record<string, string | undefined> = process.env,
 ): Promise<LimitsOverview> {
-  const globals = readGlobals(env);
+  const globals = readGlobals(env, await loadEngineFlagRows(db as never));
   const configs = await loadConfigs(db, accountId);
   const { rows, pauseSupported } = await loadLimitRows(db, configs.map((c) => c.id));
 
