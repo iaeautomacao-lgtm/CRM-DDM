@@ -28,6 +28,7 @@ import { beginShutdown } from "@/lib/disparador/shutdown-gate";
 import type { Campaign } from "@/lib/disparador/processQueue";
 import { recordCronHeartbeat } from "@/lib/ops/cron-heartbeat";
 import { writeLog } from "@/lib/logger";
+import { formatWorkerEvent } from "./log";
 
 type Env = Record<string, string | undefined>;
 type Db = SupabaseClient;
@@ -142,7 +143,7 @@ export class DispatchWorker {
     this.config = deps.config ?? resolveWorkerConfig(this.env);
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-    this.log = deps.log ?? ((event, payload) => console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...payload })));
+    this.log = deps.log ?? ((event, payload) => console.log(formatWorkerEvent(event, payload)));
     this.sendStage = deps.sendStage ?? runSendStage;
     this.heartbeat =
       deps.heartbeat ?? (async (durationMs) => recordCronHeartbeat("dispatch_worker", { status: "ok", durationMs }, this.db as never));

@@ -8,6 +8,7 @@
 import { assertLoadTestGate } from "@/lib/loadtest/gate";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { DispatchWorker, MigrationRequiredError, WORKER_VERSION } from "./dispatch-worker";
+import { formatWorkerEvent } from "./log";
 
 const REQUIRED_ENV = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ENCRYPTION_KEY"] as const;
 /** Limite duro: se a parada limpa não terminar, o processo sai mesmo assim (o systemd também mata em TimeoutStopSec). */
@@ -42,7 +43,7 @@ async function start(): Promise<void> {
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(JSON.stringify({ ts: new Date().toISOString(), event: "dispatch_worker_signal", signal }));
+    console.log(formatWorkerEvent("dispatch_worker_signal", { signal }));
     const hard = setTimeout(() => process.exit(1), HARD_EXIT_MS);
     hard.unref();
     void worker.stop().finally(() => process.exit(0));
