@@ -129,11 +129,10 @@ export function MonthlyCostsDashboard() {
             id="cost-month" type="month" value={month} onChange={e=>setMonth(e.target.value)}
             className="h-9 w-40" min="2025-01" max="2100-12"
           />
-          <Button asChild variant="outline" size="sm" disabled={loading || !report}>
-            <a href={"/api/dashboard/costs?month="+encodeURIComponent(month)+"&format=csv"}
-               aria-label={"Exportar custos de "+month+" em CSV"}>
-              <Download className="size-4" /> Exportar mês (CSV)
-            </a>
+          <Button variant="outline" size="sm" disabled={loading || !report}
+            onClick={() => { window.location.href="/api/dashboard/costs?month="+encodeURIComponent(month)+"&format=csv" }}
+            aria-label={"Exportar custos de "+month+" em CSV"}>
+            <Download className="size-4" /> Exportar mês (CSV)
           </Button>
         </div>
       </div>
