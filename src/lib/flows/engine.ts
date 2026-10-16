@@ -45,6 +45,7 @@ import {
 } from "./agent-picker";
 import { filterAvailableAgents, isAgentPaused } from "@/lib/pausas/availability";
 import { hasMentionReservation } from "@/lib/inbox/agent-mention-server";
+import { lostToReservation, runUnlessReserved } from "@/lib/inbox/reservation-guard";
 import { preferredContactOwner, type OwnerPreferenceInput } from "@/lib/carteira/owner-preference";
 
 type OwnerContext = Pick<OwnerPreferenceInput, "contactId" | "conversationId">;
@@ -1741,7 +1742,8 @@ export async function selectAnyAgentForAccount(
  * never touched directly (though `selectAgentForTeam` may still
  * populate `assigned_agent_id` with an auto-picked agent below).
  */
-async function executeHandoffTeam(
+// exportada só para o teste da reserva do @operador (src/lib/flows/handoff-team-reserva.test.ts)
+export async function executeHandoffTeam(
   db: AdminClient,
   run: FlowRunRow,
   node: FlowNodeRow,
@@ -1777,10 +1779,14 @@ async function executeHandoffTeam(
       convUpdate.assigned_agent_id = selectedAgent ?? null;
     }
     if (run.conversation_id && !reservedByMention) {
-      await db
-        .from("conversations")
-        .update(convUpdate)
-        .eq("id", run.conversation_id);
+      const convId = run.conversation_id;
+      // Guarda na própria gravação (menção que chega depois da leitura acima não perde a reserva); sem a 376 refaz sem o guarda.
+      const written = await runUnlessReserved<unknown[]>((guard) => {
+        let q = db.from("conversations").update(convUpdate).eq("id", convId);
+        if (guard) q = q.is("requested_agent_id", null);
+        return q.select("id");
+      });
+      if (lostToReservation(written)) selectedAgent = null;
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

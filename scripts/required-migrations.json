@@ -601,6 +601,10 @@
     {
       "version": "380_ai_costs_by_feature",
       "kind": "registry"
+    },
+    {
+      "version": "382_seguranca_carteira_mfa_reserva",
+      "kind": "registry"
     }
   ]
 }
