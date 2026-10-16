@@ -9,7 +9,7 @@ selectedRoles(); // valida E2E_ROLES cedo
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["auth.setup.ts", "telas.spec.ts"],
+  testMatch: ["auth.setup.ts", "telas.spec.ts", "fluxos.spec.ts"],
   outputDir: "e2e/test-results",
   fullyParallel: true,
   workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : 4,
@@ -31,6 +31,13 @@ export default defineConfig({
     {
       name: "telas",
       testMatch: "telas.spec.ts",
+      dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      // Fluxos das telas novas (e2e/fluxos.spec.ts): login do admin + rotas simuladas. Rodar: E2E_ROLES=admin npm run e2e:fluxos
+      name: "fluxos",
+      testMatch: "fluxos.spec.ts",
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
