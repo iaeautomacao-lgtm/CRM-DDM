@@ -53,20 +53,34 @@ export async function loadExtras(db: Db, rows: ContactDbRow[]): Promise<Map<stri
   return map;
 }
 
-/** Carteira fixa (migration 372): dono de cada contato. Lido à parte para que a API de contatos continue funcionando sem a migration (coluna ausente = sem dono). */
+/**
+ * Carteira fixa (migration 372): dono de cada contato. Lido à parte para que a API de contatos continue funcionando sem a migration (coluna ausente = sem dono).
+ * Segurança (revisão de 16/10, M2): o perfil do dono é lido SEMPRE da mesma conta do contato; um owner_user_id que aponte para alguém de outra conta
+ * não aparece (nem o id nem o nome), em vez de devolver o nome de um usuário de fora.
+ */
 async function attachOwners(db: Db, rows: ContactDbRow[], map: Map<string, ContactExtras>): Promise<void> {
-  const owners = new Map<string, string>();
+  const owners = new Map<string, { userId: string; accountId: string }>();
   for (const ids of chunks(rows.map((r) => r.id), 100)) {
-    const { data, error } = await db.from('contacts').select('id, owner_user_id').in('id', ids);
+    const { data, error } = await db.from('contacts').select('id, account_id, owner_user_id').in('id', ids);
     if (error) return;
-    for (const r of (data ?? []) as Array<{ id: string; owner_user_id?: string | null }>) if (r.owner_user_id) owners.set(r.id, r.owner_user_id);
+    for (const r of (data ?? []) as Array<{ id: string; account_id: string; owner_user_id?: string | null }>) {
+      if (r.owner_user_id && r.account_id) owners.set(r.id, { userId: r.owner_user_id, accountId: r.account_id });
+    }
   }
   if (owners.size === 0) return;
-  const { data: profiles } = await db.from('profiles').select('user_id, full_name').in('user_id', [...new Set(owners.values())]);
-  const names = new Map(((profiles ?? []) as Array<{ user_id: string; full_name: string | null }>).map((p) => [p.user_id, (p.full_name ?? '').trim() || 'Atendente']));
-  for (const [contactId, userId] of owners) {
+  const { data: profiles } = await db
+    .from('profiles')
+    .select('user_id, account_id, full_name')
+    .in('user_id', [...new Set([...owners.values()].map((o) => o.userId))])
+    .in('account_id', [...new Set([...owners.values()].map((o) => o.accountId))]);
+  const names = new Map(
+    ((profiles ?? []) as Array<{ user_id: string; account_id: string; full_name: string | null }>).map((p) => [`${p.account_id}:${p.user_id}`, (p.full_name ?? '').trim() || 'Atendente']),
+  );
+  for (const [contactId, o] of owners) {
+    const name = names.get(`${o.accountId}:${o.userId}`);
+    if (name === undefined) continue; // dono sem perfil nesta conta (ex.: usuário de outra conta): não expõe
     const extras = map.get(contactId);
-    if (extras) extras.owner = { id: userId, name: names.get(userId) ?? 'Atendente' };
+    if (extras) extras.owner = { id: o.userId, name };
   }
 }
 

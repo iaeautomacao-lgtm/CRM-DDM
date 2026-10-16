@@ -96,3 +96,42 @@ describe("sem a migration 376 (coluna requested_agent_id inexistente)", () => {
     expect(state.searches).toEqual([true]);
   });
 });
+
+describe("guarda da reserva (@operador, 376) nas gravações do cron — revisão de segurança 16/10, M6", () => {
+  const reservedGuards = () => state.isCalls.filter(([col, val]) => col === "requested_agent_id" && val === null).length;
+  const pendingOne = () => {
+    state.pending = { data: [{ id: "c1", team_id: "t", account_id: "a", contact_id: "ct" }], error: null };
+  };
+
+  it("o UPDATE de atribuição leva .is('requested_agent_id', null) (além da busca): reserva que chega depois da escolha não é desfeita", async () => {
+    pendingOne();
+    state.updates = [{ data: [{ id: "c1" }], error: null }];
+    const res = await call();
+    expect(await res.json()).toMatchObject({ assigned: 1 });
+    expect(reservedGuards()).toBe(2); // busca + gravação
+  });
+
+  it("reserva apareceu entre a leitura e a gravação: o UPDATE não atualiza nada, não conta como atribuída", async () => {
+    pendingOne();
+    state.updates = [{ data: [], error: null }];
+    const res = await call();
+    expect(await res.json()).toMatchObject({ retried: 1, assigned: 0 });
+  });
+
+  it("sem a 376 na gravação (coluna ausente): refaz sem o guarda e atribui", async () => {
+    pendingOne();
+    state.updates = [{ data: null, error: { code: "42703", message: "column does not exist" } as never }, { data: [{ id: "c1" }], error: null }];
+    const res = await call();
+    expect(await res.json()).toMatchObject({ assigned: 1 });
+    expect(reservedGuards()).toBe(2); // busca + 1ª gravação (a 2ª, de reserva, vai sem o guarda)
+  });
+
+  it("sem agente disponível: o adiamento (assignment_retry_at) também leva o guarda e não conta atribuição", async () => {
+    pendingOne();
+    state.agent = null;
+    state.updates = [{ data: [{ id: "c1" }], error: null }];
+    const res = await call();
+    expect(await res.json()).toMatchObject({ retried: 1, assigned: 0 });
+    expect(reservedGuards()).toBe(2); // busca + adiamento
+  });
+});

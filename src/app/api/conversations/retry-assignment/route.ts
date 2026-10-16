@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { selectAgentForTeam, selectAnyAgentForAccount } from "@/lib/flows/engine";
+import { runUnlessReserved } from "@/lib/inbox/reservation-guard";
 
 async function handlePost(request: Request) {
   // Auth: reutiliza AUTOMATION_CRON_SECRET (mesmo padrão de
@@ -66,22 +67,31 @@ async function handlePost(request: Request) {
         : await selectAnyAgentForAccount(db, conv.account_id, ownerCtx);
 
       if (!agentId) {
-        const { error: retryError } = await db.from('conversations')
-          .update({ assignment_retry_at: new Date(Date.now() + 5 * 60_000).toISOString() })
-          .eq('id', conv.id).is('assigned_agent_id', null);
+        // Guardas: ainda sem atendente E sem reserva do @operador (menção que chegou depois da leitura não é desfeita; sem a 376 o guarda cai).
+        const { error: retryError } = await runUnlessReserved<unknown[]>((guard) => {
+          let q = db.from('conversations')
+            .update({ assignment_retry_at: new Date(Date.now() + 5 * 60_000).toISOString() })
+            .eq('id', conv.id).is('assigned_agent_id', null);
+          if (guard) q = q.is('requested_agent_id', null);
+          return q.select('id');
+        });
         if (retryError) throw retryError;
         continue;
       }
 
-      const { data: updated, error: assignError } = await db
-        .from("conversations")
-        .update({
-          assigned_agent_id: agentId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conv.id)
-        .is("assigned_agent_id", null) // guard: só atualiza se ainda null
-        .select("id");
+      const { data: updated, error: assignError } = await runUnlessReserved<unknown[]>((guard) => {
+        let q = db
+          .from("conversations")
+          .update({
+            assigned_agent_id: agentId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conv.id)
+          .is("assigned_agent_id", null); // guard: só atualiza se ainda null
+        // guard da reserva (@operador, 376): se a menção chegou entre a escolha do agente e esta gravação, a conversa fica na fila do reservado
+        if (guard) q = q.is("requested_agent_id", null);
+        return q.select("id");
+      });
       if (assignError) throw assignError;
       // Outra execução (ou um operador) pegou a conversa antes: o guard não atualizou nada.
       if (!updated || updated.length === 0) continue;
