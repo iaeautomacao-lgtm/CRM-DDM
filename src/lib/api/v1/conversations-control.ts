@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError, notFound } from '@/lib/api/v1/respond';
 import { pausedAgentIds } from '@/lib/pausas/availability';
+import { completeAssignmentAudit } from '@/lib/conversations/assignment-audit';
 
 type Db = SupabaseClient;
 const unavailable = (what: string) => new ApiError('unavailable', `Não foi possível ${what}; tente novamente`, 503);
@@ -119,7 +120,10 @@ export async function transferConversation(db: Db, a: TransferArgs): Promise<{ c
   if (a.teamId !== undefined && a.teamId !== c.team_id) patch.team_id = a.teamId;
   if (Object.keys(patch).length === 0) return { conversation: c, changed: false, pausedConfirmed: false };
 
-  const startedAt = new Date().toISOString();
+  // De (antes do UPDATE) → para (o que ele devolver): a linha do histórico é achada por isso (B6).
+  const fromAgent = c.assigned_agent_id ?? null;
+  const fromTeam = c.team_id ?? null;
+
   const { data, error } = await db.from('conversations').update(patch).eq('id', c.id).eq('account_id', a.accountId).neq('status', 'closed').select(CONVERSATION_COLUMNS);
   if (error) throw unavailable('transferir a conversa');
   const updated = ((data ?? [])[0] as ConversationRow | undefined) ?? null;
@@ -127,18 +131,16 @@ export async function transferConversation(db: Db, a: TransferArgs): Promise<{ c
 
   // Completa a linha que o trigger acabou de gravar (ator = quem criou a chave; motivo e marca de pausa confirmada).
   const note = pausedConfirmed ? `(atendente em pausa, confirmado)${a.reason ? ` ${a.reason}` : ''}`.slice(0, 500) : a.reason;
-  const { data: rows } = await db
-    .from('conversation_assignments')
-    .select('id')
-    .eq('conversation_id', c.id)
-    .is('actor_id', null)
-    .gte('created_at', startedAt)
-    .order('created_at', { ascending: false })
-    .limit(1);
-  const row = ((rows ?? [])[0] as { id: string } | undefined) ?? null;
-  if (row && (a.actorUserId || note)) {
-    await db.from('conversation_assignments').update({ ...(a.actorUserId ? { actor_id: a.actorUserId } : {}), ...(note ? { reason: note } : {}) }).eq('id', row.id);
-  }
+  // Achada pelo de→para deste UPDATE, não pelo relógio do Node (B6).
+  await completeAssignmentAudit(db, {
+    conversationId: c.id,
+    fromAgent,
+    fromTeam,
+    toAgent: updated.assigned_agent_id ?? null,
+    toTeam: updated.team_id ?? null,
+    actorId: a.actorUserId,
+    reason: note,
+  });
   return { conversation: updated, changed: true, pausedConfirmed };
 }
 

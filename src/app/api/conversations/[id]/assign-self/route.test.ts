@@ -56,7 +56,8 @@ const call = (id = CONV) => POST(new Request('http://x', { method: 'POST' }), { 
 beforeEach(() => {
   for (const k of Object.keys(tables)) delete tables[k]
   tables.conversations = [{ id: CONV, account_id: 'acc-1', status: 'open', assigned_agent_id: null, team_id: 'team-1' }]
-  tables.conversation_assignments = [{ id: 'a1', conversation_id: CONV, actor_id: null, created_at: new Date(Date.now() + 1000).toISOString() }]
+  // linha do trigger (128): de→para completo; o created_at do BANCO pode estar bem ANTES do relógio do Node (B6): a rota não depende de horário
+  tables.conversation_assignments = [{ id: 'a1', conversation_id: CONV, from_agent_id: null, to_agent_id: ME, from_team_id: 'team-1', to_team_id: 'team-1', actor_id: null, created_at: new Date(Date.now() - 3_600_000).toISOString() }]
   denied = false
   visibleToUser = true
   raceStealer = null

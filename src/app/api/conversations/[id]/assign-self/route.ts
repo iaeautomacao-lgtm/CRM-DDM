@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { completeAssignmentAudit } from '@/lib/conversations/assignment-audit'
 
 // POST /api/conversations/[id]/assign-self   (PRD 24, item 1 — "Assumir" / abas Minhas · Fila · Todas)
 //
@@ -45,7 +46,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     }
 
     const db = supabaseAdmin()
-    const startedAt = new Date().toISOString()
     const { data: updated, error } = await db
       .from('conversations')
       .update({ assigned_agent_id: userId })
@@ -72,17 +72,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'A conversa já tem outro atendente', code: 'already_assigned' }, { status: 409 })
     }
 
-    // Completa o ator na linha de histórico que o trigger acabou de gravar (actor_id nulo sob service role).
-    const { data: rows } = await db
-      .from('conversation_assignments')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .is('actor_id', null)
-      .gte('created_at', startedAt)
-      .order('created_at', { ascending: false })
-      .limit(1)
-    const row = rows?.[0]
-    if (row) await db.from('conversation_assignments').update({ actor_id: userId, reason: 'Assumiu a conversa' }).eq('id', row.id)
+    // Completa o ator na linha de histórico que o trigger acabou de gravar (actor_id nulo sob service role): achada pelo de→para deste UPDATE (B6).
+    await completeAssignmentAudit(db, {
+      conversationId,
+      fromAgent: null,
+      fromTeam: current.team_id ?? null,
+      toAgent: userId,
+      toTeam: conversation.team_id ?? null,
+      actorId: userId,
+      reason: 'Assumiu a conversa',
+    })
 
     return NextResponse.json({ conversation, already_mine: false })
   } catch (err) {

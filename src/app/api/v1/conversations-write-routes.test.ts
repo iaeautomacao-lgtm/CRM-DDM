@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   lock: 'ok' as 'ok' | 'missing' | 'broken' | 'race',
   raceAssignee: null as string | null,
   rpcCalls: [] as any[],
+  wahaError: null as unknown,
   createdBy: null as string | null,
   rate: true,
   seq: 0,
@@ -70,7 +71,7 @@ class Q {
           if (r.status === 'closed' && !r.closed_at) r.closed_at = new Date().toISOString()
           // trigger log_conversation_assignment (ator nulo sob service role)
           if (before.assigned_agent_id !== r.assigned_agent_id || before.team_id !== r.team_id) {
-            h.db.conversation_assignments.push({ id: U(2000 + ++h.seq), conversation_id: r.id, actor_id: null, reason: null, created_at: new Date().toISOString() })
+            h.db.conversation_assignments.push({ id: U(2000 + ++h.seq), conversation_id: r.id, from_agent_id: before.assigned_agent_id ?? null, to_agent_id: r.assigned_agent_id ?? null, from_team_id: before.team_id ?? null, to_team_id: r.team_id ?? null, actor_id: null, reason: null, created_at: new Date().toISOString() })
           }
         }
       }
@@ -142,7 +143,7 @@ vi.mock('@/lib/whatsapp/meta-api', async (orig) => ({
 }))
 vi.mock('@/lib/whatsapp/waha-api', async (orig) => ({
   ...(await orig<typeof import('@/lib/whatsapp/waha-api')>()),
-  sendWahaTextMessage: async (cfg: any, phone: string, text: string) => { h.sent.push({ kind: 'waha-text', cfg, phone, text }); return { messageId: 'waha-1' } },
+  sendWahaTextMessage: async (cfg: any, phone: string, text: string) => { if (h.wahaError) throw h.wahaError; h.sent.push({ kind: 'waha-text', cfg, phone, text }); return { messageId: 'waha-1' } },
 }))
 vi.mock('@/lib/disparador/send-ledger', () => ({
   runIdempotentSend: async (_a: string, request: Request, work: (ctl: any) => Promise<Response>) => {
@@ -606,5 +607,22 @@ describe('POST /conversations — escopos adicionais (M1) e corrida (M4) da revi
     h.lock = 'broken'
     expect((await open({ contact_id: CONTACT, assignee_id: AGENT })).status).toBe(503)
     expect(h.db.conversations).toEqual([])
+  })
+})
+
+describe('B7 (revisão 16/10): erro do WAHA não vai cru ao integrador', () => {
+  it('502 com mensagem fixa e reason estável; o detalhe (com telefone) só no log, mascarado', async () => {
+    h.db.whatsapp_config = [WAHA_CH]
+    h.wahaError = new Error('Request failed for chatId 5527999991212@c.us: session sess1 not ready (internal host 10.0.0.5)')
+    const res = await open({ phone: '+5527999991212', assignee_id: AGENT, message: { text: 'Olá' } }, idem)
+    expect(res.status).toBe(502)
+    const body = await json(res)
+    expect(body.error).toMatchObject({ code: 'internal', reason: 'waha_send_failed' })
+    expect(body.error.message).toMatch(/canal WAHA/)
+    expect(JSON.stringify(body)).not.toMatch(/5527999991212|chatId|10\.0\.0\.5|not ready/)
+    const logged = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => c.join(' ')).join('\n')
+    expect(logged).toMatch(/falha no envio pelo WAHA/)
+    expect(logged).not.toMatch(/5527999991212/)
+    h.wahaError = null
   })
 })
