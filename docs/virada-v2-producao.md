@@ -30,6 +30,12 @@ O crontab é **um só** para o usuário da VPS e mistura V1, V2 e outros sistema
 ### 2.2 Banco
 - [ ] Decidir qual banco fica: manter o da V2 (`mkrkkv…`) ou migrar dados da V1 (`cyftbff…`). Se a V2 apontar para o banco
       da V1, **todas** as migrations da V2 precisam estar aplicadas nele antes (conferir com `npm run schema:check`).
+- [ ] **376 e 377 vieram da V1 (16/10)** — detalhes em `prd-v2/virada-v1-376-377.md`:
+  - A `main` (V1) tem a `376_agent_mention_queue.sql` (PR #476); a branch `feat/v1-dashboard-monthly-ai-meta-costs-20261015` tem a `377_dashboard_costs.sql`. A v2 não tinha nenhuma das duas. **Próximo número livre na v2: 378** (369 reservado ao Farol/W4).
+  - Antes de aplicar, conferir no schema vivo da produção se a 376 já foi aplicada (arquivos de migration não são fonte de verdade).
+  - Ordem no banco da V1: o que falta da v2 (faixa 304–375, em ordem numérica) → **376** → **378** (metade de IA da 377, se for portada). Não aplicar a 377 original por cima da v2: ela duplica a 195 (custo Meta) e reescreve `ingest_status_events`.
+  - A migration 376 vai **antes** do código do `@operador`. O código do #476 ainda **não existe na v2**: portar `agent-mention*.ts`, o gancho em `inbound-message.ts` e na rota WAHA, o filtro `requested_agent_id IS NULL` do `retry-assignment` e o campo no PATCH de membros (lista completa no relatório).
+  - Decisões do dono: menção a operador em pausa espera ou cai na distribuição (371)? Custo Meta da V2 vem da 195 ou da 377?
 
 ### 2.3 Crons (crontab da VPS)
 - [ ] Em `~/.crm-cron-v2.env`, trocar `APP=` para o domínio de produção. As 11 linhas da V2 leem dali; não precisa mexer nelas.
