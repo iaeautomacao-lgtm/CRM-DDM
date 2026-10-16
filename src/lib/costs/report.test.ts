@@ -17,8 +17,8 @@ describe("relatório de custo de IA", () => {
   });
   it("CSV protege contra injeção de fórmula e traz o aviso de estimativa", () => {
     const csv = aiCostReportCsv(normalizeAiCostReport("2026-10", rows, []));
-    expect(csv).toContain(`"'=cmd|calc"`);
+    expect(csv).toContain("'=cmd|calc");
     expect(csv).toContain("Observacao: Valores estimados");
-    expect(csv.startsWith("﻿")).toBe(true);
+    expect(csv.startsWith("﻿")).toBe(false); // o BOM é posto pela rota de download (CSV_BOM)
   });
 });

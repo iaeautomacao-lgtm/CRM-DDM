@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { aiCostReportCsv, normalizeAiCostReport } from '@/lib/costs/report'
+import { CSV_BOM } from '@/lib/security/csv-safe'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
 
     const report = normalizeAiCostReport(month, summary.data, rates.data)
     if (url.searchParams.get('format') === 'csv') {
-      return new Response(aiCostReportCsv(report), {
+      return new Response(CSV_BOM + aiCostReportCsv(report), {
         status: 200,
         headers: { ...HEADERS, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="custos-ia-${month}.csv"` },
       })

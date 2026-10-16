@@ -73,5 +73,6 @@ describe("GET /api/costs/ai", () => {
     const res = await GET(req("?month=2026-10&format=csv"));
     expect(res.headers.get("content-type")).toMatch(/text\/csv/);
     expect(res.headers.get("content-disposition")).toContain("custos-ia-2026-10.csv");
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()).slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]); // BOM UTF-8 (res.text() o remove)
   });
 });

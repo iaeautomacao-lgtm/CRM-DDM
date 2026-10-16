@@ -1,6 +1,8 @@
 // Relatório mensal de custo de IA (migration 378). ESTIMATIVA, não fatura: tarifa configurada × tokens informados pelo provedor.
 // Sem tarifa para o item = "sem preço" (contagem), nunca zero. Nunca soma USD com BRL. O custo Meta NÃO está aqui: vem da 195
 // (GET /api/disparador/desempenho/custo).
+import { csvLine } from '@/lib/security/csv-safe'
+
 export interface AiCostRow {
   sku: string
   requests: number
@@ -76,19 +78,13 @@ export function normalizeAiCostReport(month: string, rows: unknown, rates: unkno
   }
 }
 
-/** CSV para Excel (separador ;), com proteção contra injeção de fórmula nas células de texto. */
-function csvCell(value: unknown): string {
-  const raw = String(value ?? '')
-  const safe = /^[\t\r\n\s]*[=+@-]/.test(raw) ? "'" + raw : raw
-  return '"' + safe.replace(/"/g, '""') + '"'
-}
-
+/** CSV para Excel (separador ;, CRLF) pelo helper seguro do projeto (neutraliza fórmula). Sem BOM: a rota de download põe CSV_BOM. */
 export function aiCostReportCsv(report: MonthlyAiCostReport): string {
   const cols = ['mes', 'item', 'moeda', 'chamadas', 'valor_estimado', 'sem_tarifa', 'tokens_entrada', 'tokens_saida', 'tokens_cache']
-  const lines = [cols.map(csvCell).join(';')]
+  const lines = [csvLine(cols)]
   for (const r of report.ai) {
-    lines.push([report.month, r.sku, 'USD', r.requests, r.priced_usd.toFixed(8).replace('.', ','), r.unpriced, r.input_tokens, r.output_tokens, r.cached_input_tokens].map(csvCell).join(';'))
+    lines.push(csvLine([report.month, r.sku, 'USD', r.requests, r.priced_usd.toFixed(8).replace('.', ','), r.unpriced, r.input_tokens, r.output_tokens, r.cached_input_tokens]))
   }
-  lines.push([report.month, 'Observacao: ' + report.notice, '', '', '', '', '', '', ''].map(csvCell).join(';'))
-  return '﻿' + lines.join('\r\n') + '\r\n'
+  lines.push(csvLine([report.month, 'Observacao: ' + report.notice, '', '', '', '', '', '', '']))
+  return lines.join('')
 }
