@@ -92,6 +92,44 @@ describe("createEndpoint", () => {
   });
 });
 
+describe("B8 (revisão 16/10): evento com dado do cliente exige o escopo de leitura da chave", () => {
+  const auth = (scopes: string[]) => ({ scopes, accountId: "A", keyId: "K1" });
+  const base = { accountId: "A", keyId: "K1", url: "https://x.example/h" };
+
+  it("criar: conversation.* exige conversations:read e campaign.reply exige messages:read (403, nada gravado)", async () => {
+    for (const [events, needs] of [
+      [["conversation.opened"], "conversations:read"],
+      [["conversation.assigned", "message.received"], "conversations:read"],
+      [["campaign.reply"], "messages:read"],
+    ] as Array<[string[], string]>) {
+      calls = [];
+      await expect(createEndpoint(db(), { ...base, events, keyAuth: auth(["webhooks:write"]) })).rejects.toMatchObject({ status: 403, code: "forbidden", message: expect.stringContaining(needs) });
+      expect(calls.some((c) => c.op === "insert")).toBe(false);
+    }
+    // com os dois eventos e nenhum escopo: a mensagem cita os dois
+    await expect(createEndpoint(db(), { ...base, events: ["conversation.opened", "campaign.reply"], keyAuth: auth(["webhooks:write"]) })).rejects.toMatchObject({ message: expect.stringMatching(/conversations:read.*messages:read|messages:read.*conversations:read/) });
+  });
+
+  it("criar: com o escopo de leitura (ou sem eventos restritos, ou pelo painel) cadastra", async () => {
+    results["webhook_endpoints:select"] = { count: 0 };
+    results["webhook_endpoints:insert"] = { data: [view] };
+    await expect(createEndpoint(db(), { ...base, events: ["conversation.opened", "conversation.assigned"], keyAuth: auth(["webhooks:write", "conversations:read"]) })).resolves.toMatchObject({ id: view.id });
+    await expect(createEndpoint(db(), { ...base, events: ["campaign.reply"], keyAuth: auth(["webhooks:write", "messages:read"]) })).resolves.toMatchObject({ id: view.id });
+    await expect(createEndpoint(db(), { ...base, events: ["message.received", "campaign.started"], keyAuth: auth(["webhooks:write"]) })).resolves.toMatchObject({ id: view.id }); // eventos de antes: sem exigência nova
+    await expect(createEndpoint(db(), { ...base, keyId: null, events: ["conversation.opened", "campaign.reply"] })).resolves.toMatchObject({ id: view.id }); // painel (sessão de admin): sem escopo
+  });
+
+  it("alterar events: mesma regra; alterar outro campo não revalida", async () => {
+    results["webhook_endpoints:select"] = { data: [view] };
+    results["webhook_endpoints:update"] = { data: [view] };
+    await expect(updateEndpoint(db(), "A", view.id, { events: ["campaign.reply"] }, auth(["webhooks:write"]))).rejects.toMatchObject({ status: 403, message: expect.stringContaining("messages:read") });
+    expect(calls.some((c) => c.op === "update")).toBe(false);
+    await expect(updateEndpoint(db(), "A", view.id, { events: ["campaign.reply"] }, auth(["webhooks:write", "messages:read"]))).resolves.toBeTruthy();
+    await expect(updateEndpoint(db(), "A", view.id, { status: "paused" }, auth(["webhooks:write"]))).resolves.toBeTruthy();
+    await expect(updateEndpoint(db(), "A", view.id, { events: ["conversation.assigned"] })).resolves.toBeTruthy(); // painel
+  });
+});
+
 describe("leitura, alteração e exclusão (sempre escopadas pela conta)", () => {
   it("list/get nunca selecionam o segredo e filtram por conta", async () => {
     results["webhook_endpoints:select"] = { data: [view] };

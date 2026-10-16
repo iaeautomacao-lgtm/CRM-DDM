@@ -129,6 +129,31 @@ describe("PUT /api/costs/ai/rates", () => {
     expect(mocks.calls.some((c) => c.op === "update" || c.op === "insert")).toBe(false);
     expect(mocks.audit).not.toHaveBeenCalled();
   });
+  it("B2 (revisão 16/10): tarifa nova com data de hoje ou do passado NÃO reprecifica o consumo quando o modelo já tem tarifa em vigor (409)", async () => {
+    const monthStart = `${today.slice(0, 7)}-01`;
+    for (const date of [today, monthStart]) {
+      mocks.calls.length = 0;
+      queue("cost_rates", "select", [{ id: "old", effective_from: "2026-01-01" }]); // tarifa em vigor (começou antes)
+      const res = await put({ ...good, effective_from: date });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toMatch(/já tem uma tarifa em vigor/);
+      expect(mocks.calls.some((c) => c.op === "insert" || c.op === "update")).toBe(false);
+    }
+    expect(mocks.audit).not.toHaveBeenCalled();
+    // com tarifa em vigor, vigência FUTURA continua valendo
+    queue("cost_rates", "select", [{ id: "old", effective_from: "2026-01-01" }]);
+    queue("cost_rates", "insert", [saved]);
+    expect((await put(good)).status).toBe(200);
+  });
+  it("B2: sem tarifa em vigor (primeira, ou só futuras) pode retroagir dentro do mês atual — o passado estava 'sem preço'", async () => {
+    const monthStart = `${today.slice(0, 7)}-01`;
+    queue("cost_rates", "select", []);
+    queue("cost_rates", "insert", [{ ...saved, effective_from: monthStart }]);
+    expect((await put({ ...good, effective_from: monthStart })).status).toBe(200);
+    queue("cost_rates", "select", [{ id: "fut", effective_from: future }]); // só tarifa futura
+    queue("cost_rates", "insert", [{ ...saved, effective_from: monthStart }]);
+    expect((await put({ ...good, effective_from: monthStart })).status).toBe(200);
+  });
   it("corrida na unicidade = 409; migration ausente = 503; erro do banco = 500 sem detalhe", async () => {
     queue("cost_rates", "select", []);
     queue("cost_rates", "insert", null, { code: "23505" });

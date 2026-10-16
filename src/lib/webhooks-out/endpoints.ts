@@ -4,11 +4,11 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { ApiError, badRequest, notFound } from "@/lib/api/v1/respond";
+import { ApiError, badRequest, forbidden, notFound } from "@/lib/api/v1/respond";
 import { assertPublicUrl, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { encrypt } from "@/lib/whatsapp/encryption";
 
-import { MAX_ENDPOINTS_PER_ACCOUNT, parseWebhookEvents, WEBHOOK_EVENTS, WEBHOOK_TEST_EVENT, type WebhookEvent } from "./catalog";
+import { MAX_ENDPOINTS_PER_ACCOUNT, missingEventReadScopes, parseWebhookEvents, WEBHOOK_EVENTS, WEBHOOK_TEST_EVENT, type WebhookEvent } from "./catalog";
 import { generateWebhookSecret } from "./signature";
 
 type Db = Pick<SupabaseClient, "from" | "rpc">;
@@ -90,12 +90,30 @@ function validateEvents(raw: unknown): WebhookEvent[] {
   return events;
 }
 
+/** Chave da API pública que cadastra/edita: seus escopos limitam os eventos assináveis (B8). Painel (sessão de admin) não passa isto. */
+export interface KeyScopeAuth {
+  scopes: readonly string[];
+  accountId: string;
+  keyId: string;
+}
+
+function assertEventScopes(events: readonly WebhookEvent[], auth: KeyScopeAuth | undefined): void {
+  if (!auth) return;
+  const missing = missingEventReadScopes(events, auth.scopes);
+  if (missing.length === 0) return;
+  throw forbidden(
+    `Assinar ${missing.map((m) => `'${m.event}'`).join(", ")} exige também ${[...new Set(missing.map((m) => `o escopo ${m.scope}`))].join(" e ")}: esses eventos entregam dados do cliente`,
+    { accountId: auth.accountId, keyId: auth.keyId },
+  );
+}
+
 export async function createEndpoint(
   db: Db,
-  input: { accountId: string; keyId: string | null; url: unknown; events: unknown; description?: unknown; rateLimitPerMinute?: unknown },
+  input: { accountId: string; keyId: string | null; url: unknown; events: unknown; description?: unknown; rateLimitPerMinute?: unknown; keyAuth?: KeyScopeAuth },
 ): Promise<EndpointView & { secret: string }> {
   const url = await validateUrl(input.url);
   const events = validateEvents(input.events);
+  assertEventScopes(events, input.keyAuth);
   const description = validateDescription(input.description);
   const rate = input.rateLimitPerMinute === undefined || input.rateLimitPerMinute === null ? null : validateRateLimit(input.rateLimitPerMinute);
 
@@ -125,11 +143,15 @@ export async function getEndpoint(db: Db, accountId: string, id: string): Promis
   return rows[0];
 }
 
-export async function updateEndpoint(db: Db, accountId: string, id: string, patch: Record<string, unknown>): Promise<EndpointView> {
+export async function updateEndpoint(db: Db, accountId: string, id: string, patch: Record<string, unknown>, keyAuth?: KeyScopeAuth): Promise<EndpointView> {
   await getEndpoint(db, accountId, id);
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.url !== undefined) update.url = await validateUrl(patch.url);
-  if (patch.events !== undefined) update.events = validateEvents(patch.events);
+  if (patch.events !== undefined) {
+    const events = validateEvents(patch.events);
+    assertEventScopes(events, keyAuth);
+    update.events = events;
+  }
   if (patch.description !== undefined) update.description = validateDescription(patch.description);
   if (patch.status !== undefined) {
     if (patch.status !== "active" && patch.status !== "paused") throw badRequest("`status` deve ser 'active' ou 'paused'");

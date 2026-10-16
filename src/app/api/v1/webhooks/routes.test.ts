@@ -60,6 +60,8 @@ describe("/api/v1/webhooks", () => {
     expect(res.status).toBe(201);
     expect((await res.json()).data.secret).toBe("whsec_x");
     expect(createEndpoint).toHaveBeenCalledWith(ctx.supabase, expect.objectContaining({ accountId: "A", keyId: "K1" }));
+    // os escopos da CHAVE vão junto: o cadastro recusa evento com dado do cliente sem o escopo de leitura (B8)
+    expect(createEndpoint).toHaveBeenCalledWith(ctx.supabase, expect.objectContaining({ keyAuth: { scopes: ["webhooks:write"], accountId: "A", keyId: "K1" } }));
   });
 
   it("corpo inválido → 400; corpo grande → 413", async () => {
