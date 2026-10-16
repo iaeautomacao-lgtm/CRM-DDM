@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import { ArrowDownLeft, ArrowUpRight, Megaphone } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
+import { originCache } from "@/lib/inbox/origin-cache";
 import type { ConversationOrigin } from "@/lib/conversations/origin";
 
 export interface OriginResponse {
@@ -18,7 +19,7 @@ export interface OriginResponse {
   client: { id: string; name: string; color: string } | null;
 }
 
-const cache = new Map<string, Promise<OriginResponse | null>>();
+const cache = originCache as Map<string, Promise<OriginResponse | null>>;
 
 function fetchOrigin(conversationId: string): Promise<OriginResponse | null> {
   let p = cache.get(conversationId);
