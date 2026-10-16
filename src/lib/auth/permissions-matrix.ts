@@ -114,6 +114,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account/roles/[roleId]", "DELETE", "admin", "roles.manage"),
   pg("account/roles/[roleId]/reset", "POST", "admin", "roles.manage"), // cargos (318): restaurar padrão de cargo de sistema
   pg("account/members/[userId]/role", "PUT", "admin", "roles.manage"),
+  pg("account/teams/[teamId]", "PATCH", "admin", "teams.manage"), // SLA de primeira resposta da equipe (381)
+  pg("sla/config", "GET", "viewer", "account.view"), // meta de SLA da conta e das equipes (381)
   pg("account/teams/[teamId]/members", "GET", "viewer", "teams.view"),
   pg("account/teams/[teamId]/members", "POST", "admin", "teams.manage"),
   pg("account/teams/[teamId]/members", "DELETE", "admin", "teams.manage"),

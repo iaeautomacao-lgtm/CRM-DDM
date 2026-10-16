@@ -13,7 +13,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
-import { clearSwrCache } from "@/lib/swr/cache";
+import { clearSessionData } from "@/lib/auth/session-cleanup";
+import { purgeExpiredDrafts } from "@/lib/inbox/drafts";
 import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
 import {
   DDM_SESSION_STORAGE_KEY,
@@ -305,6 +306,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(currentUser);
 
         if (currentUser) {
+          // Rascunhos vencidos ou do formato antigo (sem usuário na chave) saem ao entrar.
+          purgeExpiredDrafts();
           // Don't block session loading on profile fetch — chrome
           // (header, sidebar) can render from the user object alone,
           // profile enriches async. Callers that need to branch on
@@ -370,7 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         // Sessão acabou (logout, expiração): nada de resposta em memória fica para trás.
-        clearSwrCache();
+        clearSessionData();
         fetchProfileCallsRef.current += 1;
         setAuthError(null);
         profileUserIdRef.current = null;
@@ -404,9 +407,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const supabase = createClient();
-    clearSwrCache();
+    clearSessionData();
     await supabase.auth.signOut();
-    clearSwrCache();
+    clearSessionData();
     setUser(null);
     setProfile(null);
     setAccount(null);

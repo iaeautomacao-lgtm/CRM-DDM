@@ -603,6 +603,10 @@
       "kind": "registry"
     },
     {
+      "version": "381_teams_first_response_sla",
+      "kind": "registry"
+    },
+    {
       "version": "382_seguranca_carteira_mfa_reserva",
       "kind": "registry"
     },
