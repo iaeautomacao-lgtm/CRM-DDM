@@ -41,3 +41,20 @@ export async function filterAvailableAgents<T extends string>(db: Db, userIds: r
 export async function isAgentPaused(db: Db, userId: string): Promise<boolean> {
   return (await pausedAgentIds(db, [userId])).has(userId);
 }
+
+/**
+ * Início da pausa ABERTA de cada um (mesmo critério de "em pausa": ended_at IS NULL, uma por atendente — índice único parcial da 370).
+ * Diferente de pausedAgentIds, NÃO é fail-closed: quem usa isto para ENCERRAR algo (expiração da reserva do @operador) não pode agir no escuro, então
+ * erro de leitura devolve null ("não sei") e o chamador não faz nada. Sem a migration 370 não há pausa nenhuma (mapa vazio).
+ */
+export async function openPauseStarts(db: Db, userIds: readonly string[]): Promise<Map<string, string> | null> {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Map();
+  try {
+    const { data, error } = await db.from("agent_pauses").select("user_id, started_at").in("user_id", ids).is("ended_at", null);
+    if (error) return isMissingTable(error) ? new Map() : null;
+    return new Map(((data ?? []) as Array<{ user_id: string; started_at: string }>).map((r) => [r.user_id, r.started_at]));
+  } catch {
+    return null;
+  }
+}
