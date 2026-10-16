@@ -41,6 +41,13 @@ O crontab é **um só** para o usuário da VPS e mistura V1, V2 e outros sistema
   - Ordem no banco da V1: faixa 304–375 → 376 → 378 → **379** → 380. A 379 só cria 3 tabelas novas (`meta_onboarding_*`, RLS sem policy, só `service_role`); sem colisão com a v2, que ainda não tem a migration nem o código.
   - A v2 precisa portar a 379 (mesmo número, com `apply_mfa_policy` condicional nas 3 tabelas), as 3 rotas `/api/whatsapp/meta-integrations` (guard `channels.manage` e entrada em `permissions-matrix.ts`), a lib `meta-onboarding*` e o doc. Tela `canais/integracoes-meta` e o link em `canais`: front. Segredos pelo `resolveSecretForWrite`.
   - Sem portar, a virada não perde dados, mas os admins perdem o menu Integrações Meta. Decisão do dono: antes ou depois da virada (recomendado: depois).
+- [ ] **Migrations de 16/10 e numeração atualizada:**
+  - **Ordem no banco da V1:** faixa 304–375 → 376 → 378 → 379 (V1) → 380 → 381 (SLA por equipe) → 382 e 383 (correções de segurança). Pular o que já estiver em `schema_migrations`. **Próximo número livre na v2: 384**; 369 segue reservado ao Farol.
+  - **Decisões do dono (16/10):**
+    - menção a operador em pausa espera por ele, mas a reserva volta para a fila depois de 30 min com o operador em pausa ou offline;
+    - o custo Meta vem da 195;
+    - o onboarding Meta (379) é portado depois da virada.
+  - **Tabelas grandes:** a 372 (índice e FK em `contacts`) e a 376 (colunas e índice em `conversations` e `profiles`) não têm `lock_timeout` nem FK `NOT VALID`, e o índice da 376 é criado sem `CONCURRENTLY`. No banco da V1, rodar fora do horário de pico, com `SET lock_timeout = '5s'` antes de cada uma (se estourar, repetir). A 372b já usa `CONCURRENTLY` e roda sozinha.
 
 ### 2.3 Crons (crontab da VPS)
 - [ ] Em `~/.crm-cron-v2.env`, trocar `APP=` para o domínio de produção. As 11 linhas da V2 leem dali; não precisa mexer nelas.
