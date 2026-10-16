@@ -19,6 +19,7 @@ import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
+import { tryMentionAgentHandoff } from '@/lib/inbox/agent-mention-server'
 import { writeLog, maskPhone } from '@/lib/logger'
 import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import { readCappedBody } from '@/lib/security/webhook-body'
@@ -28,6 +29,8 @@ import { safeDbError } from '@/lib/privacy/mask'
 
 // Espera antes de gravar o eco de uma mensagem nossa (ver abaixo).
 const OWN_SEND_ECHO_WAIT_MS = 3000
+
+type WahaConversationRow = { id: string; status: string; unread_count: number | null; assigned_agent_id: string | null; requested_agent_id?: string | null }
 
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_waha).
@@ -450,12 +453,23 @@ export async function POST(request: Request) {
 
       // 2. Find or create conversation
       let conversationId: string | null = null
-      const { data: convsList, error: convFetchError } = await db
-        .from('conversations')
-        .select('id, status, unread_count, assigned_agent_id')
-        .eq('account_id', accountId)
-        .eq('contact_id', contactId!)
-        .eq('waha_session', session)
+      // requested_agent_id é da migration 376 (@operador). Sem ela o select falha por coluna inexistente (42703/PGRST204):
+      // refaz sem a coluna e segue como "sem reserva", para um deploy antes da migration não perder mensagem.
+      const selectConversations = (columns: string) =>
+        db
+          .from('conversations')
+          .select(columns)
+          .eq('account_id', accountId)
+          .eq('contact_id', contactId!)
+          .eq('waha_session', session)
+      let { data: convsList, error: convFetchError } = (await selectConversations(
+        'id, status, unread_count, assigned_agent_id, requested_agent_id',
+      )) as unknown as { data: WahaConversationRow[] | null; error: { code?: string } | null }
+      if (convFetchError && (convFetchError.code === '42703' || convFetchError.code === 'PGRST204')) {
+        ;({ data: convsList, error: convFetchError } = (await selectConversations(
+          'id, status, unread_count, assigned_agent_id',
+        )) as unknown as { data: WahaConversationRow[] | null; error: { code?: string } | null })
+      }
 
       if (convFetchError) {
         console.error('[waha/webhook] Error fetching conversations:', convFetchError)
@@ -768,15 +782,25 @@ export async function POST(request: Request) {
 
         // Resposta a campanha com "enviar para o Webchat": convite no lugar
         // do fluxo receptivo (mesma regra do webhook Meta).
-        const movedToWebchat = await maybeStartCampaignWebchat({
+        // @operador (migration 376): mensagem que COMEÇA com o apelido de um operador vai para a fila de espera dele e conta como
+        // tratada (sem fluxo, convite de Webchat nem IA). Com a reserva pendente, as mensagens seguintes também não disparam nada.
+        const mentionedHandoff = await tryMentionAgentHandoff({
           accountId,
-          userId: config.user_id,
-          contactId,
           conversationId,
-          configId: config.id,
-          replyToProviderId: payload.replyTo?.id ?? null,
+          text: contentType === 'text' ? contentText : null,
         })
-        const flowResult = movedToWebchat
+        const reservedToAgent = mentionedHandoff || Boolean(conversation?.requested_agent_id)
+        const movedToWebchat = reservedToAgent
+          ? false
+          : await maybeStartCampaignWebchat({
+              accountId,
+              userId: config.user_id,
+              contactId,
+              conversationId,
+              configId: config.id,
+              replyToProviderId: payload.replyTo?.id ?? null,
+            })
+        const flowResult = movedToWebchat || reservedToAgent
           ? { consumed: true }
           : await dispatchInboundToFlows({
           accountId,

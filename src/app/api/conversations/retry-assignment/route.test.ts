@@ -6,6 +6,9 @@ const state = vi.hoisted(() => ({
   pending: { data: [] as unknown[] | null, error: null as { message: string } | null },
   updates: [] as Array<{ data: unknown[] | null; error: { message: string } | null }>,
   agent: "agent-1" as string | null,
+  isCalls: [] as Array<[string, unknown]>,
+  noReservationColumn: false,
+  searches: [] as boolean[],
 }));
 
 vi.mock("@/lib/flows/engine", () => ({
@@ -16,11 +19,19 @@ vi.mock("@/lib/flows/admin-client", () => ({
   supabaseAdmin: () => ({
     from: () => {
       let isUpdate = false;
+      let withReservationFilter = false;
       const b: Record<string, unknown> = {};
-      for (const op of ["select", "eq", "is", "or", "lte", "order", "limit"]) b[op] = () => b;
+      for (const op of ["select", "eq", "or", "lte", "order", "limit"]) b[op] = () => b;
+      b.is = (col: string, val: unknown) => (state.isCalls.push([col, val]), col === "requested_agent_id" && (withReservationFilter = true), b);
       b.update = () => ((isUpdate = true), b);
       b.then = (ok: (v: unknown) => unknown) =>
-        Promise.resolve(isUpdate ? (state.updates.shift() ?? { data: [], error: null }) : state.pending).then(ok);
+        Promise.resolve(
+          isUpdate
+            ? (state.updates.shift() ?? { data: [], error: null })
+            : (state.searches.push(withReservationFilter), withReservationFilter && state.noReservationColumn)
+              ? { data: null, error: { code: "42703", message: "column conversations.requested_agent_id does not exist" } }
+              : state.pending,
+        ).then(ok);
       return b;
     },
   }),
@@ -34,6 +45,9 @@ beforeEach(() => {
   state.pending = { data: [], error: null };
   state.updates = [];
   state.agent = "agent-1";
+  state.isCalls = [];
+  state.noReservationColumn = false;
+  state.searches = [];
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -55,5 +69,30 @@ describe("POST /api/conversations/retry-assignment", () => {
     const res = await call();
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("wacrm");
+  });
+});
+
+describe("@operador (migration 376)", () => {
+  it("a busca ignora conversa reservada a um operador (requested_agent_id IS NULL): o rodízio não a redistribui", async () => {
+    await call();
+    expect(state.isCalls).toContainEqual(["requested_agent_id", null]);
+    expect(state.isCalls).toContainEqual(["assigned_agent_id", null]);
+  });
+});
+
+describe("sem a migration 376 (coluna requested_agent_id inexistente)", () => {
+  it("refaz a busca sem o filtro de reserva e segue distribuindo (sem 376 não existe reserva)", async () => {
+    state.noReservationColumn = true;
+    state.pending = { data: [{ id: "c1", team_id: "t", account_id: "a" }], error: null };
+    state.updates = [{ data: [{ id: "c1" }], error: null }];
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(state.searches).toEqual([true, false]); // 1ª com o filtro (falhou), 2ª sem
+    expect(await res.json()).toMatchObject({ assigned: 1 });
+  });
+
+  it("com a coluna, uma só busca (com o filtro)", async () => {
+    await call();
+    expect(state.searches).toEqual([true]);
   });
 });

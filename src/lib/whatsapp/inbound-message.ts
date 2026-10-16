@@ -18,6 +18,7 @@ import { writeLog, maskPhone } from '@/lib/logger'
 import { formatTranscript, transcribeInboundAudio, type TranscriptionResult } from '@/lib/ai/stt'
 import { callPermissionReplyText, parseCallPermissionReply, recordCallPermissionReply, type CallContext } from '@/lib/whatsapp/calls'
 import { safeDbError } from '@/lib/privacy/mask'
+import { tryMentionAgentHandoff } from '@/lib/inbox/agent-mention-server'
 import { flowResponseVars, parseNfmReply, type ParsedFlowResponse } from '@/lib/whatsapp/flow-response'
 import { deliverFlowResponse } from '@/lib/flows/flow-response-vars'
 
@@ -490,15 +491,28 @@ export async function processMessage(
     })
   }
 
-  const movedToWebchat = await maybeStartCampaignWebchat({
+  // @operador (migration 376): mensagem que COMEÇA com o apelido de um operador manda a conversa para a fila de espera dele
+  // (requested_agent_id) e conta como tratada: sem fluxo receptivo, sem convite de Webchat, sem IA global. Enquanto a reserva
+  // existir, as mensagens seguintes do cliente também não disparam fluxo nem IA (a reserva some quando alguém assume ou fecha).
+  const mentionedHandoff = await tryMentionAgentHandoff({
     accountId,
-    userId: configOwnerUserId,
-    contactId: contactRecord.id,
     conversationId: conversation.id,
-    configId: configId ?? null,
-    replyToProviderId: message.context?.id ?? null,
+    text: contentType === 'text' ? contentText : null,
   })
-  const flowResult = movedToWebchat
+  const reservedToAgent =
+    mentionedHandoff || Boolean((conversation as { requested_agent_id?: string | null }).requested_agent_id)
+
+  const movedToWebchat = reservedToAgent
+    ? false
+    : await maybeStartCampaignWebchat({
+        accountId,
+        userId: configOwnerUserId,
+        contactId: contactRecord.id,
+        conversationId: conversation.id,
+        configId: configId ?? null,
+        replyToProviderId: message.context?.id ?? null,
+      })
+  const flowResult = movedToWebchat || reservedToAgent
     ? { consumed: true }
     : await dispatchInboundToFlows({
     accountId,

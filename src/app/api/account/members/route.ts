@@ -32,6 +32,8 @@ interface ProfileRow {
   max_simultaneous_chats: number | null;
   /** Migration 311; ausente antes dela. */
   deactivated_at?: string | null;
+  /** Apelido @operador (migration 376); ausente antes dela. */
+  mention_alias?: string | null;
 }
 
 export async function GET() {
@@ -75,6 +77,7 @@ export async function GET() {
           joined_at: row.created_at,
           team_id: row.team_id,
           max_simultaneous_chats: row.max_simultaneous_chats,
+          mention_alias: row.mention_alias ?? null,
           active: !row.deactivated_at,
           deactivated_at: row.deactivated_at ?? null,
           last_sign_in_at: canSeeAccess ? (access.get(row.user_id)?.last_sign_in_at ?? null) : null,

@@ -21,18 +21,28 @@ async function handlePost(request: Request) {
 
   // Busca conversas pending sem agente há pelo menos 5 minutos
   const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { data: conversations, error } = await db
-    .from("conversations")
-    .select("id, team_id, account_id, contact_id")
-    .eq("status", "pending")
-    .is("assigned_agent_id", null)
-    .or(`assignment_retry_at.is.null,assignment_retry_at.lte.${new Date().toISOString()}`)
-    // Removido — conversas sem team_id também precisam de retry
-    .lte("updated_at", cutoff)
-    // Backpressure: uma única execução não deve tentar drenar um backlog
-    // ilimitado dentro do mesmo processo Passenger.
-    .order("updated_at", { ascending: true })
-    .limit(100);
+  // @operador (migration 376): conversa reservada a um operador (requested_agent_id) espera por ele; o rodízio não a
+  // redistribui. Sem a 376 a coluna não existe (42703/PGRST204) e também não existe reserva: refaz a busca sem o filtro.
+  const fetchPending = (withReservationFilter: boolean) => {
+    let q = db
+      .from("conversations")
+      .select("id, team_id, account_id, contact_id")
+      .eq("status", "pending")
+      .is("assigned_agent_id", null);
+    if (withReservationFilter) q = q.is("requested_agent_id", null);
+    return q
+      .or(`assignment_retry_at.is.null,assignment_retry_at.lte.${new Date().toISOString()}`)
+      // Removido — conversas sem team_id também precisam de retry
+      .lte("updated_at", cutoff)
+      // Backpressure: uma única execução não deve tentar drenar um backlog
+      // ilimitado dentro do mesmo processo Passenger.
+      .order("updated_at", { ascending: true })
+      .limit(100);
+  };
+  let { data: conversations, error } = await fetchPending(true);
+  if (error && (error.code === "42703" || error.code === "PGRST204")) {
+    ({ data: conversations, error } = await fetchPending(false));
+  }
 
   if (error) {
     console.error("[RetryAssignment] Query error:", error.message);
