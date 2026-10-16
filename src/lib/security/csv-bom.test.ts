@@ -74,6 +74,7 @@ const NOT_A_DOWNLOAD: Record<string, string> = {
   "app/api/historico/exports/route.ts": "agenda o job; o CSV é montado em lib/historico/export-jobs.ts (BOM + `;`)",
   "app/api/disparador/erros/route.ts": "devolve o CSV montado por errosToCsv (BOM + `;`)",
   "app/(dashboard)/disparador/erros/page.tsx": "só baixa o que o servidor devolve",
+  "app/(dashboard)/relatorios/custos-ia/page.tsx": "só baixa o CSV de /api/costs/ai (BOM + `;` pelo csv-safe na rota)",
   "components/contacts/import-modal.tsx": "importação: só o accept do upload (entrada)",
   "components/disparador/nova-campanha/step-origem.tsx": "importação: só o accept e o texto do upload (entrada)",
   "components/disparador/export/campaign-exports.tsx":"botão que baixa o CSV do job assíncrono (BOM + `;` em lib/disparador/export-jobs.ts)",

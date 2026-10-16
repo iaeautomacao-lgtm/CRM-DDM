@@ -65,6 +65,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Relatórios · Tabulações", group: "Relatórios", href: "/relatorios/tabulacoes" },
   { label: "Relatórios · Campanhas", group: "Relatórios", href: "/relatorios/envio-em-lote", keywords: "envio em lote disparador" },
   { label: "Relatórios · Exportações", group: "Relatórios", href: "/relatorios/exportacoes", keywords: "downloads" },
+  { label: "Relatórios · Custos de IA", group: "Relatórios", href: "/relatorios/custos-ia", permission: "reports.view_all", keywords: "custo ia tokens openai gasto tarifa estimativa" },
 
   { label: "Usuários", group: "Administração", href: "/usuarios", keywords: "membros convites cargos permissões papeis" },
   { label: "Equipes", group: "Administração", href: "/equipes", keywords: "times" },

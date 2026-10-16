@@ -299,6 +299,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   pg("costs/ai", "GET", "admin", "reports.view_all"), // custo estimado de IA (378); o custo Meta fica na 195
+  pg("costs/ai/rates", "GET", "admin", "reports.view_all"), // tarifas de IA por vigência
+  pg("costs/ai/rates", "PUT", "admin", "settings.account"), // nova vigência (append-only), auditada
   pg("historico/exports", "POST", "admin", "exports.manage"),
   pg("historico/exports", "GET", "admin", "exports.manage"),
   pg("historico/exports/[id]", "GET", "admin", "exports.manage"),

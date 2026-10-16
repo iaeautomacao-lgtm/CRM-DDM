@@ -48,6 +48,8 @@ export interface OpenAiChatClientOptions {
   model: string;
   timeoutMs?: number;
   maxTokens?: number;
+  /** Recebe o chunk final com `usage` (telemetria de custo, migration 378): nunca lança nem atrasa a resposta. */
+  onUsage?: (response: unknown) => void;
 }
 
 export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmClient {
@@ -73,11 +75,14 @@ export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmCl
         temperature: 0.1,
         max_tokens: opts.maxTokens ?? 1_500,
         stream: true,
+        stream_options: { include_usage: true },
       });
 
+      let usageChunk: unknown = null;
       let content = "";
       const calls = new Map<number, LlmToolCall>();
       for await (const chunk of stream) {
+        if (chunk.usage) usageChunk = chunk;
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
         if (delta.content) {
@@ -90,6 +95,14 @@ export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmCl
           if (tc.function?.name) current.name += tc.function.name;
           if (tc.function?.arguments) current.arguments += tc.function.arguments;
           calls.set(tc.index, current);
+        }
+      }
+
+      if (usageChunk && opts.onUsage) {
+        try {
+          opts.onUsage(usageChunk);
+        } catch {
+          // telemetria de custo nunca derruba a resposta
         }
       }
 
