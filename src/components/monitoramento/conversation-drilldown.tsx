@@ -11,6 +11,7 @@ import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, Loader2, MessageSquare } from "lucide-react";
 import { ConversationModal } from "@/components/monitoramento/conversation-modal";
 import { apiFetch } from "@/lib/api-fetch";
+import { cn } from "@/lib/utils";
 import { formatCappedTotal, pageCount, readCappedTotal } from "@/lib/reports/capped-label";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -37,6 +38,8 @@ interface Row {
   first_response_min: number | null;
   waiting_min: number | null;
   closed_at: string | null;
+  /** SLA de primeira resposta (min) da equipe da conversa (migration 381); ausente = sem comparação. */
+  sla_target_min?: number | null;
 }
 
 const STATUS_LABEL: Record<Row["status"], string> = {
@@ -51,6 +54,11 @@ const CHANNEL_LABEL: Record<string, string> = {
   messenger: "Messenger",
   sms: "SMS",
 };
+
+/** Passou do SLA da equipe? Sem SLA ou sem tempo medido não marca nada. */
+function overSla(elapsedMin: number | null, targetMin: number | null | undefined): boolean {
+  return elapsedMin !== null && !!targetMin && elapsedMin > targetMin;
+}
 
 function mins(m: number | null): string {
   if (m === null) return "—";
@@ -144,9 +152,21 @@ export function ConversationDrilldown({
                 <div className="shrink-0 text-right text-muted-foreground">
                   <p>{format(new Date(r.created_at), "dd/MM HH:mm")}</p>
                   {r.waiting_min !== null ? (
-                    <p className="font-medium text-warning">aguardando {mins(r.waiting_min)}</p>
+                    <p
+                      className={cn("font-medium", overSla(r.waiting_min, r.sla_target_min) ? "text-destructive" : "text-warning")}
+                      title={r.sla_target_min ? `SLA da equipe: ${r.sla_target_min} min` : undefined}
+                    >
+                      aguardando {mins(r.waiting_min)}
+                      {overSla(r.waiting_min, r.sla_target_min) && " · SLA estourado"}
+                    </p>
                   ) : (
-                    <p>1ª resposta {mins(r.first_response_min)}</p>
+                    <p
+                      className={overSla(r.first_response_min, r.sla_target_min) ? "text-destructive" : undefined}
+                      title={r.sla_target_min ? `SLA da equipe: ${r.sla_target_min} min` : undefined}
+                    >
+                      1ª resposta {mins(r.first_response_min)}
+                      {overSla(r.first_response_min, r.sla_target_min) && " · acima do SLA"}
+                    </p>
                   )}
                 </div>
               </button>

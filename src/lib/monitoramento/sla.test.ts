@@ -51,6 +51,24 @@ describe("computeSla", () => {
     expect(total.firstResponseAvgMin).toBeNull();
   });
 
+  it("meta por equipe: cada conversa conta com a meta da SUA equipe; sem configuração tudo é 15", () => {
+    const rows = [
+      row({ team_id: "t1", created_at: minsAgo(100), first_response_at: minsAgo(80) }), // 20 min
+      row({ team_id: "t2", created_at: minsAgo(100), first_response_at: minsAgo(80) }), // 20 min
+      row({ team_id: null, created_at: minsAgo(100), first_response_at: minsAgo(80) }), // 20 min
+    ];
+    const sem = computeSla(rows, { sinceMs, nowMs: now });
+    expect(sem.total.withinTargetPct).toBe(0);
+    expect(sem.total.target_minutes).toBe(15);
+    const config = { defaultMin: 15, defaultSource: "default" as const, teams: { t1: 30, t2: null } };
+    const out = computeSla(rows, { sinceMs, nowMs: now, config });
+    expect(out.total.withinTargetPct).toBe(33); // só t1 (meta 30) cumpriu; t2 e sem equipe usam 15
+    expect(Object.fromEntries(out.byTeam.map((s) => [s.key, [s.target_minutes, s.withinTargetPct]]))).toEqual({ t1: [30, 100], t2: [15, 0], none: [15, 0] });
+    expect(out.byChannel[0].target_minutes).toBe(15);
+    const conta = computeSla(rows, { sinceMs, nowMs: now, config: { ...config, defaultMin: 25, defaultSource: "account" } });
+    expect(conta.total.withinTargetPct).toBe(100); // padrão 25 cobre os 20 min de t2 e de sem-equipe
+  });
+
   it("agrupa por canal (whatsapp por padrão) e por equipe", () => {
     const rows = [
       row({ channel_type: null, team_id: "t1" }),

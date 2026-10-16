@@ -74,6 +74,9 @@ import { PageBody } from "@/components/ddm/page-toolbar";
 import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import type { AccountMember, MessageTemplate, Tag, Team } from "@/types";
 import { mentionAliasErrorMessage, parseMentionAlias } from "@/lib/members/mention-alias";
+import { parseSlaMinutes, SLA_RANGE_MESSAGE } from "@/lib/sla/client-config";
+import { useSlaConfig } from "@/hooks/use-sla-config";
+import { useSwrInvalidate } from "@/lib/swr";
 
 /** Replaces {{1}}, {{2}}, ... with the matching sample value — left as
  *  literal "{{n}}" when no sample exists, mirroring template-manager's
@@ -368,6 +371,13 @@ export default function EquipeDetailPage({
   const [overflowTeamId, setOverflowTeamId] = useState(NO_OVERFLOW);
   const [savingInfo, setSavingInfo] = useState(false);
 
+  // ---- SLA de primeira resposta (migration 381): PATCH próprio, permissão teams.manage ----
+  const slaConfig = useSlaConfig();
+  const invalidateSwr = useSwrInvalidate();
+  const [slaDraft, setSlaDraft] = useState("");
+  const [slaError, setSlaError] = useState<string | null>(null);
+  const [savingSla, setSavingSla] = useState(false);
+
   // ---- members — same state/logic shape as TeamFormDialog, now split
   // by role (agent -> Operadores, admin -> Supervisores) ----
   const [allAccountMembers, setAllAccountMembers] = useState<AccountMember[]>([]);
@@ -445,6 +455,7 @@ export default function EquipeDetailPage({
         row.session_timeout_minutes != null ? String(row.session_timeout_minutes) : "",
       );
       setOverflowTeamId(row.overflow_team_id ?? NO_OVERFLOW);
+      setSlaDraft(row.first_response_sla_min != null ? String(row.first_response_sla_min) : "");
       setOtherTeams(((allTeamsRes.data ?? []) as Team[]).filter((t) => t.id !== id));
       if (!channelsRes.error) {
         setChannels((channelsRes.data ?? []) as LinkedChannel[]);
@@ -794,6 +805,39 @@ export default function EquipeDetailPage({
       toast.error("Falha ao salvar informações");
     } finally {
       setSavingInfo(false);
+    }
+  }
+
+  /** `raw` vazio = voltar ao padrão da conta. O servidor valida de novo (1..1440). */
+  async function handleSaveSla(raw: string) {
+    if (!team || isReadOnly || savingSla) return;
+    const parsed = parseSlaMinutes(raw);
+    if (!parsed.ok) {
+      setSlaError(parsed.message);
+      return;
+    }
+    setSavingSla(true);
+    setSlaError(null);
+    try {
+      const res = await apiFetch(`/api/account/teams/${team.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ first_response_sla_min: parsed.value }),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        setSlaError(payload.error ?? (res.status === 403 ? "Você não tem permissão para editar o SLA." : SLA_RANGE_MESSAGE));
+        return;
+      }
+      setTeam({ ...team, first_response_sla_min: parsed.value });
+      setSlaDraft(parsed.value != null ? String(parsed.value) : "");
+      void invalidateSwr("GET");
+      toast.success(parsed.value != null ? `SLA da equipe: ${parsed.value} min` : "A equipe voltou a usar o SLA padrão da conta");
+    } catch (err) {
+      console.error("[EquipeDetail] sla save error:", err);
+      setSlaError("Não foi possível conectar ao servidor");
+    } finally {
+      setSavingSla(false);
     }
   }
 
@@ -1260,6 +1304,69 @@ export default function EquipeDetailPage({
                     "Salvar informações"
                   )}
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* SLA de primeira resposta (por equipe; vazio = padrão da conta) */}
+          <Card>
+            <CardContent className="space-y-3 pt-4">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">SLA de primeira resposta</h2>
+                <p className="text-xs text-muted-foreground">
+                  Tempo máximo para um atendente responder as conversas desta equipe. Alimenta os alertas de espera do Conversas e o
+                  Monitoramento.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="team-first-response-sla">SLA de primeira resposta (min)</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    id="team-first-response-sla"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={4}
+                    value={slaDraft}
+                    onChange={(e) => {
+                      setSlaDraft(e.target.value);
+                      setSlaError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void handleSaveSla(slaDraft);
+                    }}
+                    disabled={isReadOnly || savingSla}
+                    placeholder={`Padrão da conta (${slaConfig.defaultMin} min)`}
+                    aria-invalid={slaError ? true : undefined}
+                    aria-describedby="team-first-response-sla-hint"
+                    className="w-56"
+                  />
+                  {!isReadOnly && (
+                    <>
+                      <Button
+                        onClick={() => void handleSaveSla(slaDraft)}
+                        disabled={savingSla || slaDraft.trim() === (team?.first_response_sla_min != null ? String(team.first_response_sla_min) : "")}
+                      >
+                        {savingSla ? <Loader2 className="size-4 animate-spin" /> : null}
+                        Salvar SLA
+                      </Button>
+                      {team?.first_response_sla_min != null && (
+                        <Button variant="outline" onClick={() => void handleSaveSla("")} disabled={savingSla}>
+                          Usar padrão
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+                <p
+                  id="team-first-response-sla-hint"
+                  role={slaError ? "alert" : undefined}
+                  className={slaError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
+                >
+                  {slaError ??
+                    (team?.first_response_sla_min != null
+                      ? `Em uso: ${team.first_response_sla_min} min (definido nesta equipe). De 1 a 1440 minutos.`
+                      : `Em uso: ${slaConfig.defaultMin} min (padrão da conta). Preencha de 1 a 1440 minutos para definir um valor só desta equipe.`)}
+                </p>
               </div>
             </CardContent>
           </Card>

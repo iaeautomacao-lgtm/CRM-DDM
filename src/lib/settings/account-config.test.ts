@@ -66,7 +66,10 @@ describe("notification_preferences", () => {
 
 describe("registro e resolução", () => {
   it("o fuso padrão é Brasília; horário e notificações não têm valor inventado", () => {
-    expect(ACCOUNT_SETTINGS.map((s) => [s.key, s.default])).toEqual([["timezone", "America/Sao_Paulo"], ["business_hours", null], ["notification_preferences", {}]]);
+    expect(ACCOUNT_SETTINGS.map((s) => [s.key, s.default])).toEqual([["timezone", "America/Sao_Paulo"], ["business_hours", null], ["notification_preferences", {}], ["first_response_sla_min", null]]);
+    expect(validateSetting(settingDef("first_response_sla_min")!, 30)).toEqual({ ok: true, value: 30 });
+    expect(validateSetting(settingDef("first_response_sla_min")!, null)).toEqual({ ok: true, value: null }); // vazio = usa 15
+    for (const bad of [0, 1441, 1.5, "15", true]) expect(validateSetting(settingDef("first_response_sla_min")!, bad).ok).toBe(false);
     expect(settingDef("timezone")?.type).toBe("timezone");
     expect(settingDef("inventada")).toBeNull();
   });
