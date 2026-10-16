@@ -20,6 +20,9 @@ export interface AiCostRate {
   output_per_million: number | null;
 }
 
+export type AiCostFeatureRow = Omit<AiCostRow, "sku"> & { feature: string };
+export type AiCostFeatureModelRow = AiCostFeatureRow & { sku: string };
+
 export interface AiCostReport {
   month: string;
   estimate: true;
@@ -28,6 +31,10 @@ export interface AiCostReport {
   rates: AiCostRate[];
   totals: Omit<AiCostRow, "sku">;
   notice: string;
+  /** Por funcionalidade (migration 380). Ausente/vazio numa rota antiga: a tela esconde o seletor. */
+  by_feature?: AiCostFeatureRow[];
+  /** Detalhe funcionalidade × modelo, ordenado por funcionalidade e depois valor. */
+  by_feature_model?: AiCostFeatureModelRow[];
 }
 
 export interface AiRateRow extends AiCostRate {
@@ -177,4 +184,34 @@ export function validateRateForm(
     if (n !== null && n > MAX_RATE_PER_MILLION) return { ok: false, error: `Cada tarifa deve ser de no máximo ${formatInt(MAX_RATE_PER_MILLION)}.` };
   }
   return { ok: true, body: { sku, effective_from: v.effective_from, input_per_million: input, cached_input_per_million: cached, output_per_million: output } };
+}
+
+export type CostGrouping = "modelo" | "funcionalidade";
+
+/** Chaves estáveis gravadas em ai_token_usage.feature (backend 378/380). Chave desconhecida aparece como veio. */
+export const FEATURE_LABELS: Record<string, string> = {
+  responder: "Respostas automáticas",
+  disparador: "Campanhas com IA",
+  intelligence: "Acordito (chat)",
+  copilot: "Sugestões do Acordito",
+  acordo: "Detecção de acordo",
+  sentiment: "Sentimento",
+  tabulacao: "Tabulação",
+  rewrite: "Reescrita",
+  analysis: "Outras análises",
+};
+
+export function featureLabel(key: string): string {
+  return FEATURE_LABELS[key] ?? key;
+}
+
+/** A visão por funcionalidade só existe quando a rota devolveu by_feature (e não vazio havendo uso por modelo). */
+export function hasFeatureView(report: Pick<AiCostReport, "ai" | "by_feature"> | undefined): boolean {
+  if (!report || !Array.isArray(report.by_feature)) return false;
+  return report.by_feature.length > 0 || report.ai.length === 0;
+}
+
+/** Modelos de uma funcionalidade (by_feature_model), já na ordem recebida. */
+export function modelsOfFeature(rows: ReadonlyArray<AiCostFeatureModelRow> | undefined, feature: string): AiCostFeatureModelRow[] {
+  return (rows ?? []).filter((r) => r.feature === feature);
 }

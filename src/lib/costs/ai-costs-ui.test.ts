@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   costReportPath,
+  featureLabel,
+  hasFeatureView,
+  modelsOfFeature,
   currentMonthSP,
   formatUsd,
   monthLabel,
@@ -85,5 +88,38 @@ describe("formulário de tarifa", () => {
     expect(bad({ output: "x" }).ok).toBe(false);
     expect(bad({ cached: "x" }).ok).toBe(false);
     expect(bad({ input: "100001" }).ok).toBe(false);
+  });
+});
+
+describe("visão por funcionalidade", () => {
+  const base = { requests: 1, input_tokens: 1, output_tokens: 1, cached_input_tokens: 0, priced_usd: 0, unpriced: 0 };
+  it("traduz as chaves conhecidas e mostra a desconhecida como veio", () => {
+    expect(featureLabel("responder")).toBe("Respostas automáticas");
+    expect(featureLabel("disparador")).toBe("Campanhas com IA");
+    expect(featureLabel("intelligence")).toBe("Acordito (chat)");
+    expect(featureLabel("copilot")).toBe("Sugestões do Acordito");
+    expect(featureLabel("acordo")).toBe("Detecção de acordo");
+    expect(featureLabel("sentiment")).toBe("Sentimento");
+    expect(featureLabel("tabulacao")).toBe("Tabulação");
+    expect(featureLabel("rewrite")).toBe("Reescrita");
+    expect(featureLabel("analysis")).toBe("Outras análises");
+    expect(featureLabel("nova_coisa")).toBe("nova_coisa");
+  });
+  it("esconde o seletor quando a rota não devolve by_feature", () => {
+    const ai = [{ sku: "openai:x", ...base }];
+    expect(hasFeatureView(undefined)).toBe(false);
+    expect(hasFeatureView({ ai })).toBe(false);
+    expect(hasFeatureView({ ai, by_feature: [] })).toBe(false); // sem a migration 380 mas com uso por modelo
+    expect(hasFeatureView({ ai, by_feature: [{ feature: "responder", ...base }] })).toBe(true);
+    expect(hasFeatureView({ ai: [], by_feature: [] })).toBe(true); // mês sem uso
+  });
+  it("filtra os modelos de uma funcionalidade mantendo a ordem", () => {
+    const rows = [
+      { feature: "a", sku: "m1", ...base },
+      { feature: "b", sku: "m2", ...base },
+      { feature: "a", sku: "m3", ...base },
+    ];
+    expect(modelsOfFeature(rows, "a").map((r) => r.sku)).toEqual(["m1", "m3"]);
+    expect(modelsOfFeature(undefined, "a")).toEqual([]);
   });
 });
