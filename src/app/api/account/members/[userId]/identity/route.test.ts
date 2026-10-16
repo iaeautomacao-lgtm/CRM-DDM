@@ -73,15 +73,15 @@ beforeEach(() => {
       if (table !== 'profiles') throw Error('Unexpected table');
       let updating: Record<string, unknown> | null = null;
       const chain = {
-        select: (_cols: string) => chain,
-        eq: (field: string, value: unknown) => {
+        select(_cols: string) { return this; },
+        eq(field: string, value: unknown) {
           mocks.filters.push([field, value]);
-          return chain;
+          return this;
         },
-        update: (values: Record<string, unknown>) => {
+        update(values: Record<string, unknown>) {
           updating = values;
           mocks.updateValues.push(values);
-          return chain;
+          return this;
         },
         maybeSingle: async () => ({ data: mocks.target, error: null }),
         single: async () => {
