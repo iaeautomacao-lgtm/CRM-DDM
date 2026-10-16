@@ -358,7 +358,7 @@ export default function CanaisPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {canEditSettings && (
-            <Button asChild variant="outline"><Link href="/canais/integracoes-meta">Integrações Meta</Link></Button>
+            <Link href="/canais/integracoes-meta" className="inline-flex h-9 items-center justify-center rounded-md border border-border px-4 text-sm font-medium hover:bg-accent">Integrações Meta</Link>
           )}
           <Button variant="outline" onClick={() => setClientsOpen(true)}>
             Clientes
