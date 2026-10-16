@@ -5,6 +5,8 @@ export interface Profile {
   id: string;
   user_id: string;
   full_name: string;
+  /** Apelido @operador (migration 376), quando o select o traz. */
+  mention_alias?: string | null;
   email: string;
   avatar_url?: string;
   /**
@@ -199,6 +201,13 @@ export type OutcomeSource = 'human' | 'ai_auto' | 'automation';
 /** Origem da sugestão de tabulação (conversations.outcome_suggestion_source, 157). */
 export type OutcomeSuggestionSource = 'exit_tag' | 'llm' | 'rule';
 
+/** Operador para quem a conversa está reservada ("Aguardando @fulano", migration 376). Só estes campos saem do perfil. */
+export interface RequestedAgent {
+  user_id: string;
+  full_name: string | null;
+  mention_alias: string | null;
+}
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -244,6 +253,10 @@ export interface Conversation {
   /** Primeira campanha do Disparador que trouxe a conversa (migration 126). */
   origin_campaign_id?: string | null;
   origin_queue_item_id?: string | null;
+  /** Operador reservado por menção (@apelido, migration 376): a conversa espera por ele, sem atendente. null = sem reserva; some quando alguém assume ou fecha. */
+  requested_agent_id?: string | null;
+  /** Nome e apelido do reservado: vem pronto de GET /api/inbox/conversations e /api/conversations/:id/reservation (não vem do Realtime). */
+  requested_agent?: RequestedAgent | null;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
 import { parseInboxFilters, sanitizeSearch } from '@/lib/inbox/filters'
 import { applyInboxFilters, resolveLineClause } from '@/lib/inbox/query'
+import { attachRequestedAgents } from '@/lib/inbox/requested-agent'
 
 // GET /api/inbox/conversations — lista do inbox paginada no servidor.
 //
@@ -57,12 +58,14 @@ export async function GET(request: Request) {
 
     const { data, error } = await query
     if (error) throw error
-    const rows = (data ?? []) as Array<{ id: string; last_message_at: string | null }>
+    const rows = (data ?? []) as unknown as Array<{ id: string; last_message_at: string | null; requested_agent_id?: string | null }>
     const hasMore = rows.length > PAGE_SIZE
     const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows
     const last = page[page.length - 1]
+    // "Aguardando @fulano" (376): nome e apelido do operador reservado, só nas linhas que a RLS já entregou.
+    const conversations = await attachRequestedAgents(accountId, page)
     return NextResponse.json({
-      conversations: page,
+      conversations,
       next_cursor: hasMore && last ? `${last.last_message_at ?? 'null'}|${last.id}` : null,
     })
   } catch (err) {

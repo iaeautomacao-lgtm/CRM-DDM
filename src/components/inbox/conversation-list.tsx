@@ -11,6 +11,7 @@ import { useScopedSWR } from "@/lib/swr";
 import { cn } from "@/lib/utils";
 import type { Conversation } from "@/types";
 import {
+  AtSign,
   Search,
   ChevronDown,
   Plus,
@@ -52,6 +53,7 @@ import {
 } from "@/lib/inbox/filters";
 import { sectionTotal, shouldAutoLoadMore } from "@/lib/inbox/pagination";
 import { INBOX_QUEUE_LABELS, inboxQueueSection } from "@/lib/inbox/queue-section";
+import { reservationBadge } from "@/lib/inbox/reservation";
 import { PushNudge } from "./push-nudge";
 import { awaitingReplySince, formatWait, waitLevel, waitMinutes } from "@/lib/inbox/wait-time";
 
@@ -139,7 +141,8 @@ function readSectionPref(key: string): boolean {
 /** Opções dos filtros (linhas, atendentes, equipes, clientes, campanhas). */
 interface FilterOptionsData {
   lines: LineOption[];
-  agents: NamedOption[];
+  /** `alias` = apelido @operador (migration 376), para o selo "Aguardando @apelido". */
+  agents: (NamedOption & { alias?: string | null })[];
   teams: (NamedOption & { color: string | null })[];
   clients: ClientOption[];
   campaigns: NamedOption[];
@@ -157,14 +160,26 @@ const EMPTY_FILTER_OPTIONS: FilterOptionsData = {
 
 async function loadFilterOptions(accountId: string): Promise<FilterOptionsData> {
   const supabase = createClient();
-  const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes, outcomesRes] = await Promise.all([
-    apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
-    supabase
+  const loadAgents = async () => {
+    const roles = ["agent", "supervisor", "admin", "owner"];
+    const withAlias = await supabase
+      .from("profiles")
+      .select("user_id, full_name, mention_alias")
+      .eq("account_id", accountId)
+      .in("account_role", roles)
+      .order("full_name");
+    if (!withAlias.error) return withAlias;
+    // mention_alias (migration 376) pode ainda não existir no banco: sem ela, o filtro de atendente segue igual.
+    return supabase
       .from("profiles")
       .select("user_id, full_name")
       .eq("account_id", accountId)
-      .in("account_role", ["agent", "supervisor", "admin", "owner"])
-      .order("full_name"),
+      .in("account_role", roles)
+      .order("full_name");
+  };
+  const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes, outcomesRes] = await Promise.all([
+    apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
+    loadAgents(),
     supabase.from("teams").select("id, name, color").eq("account_id", accountId).order("name"),
     supabase.from("clients").select("id, name, color").eq("account_id", accountId).order("name"),
     // Campanhas que podem ter originado conversas (as mais recentes).
@@ -186,9 +201,10 @@ async function loadFilterOptions(accountId: string): Promise<FilterOptionsData> 
   }
   return {
     lines: linesRes.lines ?? [],
-    agents: (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null }) => ({
+    agents: (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null; mention_alias?: string | null }) => ({
       id: p.user_id,
       name: p.full_name || "Atendente",
+      alias: p.mention_alias ?? null,
     })),
     teams: (teamRows ?? []).map((t) => ({ ...t, color: t.color ?? null })),
     clients: (clientsRes.data ?? []) as ClientOption[],
@@ -435,6 +451,10 @@ export function ConversationList({
 
   const clientsById = useMemo(() => new Map(options.clients.map((c) => [c.id, c])), [options.clients]);
   const agentsById = useMemo(() => new Map(options.agents.map((a) => [a.id, a.name])), [options.agents]);
+  const reservedLookup = useMemo(() => {
+    const byId = new Map(options.agents.map((a) => [a.id, { name: a.name, alias: a.alias ?? null }]));
+    return (id: string) => byId.get(id);
+  }, [options.agents]);
   const teamsById = useMemo(() => new Map(options.teams.map((t) => [t.id, t])), [options.teams]);
   const linesById = useMemo(() => new Map(options.lines.map((l) => [l.id, l.name])), [options.lines]);
   const linesForTab = useMemo(
@@ -504,9 +524,15 @@ export function ConversationList({
 
   const renderItems = (items: Conversation[]) => (
     <div className="ddm-stagger flex flex-col">
-      {items.map((conv) => (
+      {items.map((conv) => {
+        // Só strings/boolean viram prop: o memo do item continua valendo (um objeto novo a cada render o quebraria).
+        const reserved = reservationBadge(conv, user?.id, reservedLookup);
+        return (
         <ConversationItem
           key={conv.id}
+          reservedLabel={reserved?.label ?? null}
+          reservedTitle={reserved?.title ?? null}
+          reservedMine={reserved?.mine ?? false}
           conversation={conv}
           isActive={conv.id === activeConversationId}
           onSelect={stableSelect}
@@ -521,7 +547,8 @@ export function ConversationList({
           lineName={linesById.get(conv.config_id ?? conv.channel_id ?? "") ?? null}
           nowMs={awaitingReplySince(conv) === null ? 0 : nowMs}
         />
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -1026,6 +1053,10 @@ interface ConversationItemProps {
   lineName: string | null;
   /** Relógio compartilhado da lista (ms), para o tempo de espera andar sozinho. */
   nowMs: number;
+  /** Reserva por menção: texto do selo ("Aguardando @apelido" / "Cliente pediu você"), tooltip e destaque. */
+  reservedLabel: string | null;
+  reservedTitle: string | null;
+  reservedMine: boolean;
 }
 
 const CHANNEL_ICON: Record<string, LucideIcon> = {
@@ -1069,7 +1100,7 @@ const QUEUE_DOT: Record<string, string> = {
 
 // Memoizado: um evento em tempo real numa conversa só renderiza o item dela (props estáveis; o relógio só chega
 // para quem está esperando resposta, então o tick de 30 s não mexe nos demais).
-const ConversationItem = memo(function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs }: ConversationItemProps) {
+const ConversationItem = memo(function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs, reservedLabel, reservedTitle, reservedMine }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
@@ -1198,6 +1229,18 @@ const ConversationItem = memo(function ConversationItem({ conversation, isActive
                 {assigneeName}
               </span>
             </>
+          )}
+          {reservedLabel && (
+            <span
+              className={cn(
+                "inline-flex min-w-0 shrink items-center gap-1 truncate rounded-full px-1.5 py-px text-[11px] font-semibold",
+                reservedMine ? "bg-primary/10 text-primary-text" : "bg-surface-3 text-foreground-2",
+              )}
+              title={reservedTitle ?? undefined}
+            >
+              <AtSign className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{reservedLabel}</span>
+            </span>
           )}
           {showStatus ? (
             <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-foreground-2">

@@ -38,6 +38,7 @@ import {
   Loader2,
   ArrowRightLeft,
   MoreHorizontal,
+  AtSign,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useVoipCall } from "@/hooks/use-voip-call";
@@ -84,6 +85,7 @@ import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
 import { CHANNEL_BADGE } from "./conversation-list";
 import { toast } from "sonner";
 import { automatedAuthor } from "@/lib/inbox/message-origin";
+import { reservationBadge } from "@/lib/inbox/reservation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -361,19 +363,27 @@ export function MessageThread({
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("id, user_id, full_name, avatar_url, account_role")
-      .eq("account_role", "agent")
-      .order("full_name")
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.error("Failed to fetch profiles:", error);
-          return;
-        }
-        setProfiles((data as unknown as Profile[]) ?? []);
-      });
+    void (async () => {
+      const withAlias = await supabase
+        .from("profiles")
+        .select("id, user_id, full_name, avatar_url, account_role, mention_alias")
+        .eq("account_role", "agent")
+        .order("full_name");
+      // mention_alias (migration 376) pode ainda não existir: sem ela, só some o apelido no selo da reserva.
+      const { data, error } = withAlias.error
+        ? await supabase
+            .from("profiles")
+            .select("id, user_id, full_name, avatar_url, account_role")
+            .eq("account_role", "agent")
+            .order("full_name")
+        : withAlias;
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch profiles:", error);
+        return;
+      }
+      setProfiles((data as unknown as Profile[]) ?? []);
+    })();
     return () => {
       cancelled = true;
     };
@@ -1550,6 +1560,11 @@ export function MessageThread({
     ? (currentAssignee?.full_name ?? "Atribuído")
     : "Atribuir";
   const humanControlText = assignedAgentId ? "Atendimento humano — IA pausada" : null;
+  // Reserva por menção (@operador): o banco zera ao assumir/fechar, então some sozinha.
+  const reserved = reservationBadge(conversation, user?.id, (id) => {
+    const p = profiles.find((x) => x.user_id === id);
+    return p ? { name: p.full_name, alias: p.mention_alias ?? null } : undefined;
+  });
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -1602,6 +1617,18 @@ export function MessageThread({
           </div>
         </div>
 
+        {reserved && (
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold",
+              reserved.mine ? "bg-primary/10 text-primary-text" : "bg-surface-3 text-foreground-2",
+            )}
+            title={reserved.title}
+          >
+            <AtSign className="size-3.5" aria-hidden="true" />
+            {reserved.label}
+          </span>
+        )}
         {humanControlText && <span className="shrink-0 text-xs text-warning" title="Atribuição humana impede respostas automáticas">{humanControlText}</span>}
         <div className="flex shrink-0 items-center gap-1.5" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
