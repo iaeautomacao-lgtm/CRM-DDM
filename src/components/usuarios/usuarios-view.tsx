@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, Crown, Power, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
+import { AlertTriangle, AtSign, Crown, Power, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
 import { createClient } from '@/lib/supabase/client';
@@ -49,6 +49,7 @@ import { BulkImportMembersDialog } from '@/components/settings/bulk-import-membe
 import { InviteMemberDialog } from '@/components/settings/invite-member-dialog';
 import { ROLE_META } from '@/components/settings/role-meta';
 import { UsuariosTabs } from './usuarios-tabs';
+import { MentionAliasDialog } from './mention-alias-dialog';
 import { RoleSelect } from './role-select';
 import { assignableRoles, levelOf, myLevel, roleErrorMessage, type RoleItem } from '@/lib/roles/editor';
 import { PageHeader } from '@/components/ddm/page-header';
@@ -66,6 +67,8 @@ interface Member {
   deactivated_at: string | null;
   last_sign_in_at: string | null;
   last_active_at: string | null;
+  /** Apelido @operador (migration 376). */
+  mention_alias?: string | null;
 }
 
 interface Invitation {
@@ -166,6 +169,8 @@ export function UsuariosView() {
   const [filter, setFilter] = useState<Filter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Apelido @operador (migration 376): só operadores, só quem tem members.manage edita; o servidor revalida.
+  const [aliasMember, setAliasMember] = useState<Member | null>(null);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [revokeInvite, setRevokeInvite] = useState<Invitation | null>(null);
@@ -812,6 +817,29 @@ export function UsuariosView() {
               <dt className="text-xs font-semibold text-muted-foreground">Equipe</dt>
               <dd className="text-foreground">{(selected.team_id && teamNames[selected.team_id]) || 'Sem equipe'}</dd>
             </div>
+            {selected.role === 'agent' && (selected.mention_alias || canManageMembers) && (
+              <div className="flex flex-col gap-1.5">
+                <dt className="text-xs font-semibold text-muted-foreground">Apelido de atendimento</dt>
+                <dd className="flex items-center gap-2 text-foreground">
+                  {selected.mention_alias ? (
+                    <span className="font-medium">@{selected.mention_alias}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Sem apelido</span>
+                  )}
+                  {canManageMembers && (
+                    <button
+                      type="button"
+                      onClick={() => setAliasMember(selected)}
+                      aria-label={`Editar apelido de ${selected.full_name || 'operador'}`}
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <AtSign className="size-3" aria-hidden="true" />
+                      {selected.mention_alias ? 'Editar' : 'Definir apelido'}
+                    </button>
+                  )}
+                </dd>
+              </div>
+            )}
             <div className="flex flex-col gap-1.5">
               <dt className="text-xs font-semibold text-muted-foreground">Entrou em</dt>
               <dd className="text-foreground">{fmtDate(selected.joined_at)}</dd>
@@ -825,6 +853,14 @@ export function UsuariosView() {
           </dl>
         )}
       </DetailDrawer>
+
+      <MentionAliasDialog
+        member={aliasMember}
+        onClose={() => setAliasMember(null)}
+        onSaved={(userId, alias) =>
+          setMembers((prev) => prev.map((m) => (m.user_id === userId ? { ...m, mention_alias: alias } : m)))
+        }
+      />
 
       <AlertDialog open={statusTarget !== null} onOpenChange={(open) => !open && !changingStatus && setStatusTarget(null)}>
         <AlertDialogContent>

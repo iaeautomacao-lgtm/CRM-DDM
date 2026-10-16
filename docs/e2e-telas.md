@@ -91,3 +91,21 @@ Duração esperada: 3 a 5 minutos para 4 papéis × ~30 telas com 4 workers.
 
 - Typecheck do e2e: `npm run e2e:typecheck` (o `tsconfig.json` da raiz exclui `e2e/`).
 - Versão do Playwright fixa em `package.json` (`@playwright/test`); atualize de propósito, não por `^`.
+
+## Fluxos das telas novas (`e2e/fluxos.spec.ts`)
+
+Complemento do teste de telas, **sem gravar nada**: usa o mesmo login do **admin** (`auth.setup.ts`) e simula com `page.route` o que cada tela lê
+(rotas `/api/*` do app e as tabelas do Supabase que a tela consulta; ver `e2e/fluxos/mocks.ts`). Escrita não simulada é abortada e reprova o teste.
+Permissão negada é simulada tirando a permissão da resposta real de `GET /api/me/permissions`.
+
+Cobre: Relatórios → Custos de IA (mês, agrupar por modelo/funcionalidade, aviso de estimativa, "Sem tarifa", aba Tarifas com 409, acesso negado);
+apelido @operador em Usuários e Equipe (validação, 409, sem permissão); selos "Aguardando @apelido" / "Cliente pediu você" no Inbox;
+cache SWR (Painel → Contatos → Painel mostra o dado na hora, nada em storage, logout limpa tudo).
+
+```bash
+export E2E_BASE_URL=https://omnicrmv2dev.grupoddm.ia.br
+export E2E_ADMIN_EMAIL=… E2E_ADMIN_PASSWORD=… E2E_ADMIN_TOTP_SECRET=…
+E2E_ROLES=admin npm run e2e:fluxos
+```
+
+O teste de logout encerra a sessão local do navegador (o `/auth/v1/logout` é simulado, o token no servidor não é revogado). Não roda no CI.
