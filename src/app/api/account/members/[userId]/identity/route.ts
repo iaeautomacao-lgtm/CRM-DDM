@@ -91,24 +91,38 @@ export async function PATCH(
       }
     }
 
-    const { data: updated, error: profileWriteError } = await admin.from('profiles')
-      .update({ full_name, email })
-      .eq('account_id', ctx.accountId)
-      .eq('user_id', userId)
-      .select('user_id,full_name,email')
-      .single();
+    let updated: { user_id: string; full_name: string; email: string } | null = null;
+    let profileWriteError: { code?: string } | null = null;
+    try {
+      const result = await admin.from('profiles')
+        .update({ full_name, email })
+        .eq('account_id', ctx.accountId)
+        .eq('user_id', userId)
+        .select('user_id,full_name,email')
+        .single();
+      updated = result.data;
+      profileWriteError = result.error;
+    } catch {
+      profileWriteError = { code: 'network_error' };
+    }
 
     if (profileWriteError || !updated) {
       // Best-effort compensation: restore the old Auth email if the
       // account profile could not be saved. Never claim success if
       // the databases disagree.
       if (emailChanged) {
-        const { error: rollbackError } = await admin.auth.admin.updateUserById(userId, {
-          email: previousEmail, email_confirm: true,
-        });
-        if (rollbackError) {
+        let rollbackFailed = false;
+        try {
+          const { error: rollbackError } = await admin.auth.admin.updateUserById(userId, {
+            email: previousEmail, email_confirm: true,
+          });
+          if (rollbackError) rollbackFailed = true;
+        } catch {
+          rollbackFailed = true;
+        }
+        if (rollbackFailed) {
           console.error('[members/identity] CRITICAL: Auth rollback failed', {
-            userId, code: rollbackError.code ?? 'unknown',
+            userId, code: 'auth_rollback_failed',
           });
           return NextResponse.json({
             error: 'A alteração foi parcial. Solicite ao suporte a revisão do e-mail antes de continuar.',
