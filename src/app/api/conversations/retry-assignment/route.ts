@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { selectAgentForTeam, selectAnyAgentForAccount } from "@/lib/flows/engine";
 import { runUnlessReserved } from "@/lib/inbox/reservation-guard";
+import { expireStaleReservations } from "@/lib/inbox/reservation-expiry";
 
 async function handlePost(request: Request) {
   // Auth: reutiliza AUTOMATION_CRON_SECRET (mesmo padrão de
@@ -19,6 +20,10 @@ async function handlePost(request: Request) {
   }
 
   const db = supabaseAdmin();
+
+  // Reserva do @operador expirada (30 min com o operador em pausa ou offline, src/lib/inbox/reservation-expiry.ts): volta para a fila AGORA e segue a
+  // distribuição normal (dono do contato > rodízio) neste mesmo tick, abaixo. Nunca lança; sem a 376/384 não faz nada.
+  const released = await expireStaleReservations(db);
 
   // Busca conversas pending sem agente há pelo menos 5 minutos
   const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -51,13 +56,17 @@ async function handlePost(request: Request) {
     return NextResponse.json({ error: "Falha ao ler as conversas pendentes." }, { status: 500 });
   }
 
-  if (!conversations || conversations.length === 0) {
-    return NextResponse.json({ retried: 0, assigned: 0 });
+  // As reservas recém-liberadas entram na rodada mesmo que a conversa seja recente (updated_at) ou tenha adiamento: o cliente já esperou 30 min.
+  const toProcess = [...(conversations ?? [])];
+  for (const r of released) if (!toProcess.some((c) => c.id === r.id)) toProcess.push(r);
+
+  if (toProcess.length === 0) {
+    return NextResponse.json({ retried: 0, assigned: 0, reservations_expired: 0 });
   }
 
   let assigned = 0;
 
-  for (const conv of conversations) {
+  for (const conv of toProcess) {
     try {
       if (!conv.account_id) continue;
 
@@ -109,8 +118,9 @@ async function handlePost(request: Request) {
   }
 
   return NextResponse.json({
-    retried: conversations.length,
+    retried: toProcess.length,
     assigned,
+    reservations_expired: released.length,
   });
 }
 

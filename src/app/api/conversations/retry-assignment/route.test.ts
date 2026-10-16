@@ -61,7 +61,7 @@ describe("POST /api/conversations/retry-assignment", () => {
     state.pending = { data: [{ id: "c1", team_id: "t", account_id: "a" }, { id: "c2", team_id: null, account_id: "a" }], error: null };
     state.updates = [{ data: [{ id: "c1" }], error: null }, { data: [], error: null }];
     const res = await call();
-    expect(await res.json()).toEqual({ retried: 2, assigned: 1 });
+    expect(await res.json()).toEqual({ retried: 2, assigned: 1, reservations_expired: 0 });
   });
 
   it("erro do banco na leitura: 500 sem o detalhe do Postgres", async () => {
