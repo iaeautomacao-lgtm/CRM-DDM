@@ -34,6 +34,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:worker": "node scripts/build-worker.mjs",
+    "bench:worker": "tsx scripts/loadtest/worker-bench/run.ts",
     "schema:check": "node scripts/schema-check.mjs",
     "schema:readiness": "node scripts/check-schema-readiness.mjs",
     "start": "next start",
