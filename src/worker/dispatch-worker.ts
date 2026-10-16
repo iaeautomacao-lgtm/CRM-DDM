@@ -217,57 +217,94 @@ export class DispatchWorker {
     if (planned.length === 0) return { worked: false, owned: this.ownedSessions(), sent: 0, failed: 0, reason: "nothing_due" };
 
     const config = resolveThroughputConfig(this.env, { maxGlobalConcurrency: WORKER_MAX_PROCESS_CONCURRENCY });
+    const startedAt = this.now();
+    const roundEnd = startedAt + this.config.roundBudgetMs;
+    // Um estágio de envio POR NÚMERO: cada número segue no seu ritmo, sem esperar o mais lento. A rodada só espera o orçamento de INÍCIO de envios
+    // (roundBudgetMs); o que ficou em voo (cauda: timeout da Meta de até 10 s) termina em segundo plano e não segura o planejamento seguinte, nem
+    // o dos outros números. O teto de envios em voo por número continua valendo no banco (max_in_flight no claim), inclusive entre caudas e rodadas.
+    const jobs = [...new Set(planned.flatMap((p) => p.items.map((i) => i.session_id).filter((id): id is string => !!id)))]
+      .sort()
+      .map((sessionId) => {
+        const forNumber = planned
+          .map((p) => ({ ...p, items: p.items.filter((i) => i.session_id === sessionId), result: { ...p.result } }))
+          .filter((p) => p.items.length > 0);
+        return this.launchNumber(sessionId, forNumber, config, roundEnd);
+      });
+    await Promise.all(jobs.map((job) => job.startsDone));
+    const sent = jobs.reduce((n, job) => n + job.counted.sent, 0);
+    const failed = jobs.reduce((n, job) => n + job.counted.failed, 0);
+    return { worked: true, owned: this.ownedSessions(), sent, failed };
+  }
+
+  /** Cauda de estágios ainda em voo (depois do fim do orçamento de início). Esperada no SIGTERM só pelos envios em voo (shutdown-gate). */
+  private tails = new Set<Promise<void>>();
+
+  private launchNumber(sessionId: string, planned: PlannedCampaign[], config: ReturnType<typeof resolveThroughputConfig>, roundEnd: number) {
+    const counted = { sent: 0, failed: 0 };
     const telemetry = new TickTelemetry();
     const health = startHealthMonitor();
     const startedAt = this.now();
-    const roundEnd = startedAt + this.config.roundBudgetMs;
-    const lost = new Set<string>();
-    let schedule;
-    let summary: ReturnType<typeof health.summary>;
-    try {
-      schedule = await this.sendStage({
-        db: this.db,
-        planned,
-        config,
-        telemetry,
-        batchMode: true,
-        outOfTime: () => this.stopping || this.now() > roundEnd || [...this.owned].every((id) => lost.has(id)),
-        health,
-        autoPauseConfig: autoPauseConfigFromEnv(this.env),
-        claimerRated: {
-          owner: this.config.owner,
-          onLostOwnership: (channelId) => {
-            lost.add(channelId);
-            this.owned.delete(channelId);
-            this.log("dispatch_worker_lease_lost", { session_id: channelId, owner: this.config.owner });
+    const run = (async () => {
+      let schedule;
+      let summary: ReturnType<typeof health.summary>;
+      try {
+        schedule = await this.sendStage({
+          db: this.db,
+          planned,
+          config,
+          telemetry,
+          batchMode: true,
+          outOfTime: () => this.stopping || this.now() > roundEnd || !this.owned.has(sessionId),
+          health,
+          autoPauseConfig: autoPauseConfigFromEnv(this.env),
+          claimerRated: {
+            owner: this.config.owner,
+            onLostOwnership: (channelId) => {
+              this.owned.delete(channelId);
+              this.log("dispatch_worker_lease_lost", { session_id: channelId, owner: this.config.owner });
+            },
           },
-        },
-      });
-    } finally {
-      summary = health.summary();
-      health.stop();
-    }
-    const payload = telemetry.buildPayload({
-      durationMs: this.now() - startedAt,
-      status: "processed",
-      config,
-      campaigns: planned.length,
-      schedule,
-      health: summary,
-    }) as { totals?: { sent?: number; failed?: number } };
-    const sent = Number(payload.totals?.sent ?? 0);
-    const failed = Number(payload.totals?.failed ?? 0);
-    this.acc.sent += sent;
-    this.acc.failed += failed;
-    this.acc.peakInFlight = Math.max(this.acc.peakInFlight, schedule?.globalPeakInFlight ?? 0);
-    this.lastStats = {
-      in_flight_peak: schedule?.globalPeakInFlight ?? 0,
-      event_loop_lag_p99_ms: summary.eventLoopLagP99Ms,
-      rss_mb: summary.rssMb,
-      version: WORKER_VERSION,
-    };
-    await this.maybeLogTick(payload);
-    return { worked: true, owned: this.ownedSessions(), sent, failed };
+        });
+      } finally {
+        summary = health.summary();
+        health.stop();
+      }
+      const payload = telemetry.buildPayload({
+        durationMs: this.now() - startedAt,
+        status: "processed",
+        config,
+        campaigns: planned.length,
+        schedule,
+        health: summary,
+      }) as { totals?: { sent?: number; failed?: number } };
+      counted.sent = Number(payload.totals?.sent ?? 0);
+      counted.failed = Number(payload.totals?.failed ?? 0);
+      this.acc.sent += counted.sent;
+      this.acc.failed += counted.failed;
+      this.acc.peakInFlight = Math.max(this.acc.peakInFlight, schedule?.globalPeakInFlight ?? 0);
+      this.lastStats = {
+        in_flight_peak: schedule?.globalPeakInFlight ?? 0,
+        event_loop_lag_p99_ms: summary.eventLoopLagP99Ms,
+        rss_mb: summary.rssMb,
+        version: WORKER_VERSION,
+      };
+      await this.maybeLogTick(payload);
+    })().catch((error) => {
+      this.log("dispatch_worker_number_error", { session_id: sessionId, message: error instanceof Error ? error.message : String(error) });
+      if (error instanceof MigrationRequiredError) throw error;
+    });
+    this.tails.add(run);
+    void run.finally(() => this.tails.delete(run)).catch(() => undefined);
+    // Libera a rodada no fim do orçamento de início OU quando o estágio acaba, o que vier primeiro (timer real: independe do sleep injetado).
+    const startsDone = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, Math.max(0, roundEnd - this.now()) + 50);
+      timer.unref?.();
+      run.then(
+        () => (clearTimeout(timer), resolve()),
+        (error) => (clearTimeout(timer), reject(error)),
+      );
+    });
+    return { startsDone, counted };
   }
 
   private async maybeLogTick(payload: Record<string, unknown>): Promise<void> {

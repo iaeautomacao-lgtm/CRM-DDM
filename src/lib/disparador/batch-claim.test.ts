@@ -264,6 +264,20 @@ describe('ChannelClaimer em modo worker (claim_dispatch_batch_rated)', () => {
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 
+  it('empty no modo worker é transitório: pausa curta e sonda de novo (vagas ocupadas pela cauda da rodada anterior)', async () => {
+    let t = 1_000;
+    const queue: Array<Array<{ item: unknown; outcome: string }>> = [[{ item: null, outcome: 'empty' }], [{ item: { id: 'i1' }, outcome: 'claimed' }]];
+    const rpc = vi.fn(async () => ({ data: queue.shift() ?? [{ item: null, outcome: 'empty' }], error: null }));
+    const claimer = new ChannelClaimer({ db: { rpc } as never, defaultMaxInFlight: () => 10, rated: { owner: 'w1', rateFor: () => 80 }, now: () => t });
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull();
+    t += 100;
+    expect(await claimer.next('s1', 'c1', 10)).toBeNull(); // dentro da pausa: sem nova chamada
+    expect(rpc).toHaveBeenCalledTimes(1);
+    t += 300;
+    expect((await claimer.next('s1', 'c1', 10))?.item).toMatchObject({ id: 'i1' }); // depois da pausa sonda e acha item
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
   it('erro da RPC sobe (o worker trata: migration 368 ausente ou falha transitória)', async () => {
     const claimer = new ChannelClaimer({
       db: { rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'function not found' } }) } as never,

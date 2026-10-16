@@ -18,6 +18,8 @@ type Env = Record<string, string | undefined>;
 
 /** Lote máximo por claim (cada claim cabe nas vagas livres do número). */
 export const BATCH_CLAIM_MAX = 50;
+/** Modo worker: espera entre sondagens depois de um claim vazio. */
+export const EMPTY_RETRY_MS = 300;
 
 export function isBatchClaimEnabled(env: Env = process.env): boolean {
   const raw = (env.DISPARADOR_BATCH_CLAIM ?? "").trim().toLowerCase();
@@ -87,6 +89,8 @@ type RefillResult = 'ok' | 'throttled';
 interface SlotState {
   buffer: ClaimedItem[];
   pending: Promise<RefillResult> | null;
+  /** Modo worker: claim vazio (vagas cheias com a cauda da rodada anterior, nada vencido agora). Não esgota o par: tenta de novo depois desta hora (ms). */
+  pauseUntil: number;
   exhausted: boolean;
 }
 
@@ -97,6 +101,8 @@ export interface ChannelClaimerDeps {
   /** Pré-carrega a blacklist dos itens do lote (tick-preload). */
   preload?: (items: QueueItem[]) => Promise<BlacklistLookup | undefined>;
   maxBatch?: number;
+  /** Relógio injetável (testes). */
+  now?: () => number;
   /**
    * Modo do WORKER (migration 368): o claim confere o dono do número na mesma transação (fencing) e usa o balde durável por número.
    * Ausente = o claim de sempre (claim_dispatch_batch), que é o do cron.
@@ -124,7 +130,7 @@ export class ChannelClaimer {
   private state(channelId: string, campaignId: string): SlotState {
     const key = `${channelId}|${campaignId}`;
     let s = this.states.get(key);
-    if (!s) this.states.set(key, (s = { buffer: [], pending: null, exhausted: false }));
+    if (!s) this.states.set(key, (s = { buffer: [], pending: null, pauseUntil: 0, exhausted: false }));
     return s;
   }
 
@@ -134,6 +140,7 @@ export class ChannelClaimer {
       const ready = state.buffer.shift();
       if (ready) return ready;
       if (state.exhausted) return null;
+      if (state.pauseUntil > (this.deps.now ?? Date.now)()) return null;
       if (!state.pending) {
         state.pending = this.refill(state, channelId, campaignId, free).finally(() => {
           state.pending = null;
@@ -171,7 +178,10 @@ export class ChannelClaimer {
       const outcome = rows[0]?.outcome;
       if (rated && outcome === "throttled") return "throttled";
       if (rated && outcome === "not_owner") rated.onLostOwnership?.(channelId);
-      state.exhausted = true;
+      // Worker: as rodadas se sobrepõem (a cauda em voo da anterior ainda ocupa vagas no banco), então "vazio" é transitório: pausa curta e nova sondagem,
+      // em vez de esgotar o número pelo resto da rodada. O cron (sem rated) mantém o comportamento de sempre.
+      if (rated) state.pauseUntil = (this.deps.now ?? Date.now)() + EMPTY_RETRY_MS;
+      else state.exhausted = true;
       return "ok";
     }
     this.batches++;

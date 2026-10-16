@@ -206,3 +206,52 @@ describe('DispatchWorker.stop (SIGTERM)', () => {
     expect(outOfTime!()).toBe(true);
   });
 });
+
+describe('DispatchWorker.round — sem barreira entre números nem entre rodadas', () => {
+  const twoNumbers = () => {
+    const t = baseTables();
+    (t.dispatch_channel_ownership as Array<{ session_id: string; worker_group: string | null }>).push({ session_id: "s5", worker_group: null });
+    (t.whatsapp_config as unknown[]).push({ id: "s5", provider: "meta", habilitado: true });
+    return t;
+  };
+  const due = () => ({ data: [{ campaign_id: "c1", session_id: "s1", n: 3 }, { campaign_id: "c1", session_id: "s5", n: 3 }] });
+  const sessionOf = (input: unknown) => (input as { planned: Array<{ items: Array<{ session_id: string }> }> }).planned[0].items[0].session_id;
+
+  it('um envio preso (timeout da Meta) em UM número não segura a rodada nem o outro número', async () => {
+    let release: () => void = () => undefined;
+    const stuck = new Promise<void>((resolve) => (release = resolve));
+    const started: string[] = [];
+    const sendStage = vi.fn(async (input: unknown) => {
+      const id = sessionOf(input);
+      started.push(id);
+      if (id === "s1") await stuck; // o envio em voo de s1 só termina no timeout (10 s na Meta real)
+      return { globalPeakInFlight: 1, channels: [] };
+    });
+    const { worker } = makeWorker({ tables: twoNumbers(), rpcs: { count_due_dispatch_items: due }, sendStage: sendStage as never, config: { maxNumbers: 2, roundBudgetMs: 20 } });
+
+    const first = await Promise.race([worker.round(), new Promise<"travou">((r) => setTimeout(() => r("travou"), 2_000))]);
+    expect(first).not.toBe("travou"); // a rodada fecha no orçamento de início, sem esperar o envio preso
+    expect(started.sort()).toEqual(["s1", "s5"]);
+
+    // A rodada seguinte replaneja: s5 volta a enviar enquanto a cauda de s1 ainda está em voo.
+    advance(1_000);
+    const second = await Promise.race([worker.round(), new Promise<"travou">((r) => setTimeout(() => r("travou"), 2_000))]);
+    expect(second).not.toBe("travou");
+    expect(started.filter((id) => id === "s5").length).toBeGreaterThanOrEqual(2);
+
+    release();
+    await worker.stop();
+  });
+
+  it('a cauda em voo conta nos envios quando termina e o erro de um número não derruba os outros', async () => {
+    const sendStage = vi.fn(async (input: unknown) => {
+      if (sessionOf(input) === "s1") throw new Error("falha só do s1");
+      return { globalPeakInFlight: 1, channels: [] };
+    });
+    const { worker, logs } = makeWorker({ tables: twoNumbers(), rpcs: { count_due_dispatch_items: due }, sendStage: sendStage as never, config: { maxNumbers: 2 } });
+    const r = await worker.round();
+    expect(r.worked).toBe(true);
+    expect(sendStage).toHaveBeenCalledTimes(2);
+    expect(logs.some((l) => l.event === "dispatch_worker_number_error" && l.payload.session_id === "s1")).toBe(true);
+  });
+});
