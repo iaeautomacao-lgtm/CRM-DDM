@@ -44,6 +44,7 @@ import {
   pickerTemplateRow,
 } from "./agent-picker";
 import { filterAvailableAgents, isAgentPaused } from "@/lib/pausas/availability";
+import { hasMentionReservation } from "@/lib/inbox/agent-mention-server";
 import { maskPiiArgs } from "@/lib/privacy/mask";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
@@ -1748,7 +1749,11 @@ async function executeHandoffTeam(
       status: "pending",
       updated_at: new Date().toISOString(),
     };
-    if (cfg.team_id) {
+    // @operador (migration 376): conversa reservada a um operador por menção não é redistribuída pelo fluxo; fica na fila dele.
+    const reservedByMention = await hasMentionReservation(db, run.conversation_id);
+    if (reservedByMention) {
+      // sem escolha de agente e sem gravar a conversa (mantém equipe, status e a reserva)
+    } else if (cfg.team_id) {
       convUpdate.team_id = cfg.team_id;
       selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id);
       convUpdate.assigned_agent_id = selectedAgent ?? null;
@@ -1760,7 +1765,7 @@ async function executeHandoffTeam(
       // Sempre seta o campo — null limpa atribuição anterior do BEN
       convUpdate.assigned_agent_id = selectedAgent ?? null;
     }
-    if (run.conversation_id) {
+    if (run.conversation_id && !reservedByMention) {
       await db
         .from("conversations")
         .update(convUpdate)

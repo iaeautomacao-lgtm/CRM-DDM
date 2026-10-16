@@ -31,6 +31,10 @@ export async function handOffToTeamQueue(
     .limit(1);
   const teamId = (convRows?.[0] as { team_id?: string | null } | undefined)?.team_id ?? null;
 
+  // @operador (migration 376): conversa reservada a um operador por menção continua na fila dele (sem rodízio nem gravação).
+  const { hasMentionReservation } = await import("@/lib/inbox/agent-mention-server");
+  if (await hasMentionReservation(db, conversationId)) return { ok: true, teamId, assignedTo: null };
+
   // Import dinâmico: engine.ts importa o responder (evita ciclo no load).
   const { selectAgentForTeam, selectAnyAgentForAccount } = await import("@/lib/flows/engine");
   const engineDb = db as unknown as Parameters<typeof selectAgentForTeam>[0];

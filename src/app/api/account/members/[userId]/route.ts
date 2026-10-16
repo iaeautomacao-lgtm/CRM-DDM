@@ -25,6 +25,7 @@ import { supabaseAdmin } from "@/lib/account/admin-client";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { can } from "@/lib/auth/permissions";
 import { isAccountRole } from "@/lib/auth/roles";
+import { MENTION_ALIAS_RE } from "@/lib/inbox/agent-mention";
 import { memberHasCustomRole } from "@/lib/roles/custom-roles";
 import {
   checkRateLimit,
@@ -65,16 +66,53 @@ export async function PATCH(
     const { userId } = await params;
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown; max_simultaneous_chats?: unknown }
+      | { role?: unknown; max_simultaneous_chats?: unknown; mention_alias?: unknown }
       | null;
     const hasRole = body != null && "role" in body;
     const hasMaxChats = body != null && "max_simultaneous_chats" in body;
+    const hasMentionAlias = body != null && "mention_alias" in body;
 
-    if (!hasRole && !hasMaxChats) {
+    if (!hasRole && !hasMaxChats && !hasMentionAlias) {
       return NextResponse.json(
-        { error: "Informe 'role' e/ou 'max_simultaneous_chats' para atualizar" },
+        { error: "Informe 'role', 'max_simultaneous_chats' e/ou 'mention_alias' para atualizar" },
         { status: 400 },
       );
+    }
+
+    // Apelido @operador (migration 376): escrita só por aqui (o gatilho do banco barra o navegador). Primeiro, para uma
+    // falha de formato, de papel ou de duplicidade não deixar a mudança de papel/limite pela metade. null apaga o apelido.
+    if (hasMentionAlias) {
+      const alias = body!.mention_alias;
+      if (alias !== null && (typeof alias !== "string" || !MENTION_ALIAS_RE.test(alias))) {
+        return NextResponse.json(
+          { error: "Alias deve conter 2 a 32 caracteres minúsculos, números ou _" },
+          { status: 400 },
+        );
+      }
+      const db = supabaseAdmin();
+      const { data: targetRows, error: lookupError } = await db
+        .from("profiles")
+        .select("account_role")
+        .eq("account_id", ctx.accountId)
+        .eq("user_id", userId)
+        .limit(1);
+      if (lookupError) throw lookupError;
+      const target = (targetRows ?? [])[0] as { account_role?: string } | undefined;
+      if (!target || target.account_role !== "agent") {
+        return NextResponse.json({ error: "Usuário não é operador desta conta" }, { status: 400 });
+      }
+      const { error: aliasError } = await db
+        .from("profiles")
+        .update({ mention_alias: alias })
+        .eq("account_id", ctx.accountId)
+        .eq("user_id", userId);
+      if (aliasError?.code === "23505") {
+        return NextResponse.json({ error: "Alias já está em uso nesta conta" }, { status: 409 });
+      }
+      if (aliasError?.code === "42703" || aliasError?.code === "PGRST204") {
+        return NextResponse.json({ error: "Apelido @operador indisponível: falta aplicar a migration 376." }, { status: 503 });
+      }
+      if (aliasError) throw aliasError;
     }
 
     if (hasRole) {

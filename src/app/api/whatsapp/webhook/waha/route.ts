@@ -19,6 +19,7 @@ import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
+import { tryMentionAgentHandoff } from '@/lib/inbox/agent-mention-server'
 import { writeLog, maskPhone } from '@/lib/logger'
 import { logWebhookRejection } from '@/lib/security/webhook-rejection-log'
 import { readCappedBody } from '@/lib/security/webhook-body'
@@ -452,7 +453,7 @@ export async function POST(request: Request) {
       let conversationId: string | null = null
       const { data: convsList, error: convFetchError } = await db
         .from('conversations')
-        .select('id, status, unread_count, assigned_agent_id')
+        .select('id, status, unread_count, assigned_agent_id, requested_agent_id')
         .eq('account_id', accountId)
         .eq('contact_id', contactId!)
         .eq('waha_session', session)
@@ -768,15 +769,25 @@ export async function POST(request: Request) {
 
         // Resposta a campanha com "enviar para o Webchat": convite no lugar
         // do fluxo receptivo (mesma regra do webhook Meta).
-        const movedToWebchat = await maybeStartCampaignWebchat({
+        // @operador (migration 376): mensagem que COMEÇA com o apelido de um operador vai para a fila de espera dele e conta como
+        // tratada (sem fluxo, convite de Webchat nem IA). Com a reserva pendente, as mensagens seguintes também não disparam nada.
+        const mentionedHandoff = await tryMentionAgentHandoff({
           accountId,
-          userId: config.user_id,
-          contactId,
           conversationId,
-          configId: config.id,
-          replyToProviderId: payload.replyTo?.id ?? null,
+          text: contentType === 'text' ? contentText : null,
         })
-        const flowResult = movedToWebchat
+        const reservedToAgent = mentionedHandoff || Boolean(conversation?.requested_agent_id)
+        const movedToWebchat = reservedToAgent
+          ? false
+          : await maybeStartCampaignWebchat({
+              accountId,
+              userId: config.user_id,
+              contactId,
+              conversationId,
+              configId: config.id,
+              replyToProviderId: payload.replyTo?.id ?? null,
+            })
+        const flowResult = movedToWebchat || reservedToAgent
           ? { consumed: true }
           : await dispatchInboundToFlows({
           accountId,

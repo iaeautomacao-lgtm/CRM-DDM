@@ -79,6 +79,8 @@ export interface AccountMember {
   last_sign_in_at: string | null;
   /** Última atividade (renovação mais recente de sessão). Mesma regra de visibilidade. */
   last_active_at: string | null;
+  /** Apelido @operador (migration 376): o cliente escreve "@apelido" no início da mensagem para cair na fila deste operador. */
+  mention_alias: string | null;
 }
 
 /**

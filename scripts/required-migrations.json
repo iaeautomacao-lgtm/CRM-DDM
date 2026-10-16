@@ -589,6 +589,10 @@
     {
       "version": "375_dashboard_ai_snapshot",
       "kind": "registry"
+    },
+    {
+      "version": "376_agent_mention_queue",
+      "kind": "registry"
     }
   ]
 }

@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   pending: { data: [] as unknown[] | null, error: null as { message: string } | null },
   updates: [] as Array<{ data: unknown[] | null; error: { message: string } | null }>,
   agent: "agent-1" as string | null,
+  isCalls: [] as Array<[string, unknown]>,
 }));
 
 vi.mock("@/lib/flows/engine", () => ({
@@ -17,7 +18,8 @@ vi.mock("@/lib/flows/admin-client", () => ({
     from: () => {
       let isUpdate = false;
       const b: Record<string, unknown> = {};
-      for (const op of ["select", "eq", "is", "or", "lte", "order", "limit"]) b[op] = () => b;
+      for (const op of ["select", "eq", "or", "lte", "order", "limit"]) b[op] = () => b;
+      b.is = (col: string, val: unknown) => (state.isCalls.push([col, val]), b);
       b.update = () => ((isUpdate = true), b);
       b.then = (ok: (v: unknown) => unknown) =>
         Promise.resolve(isUpdate ? (state.updates.shift() ?? { data: [], error: null }) : state.pending).then(ok);
@@ -34,6 +36,7 @@ beforeEach(() => {
   state.pending = { data: [], error: null };
   state.updates = [];
   state.agent = "agent-1";
+  state.isCalls = [];
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -55,5 +58,13 @@ describe("POST /api/conversations/retry-assignment", () => {
     const res = await call();
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("wacrm");
+  });
+});
+
+describe("@operador (migration 376)", () => {
+  it("a busca ignora conversa reservada a um operador (requested_agent_id IS NULL): o rodízio não a redistribui", async () => {
+    await call();
+    expect(state.isCalls).toContainEqual(["requested_agent_id", null]);
+    expect(state.isCalls).toContainEqual(["assigned_agent_id", null]);
   });
 });
