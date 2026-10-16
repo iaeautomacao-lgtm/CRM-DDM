@@ -12,6 +12,13 @@ export interface AiCostRow {
   priced_usd: number
   unpriced: number
 }
+/** Por funcionalidade (ai_token_usage.feature; migration 380). A chave é estável: o rótulo em pt-br fica no front. */
+export interface AiFeatureCostRow extends Omit<AiCostRow, 'sku'> {
+  feature: string
+}
+export interface AiFeatureModelCostRow extends AiCostRow {
+  feature: string
+}
 export interface AiCostRate {
   sku: string
   currency: 'USD'
@@ -26,6 +33,10 @@ export interface MonthlyAiCostReport {
   estimate: true
   currency: 'USD'
   ai: AiCostRow[]
+  /** Ausente quando a migration 380 não foi aplicada (a tela esconde o seletor). Soma == totals; ordem: valor desc, depois nome. */
+  by_feature?: AiFeatureCostRow[]
+  /** Funcionalidade × modelo; mesma ausência de by_feature. Ordem: funcionalidade, depois valor desc. */
+  by_feature_model?: AiFeatureModelCostRow[]
   rates: AiCostRate[]
   totals: { requests: number; input_tokens: number; output_tokens: number; cached_input_tokens: number; priced_usd: number; unpriced: number }
   notice: string
@@ -42,15 +53,25 @@ const nullableNumber = (v: unknown): number | null => (v === null || v === undef
 
 export function normalizeAiCostReport(month: string, rows: unknown, rates: unknown): MonthlyAiCostReport {
   const value = rows && typeof rows === 'object' && !Array.isArray(rows) ? (rows as Record<string, unknown>) : {}
-  const ai = (Array.isArray(value.ai) ? value.ai : []).map((r: Record<string, unknown>) => ({
-    sku: String(r.sku ?? 'unknown'),
+  const numbers = (r: Record<string, unknown>) => ({
     requests: finite(r.requests),
     input_tokens: finite(r.input_tokens),
     output_tokens: finite(r.output_tokens),
     cached_input_tokens: finite(r.cached_input_tokens),
     priced_usd: finite(r.priced_usd),
     unpriced: finite(r.unpriced),
-  }))
+  })
+  const ai = (Array.isArray(value.ai) ? value.ai : []).map((r: Record<string, unknown>) => ({ sku: String(r.sku ?? 'unknown'), ...numbers(r) }))
+  const byFeature = Array.isArray(value.by_feature)
+    ? value.by_feature
+        .map((r: Record<string, unknown>) => ({ feature: String(r.feature ?? 'unknown'), ...numbers(r) }))
+        .sort((a: AiFeatureCostRow, b: AiFeatureCostRow) => b.priced_usd - a.priced_usd || a.feature.localeCompare(b.feature))
+    : undefined
+  const byFeatureModel = Array.isArray(value.by_feature_model)
+    ? value.by_feature_model
+        .map((r: Record<string, unknown>) => ({ feature: String(r.feature ?? 'unknown'), sku: String(r.sku ?? 'unknown'), ...numbers(r) }))
+        .sort((a: AiFeatureModelCostRow, b: AiFeatureModelCostRow) => a.feature.localeCompare(b.feature) || b.priced_usd - a.priced_usd || a.sku.localeCompare(b.sku))
+    : undefined
   const rateRows = (Array.isArray(rates) ? rates : []).map((r: Record<string, unknown>) => ({
     sku: String(r.sku ?? ''),
     currency: 'USD' as const,
@@ -65,6 +86,8 @@ export function normalizeAiCostReport(month: string, rows: unknown, rates: unkno
     estimate: true,
     currency: 'USD',
     ai,
+    ...(byFeature ? { by_feature: byFeature } : {}),
+    ...(byFeatureModel ? { by_feature_model: byFeatureModel } : {}),
     rates: rateRows,
     totals: {
       requests: sum((r) => r.requests),
@@ -84,6 +107,14 @@ export function aiCostReportCsv(report: MonthlyAiCostReport): string {
   const lines = [csvLine(cols)]
   for (const r of report.ai) {
     lines.push(csvLine([report.month, r.sku, 'USD', r.requests, r.priced_usd.toFixed(8).replace('.', ','), r.unpriced, r.input_tokens, r.output_tokens, r.cached_input_tokens]))
+  }
+  // Segundo bloco (migration 380): funcionalidade × modelo. Só quando a RPC devolveu a visão por funcionalidade.
+  if (report.by_feature_model && report.by_feature_model.length > 0) {
+    lines.push(csvLine([]))
+    lines.push(csvLine(['mes', 'funcionalidade', 'item', 'moeda', 'chamadas', 'valor_estimado', 'sem_tarifa', 'tokens_entrada', 'tokens_saida', 'tokens_cache']))
+    for (const r of report.by_feature_model) {
+      lines.push(csvLine([report.month, r.feature, r.sku, 'USD', r.requests, r.priced_usd.toFixed(8).replace('.', ','), r.unpriced, r.input_tokens, r.output_tokens, r.cached_input_tokens]))
+    }
   }
   lines.push(csvLine([report.month, 'Observacao: ' + report.notice, '', '', '', '', '', '', '']))
   return lines.join('')

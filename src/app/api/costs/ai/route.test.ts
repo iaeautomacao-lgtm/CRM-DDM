@@ -48,6 +48,21 @@ describe("GET /api/costs/ai", () => {
     expect(body.notice).toMatch(/estimad/i);
     expect(res.headers.get("cache-control")).toMatch(/no-store/);
   });
+  it("com a 380: devolve by_feature/by_feature_model junto dos campos atuais, estimate:true; no CSV entra o bloco por funcionalidade", async () => {
+    const row = { requests: 2, input_tokens: 10, output_tokens: 5, cached_input_tokens: 0, priced_usd: 1.5, unpriced: 0 };
+    mocks.rpc.mockResolvedValue({ data: { ai: [{ sku: "openai:m", ...row }], by_feature: [{ feature: "responder", ...row }], by_feature_model: [{ feature: "responder", sku: "openai:m", ...row }] }, error: null });
+    const body = await (await GET(req("?month=2026-10"))).json();
+    expect(body).toMatchObject({ estimate: true, ai: [{ sku: "openai:m" }], by_feature: [{ feature: "responder", priced_usd: 1.5 }], by_feature_model: [{ feature: "responder", sku: "openai:m" }] });
+    expect(body.totals.priced_usd).toBe(1.5);
+    const csv = await (await GET(req("?month=2026-10&format=csv"))).text();
+    expect(csv).toContain("mes;funcionalidade;item");
+    expect(csv).toContain("responder");
+  });
+  it("sem a 380 (RPC antiga): campos atuais e by_feature ausente", async () => {
+    const body = await (await GET(req("?month=2026-10"))).json();
+    expect("by_feature" in body).toBe(false);
+    expect(body.ai).toHaveLength(1);
+  });
   it("sem permissão: nada é lido", async () => {
     mocks.requirePermission.mockRejectedValue(Object.assign(new Error("negado"), { status: 403 }));
     const res = await GET(req());
