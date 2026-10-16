@@ -33,6 +33,10 @@ Variáveis opcionais: `DISPATCH_WORKER_ID`, `DISPATCH_WORKER_GROUP`, `DISPATCH_W
 
 Parada (SIGTERM/SIGINT): para de iniciar envios, espera os em voo (≤ 8 s), drena as confirmações em micro-lote e expira os leases; limite duro de 15 s.
 
+## Rodadas e caudas
+
+Cada número tem o seu estágio de envio: a rodada só espera o orçamento de início (DISPATCH_WORKER_ROUND_MS, 20 s); o que ficou em voo termina em segundo plano e não atrasa os outros números nem o planejamento seguinte. Detalhes e medidas: docs/disparador-bancada-carga.md, seção 7.
+
 ## Observabilidade
 
 - `system_logs`: evento `dispatch_worker_tick` (a cada ≥ 15 s com trabalho; traz `worker.sent_per_s`, números próprios e o payload de telemetria do tick).
