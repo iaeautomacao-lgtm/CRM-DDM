@@ -1,6 +1,7 @@
 import "server-only";
 import { maskCpfForLog, maskTextForLog, safeDbError } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
+import { recordAiTokenUsage } from '@/lib/costs/usage';
 import { parseTranscript } from "@/lib/ai/stt";
 import { resolveConversationLine } from "@/lib/whatsapp/conversation-line";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
@@ -1264,13 +1265,15 @@ async function handleAiAutoResponseAttempt(
         responseModel,
         // Esperando vaga/429 conta como "IA trabalhando" para o vigia.
         () => tracker?.heartbeat?.beat() ?? Promise.resolve(),
+        undefined,
+        accountId,
       );
     } else if (aiConfig.api_provider === "claude") {
-      return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel);
+      return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
     } else if (aiConfig.api_provider === "hermes") {
-      return generateHermesResponse(activeKey, systemPromptWithKb, history, responseModel);
+      return generateHermesResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
     }
-    return generateGeminiResponse(activeKey, systemPromptWithKb, history, responseModel);
+    return generateGeminiResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
   };
 
   let generatedText = "";
@@ -1864,6 +1867,7 @@ export async function generateGeminiResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string, // só para a telemetria de custo (migration 378)
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -1941,6 +1945,7 @@ export async function generateGeminiResponse(
   }
 
   const data = await response.json();
+  void recordAiTokenUsage({ accountId, provider: "gemini", model, feature: "responder", response: data });
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
@@ -2015,6 +2020,7 @@ export async function generateOpenAiResponse(
      */
     real?: () => Promise<ToolRealRequest>,
   ) => Promise<Response>,
+  accountId?: string, // só para a telemetria de custo (migration 378): contagens de tokens, nunca texto
 ): Promise<string> {
   const url = openAiUrl("/chat/completions");
 
@@ -2104,6 +2110,7 @@ export async function generateOpenAiResponse(
     }
 
     const data = await response.json();
+    void recordAiTokenUsage({ accountId, provider: "openai", model, feature: "responder", response: data });
     const choice = data?.choices?.[0];
     const message = choice?.message;
 
@@ -2400,6 +2407,7 @@ export async function generateClaudeResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string, // só para a telemetria de custo (migration 378)
 ): Promise<string> {
   const url = "https://api.anthropic.com/v1/messages";
   const messages = [];
@@ -2433,6 +2441,7 @@ export async function generateClaudeResponse(
   }
 
   const data = await response.json();
+  void recordAiTokenUsage({ accountId, provider: "claude", model, feature: "responder", response: data });
   const textBlock = Array.isArray(data?.content)
     ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
     : null;
@@ -2444,6 +2453,7 @@ export async function generateHermesResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string, // só para a telemetria de custo (migration 378)
 ): Promise<string> {
   const url = "https://openrouter.ai/api/v1/chat/completions";
   const messages = [];
@@ -2482,5 +2492,6 @@ export async function generateHermesResponse(
   }
 
   const data = await response.json();
+  void recordAiTokenUsage({ accountId, provider: "hermes", model, feature: "responder", response: data });
   return data?.choices?.[0]?.message?.content || "";
 }
