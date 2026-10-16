@@ -136,7 +136,7 @@ export default function MetaIntegrationsPage(){
     <main className="space-y-3 p-4 lg:p-6">
       <h1 className="text-xl font-semibold">Integrações Meta</h1>
       <p className="text-sm text-muted-foreground">Esta área é reservada aos administradores da organização.</p>
-      <Button asChild variant="outline"><Link href="/canais">Voltar aos canais</Link></Button>
+      <Link href="/canais" className="inline-flex h-9 items-center justify-center rounded-md border border-border px-4 text-sm font-medium hover:bg-accent">Voltar aos canais</Link>
     </main>
   )
 
