@@ -1,13 +1,15 @@
 "use client";
 
 // Painel lateral com as conversas por trás de um número do Monitoramento
-// (abas Hoje e SLA). Cada linha leva ao caso no inbox. Dados de
+// (abas Hoje e SLA). Cada linha abre a mesma gaveta de conversa do
+// Monitoramento (ConversationModal, com "Abrir no Conversas" dentro); a lista
+// continua por baixo e reaparece ao fechar a gaveta. Dados de
 // GET /api/monitoramento/conversations.
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { format } from "date-fns";
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, MessageSquare } from "lucide-react";
+import { ConversationModal } from "@/components/monitoramento/conversation-modal";
 import { apiFetch } from "@/lib/api-fetch";
 import { formatCappedTotal, pageCount, readCappedTotal } from "@/lib/reports/capped-label";
 import { Button } from "@/components/ui/button";
@@ -67,6 +69,7 @@ export function ConversationDrilldown({
   const [totals, setTotals] = useState({ total: 0, capped: false, cap: 100_000 });
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
+  const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const queryKey = query ? JSON.stringify(query) : null;
 
   // Nova consulta volta para a página 1.
@@ -106,6 +109,7 @@ export function ConversationDrilldown({
   const pages = pageCount(totals.total, 50);
 
   return (
+    <>
     <Sheet open={!!query} onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
@@ -121,17 +125,16 @@ export function ConversationDrilldown({
             <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma conversa.</p>
           ) : (
             rows.map((r) => (
-              <Link
+              <button
                 key={r.id}
-                href={`/inbox?c=${r.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2 text-xs transition-colors hover:border-primary/50 hover:bg-muted/40"
+                type="button"
+                onClick={() => setOpenConversationId(r.id)}
+                className="group flex w-full items-start justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-xs transition-colors hover:border-primary/50 hover:bg-muted/40"
               >
                 <div className="min-w-0">
                   <p className="flex items-center gap-1 truncate text-sm font-medium text-foreground group-hover:text-primary">
                     {r.contact_name}
-                    <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+                    <MessageSquare className="h-3 w-3 shrink-0 opacity-60" />
                   </p>
                   <p className="text-muted-foreground">
                     {CHANNEL_LABEL[r.channel_type] ?? r.channel_type} · {STATUS_LABEL[r.status]} ·{" "}
@@ -146,7 +149,7 @@ export function ConversationDrilldown({
                     <p>1ª resposta {mins(r.first_response_min)}</p>
                   )}
                 </div>
-              </Link>
+              </button>
             ))
           )}
           {pages > 1 && (
@@ -167,5 +170,13 @@ export function ConversationDrilldown({
         </div>
       </SheetContent>
     </Sheet>
+    {openConversationId && (
+      <ConversationModal
+        key={openConversationId}
+        conversationId={openConversationId}
+        onClose={() => setOpenConversationId(null)}
+      />
+    )}
+    </>
   );
 }

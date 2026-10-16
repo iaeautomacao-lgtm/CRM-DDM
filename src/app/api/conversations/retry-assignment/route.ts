@@ -23,7 +23,7 @@ async function handlePost(request: Request) {
   const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const { data: conversations, error } = await db
     .from("conversations")
-    .select("id, team_id, account_id")
+    .select("id, team_id, account_id, contact_id")
     .eq("status", "pending")
     .is("assigned_agent_id", null)
     // @operador (migration 376): conversa reservada a um operador espera por ele; o rodízio não a redistribui.
@@ -52,9 +52,10 @@ async function handlePost(request: Request) {
     try {
       if (!conv.account_id) continue;
 
+      const ownerCtx = { contactId: conv.contact_id, conversationId: conv.id }; // carteira fixa (fase 2)
       const agentId = conv.team_id
-        ? await selectAgentForTeam(db, conv.team_id, conv.account_id)
-        : await selectAnyAgentForAccount(db, conv.account_id);
+        ? await selectAgentForTeam(db, conv.team_id, conv.account_id, ownerCtx)
+        : await selectAnyAgentForAccount(db, conv.account_id, ownerCtx);
 
       if (!agentId) {
         const { error: retryError } = await db.from('conversations')

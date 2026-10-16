@@ -99,6 +99,20 @@ describe("selectAgentForTeam / selectAnyAgentForAccount (fila, retry, round-robi
   });
 });
 
+// Carteira fixa, fase 2: preferir o dono do contato NUNCA fura a pausa (o dono passa pelo mesmo critério único).
+describe("carteira fixa (fase 2): dono do contato em pausa", () => {
+  it("seletores com o dono em pausa não o devolvem; o rodízio segue", async () => {
+    const t = tables({ contacts: [{ id: "c1", account_id: ACC, owner_user_id: "u1" }], agent_pauses: [pause("u1")] });
+    const owner = { contactId: "c1", conversationId: "c-t1" };
+    expect(await selectAgentForTeam(dbOf(t), "t1", ACC, owner)).toBe("u2");
+    expect(await selectAnyAgentForAccount(dbOf(t), ACC, owner)).toBe("u2");
+  });
+  it("o helper do dono usa o critério único de pausa e o motor o chama", () => {
+    expect(readFileSync(join(resolve(process.cwd(), "src"), "lib/carteira/owner-preference.ts"), "utf8")).toMatch(/from "@\/lib\/pausas\/availability"/);
+    expect(readFileSync(join(resolve(process.cwd(), "src"), "lib/flows/engine.ts"), "utf8")).toMatch(/preferredContactOwner/);
+  });
+});
+
 describe("menu 'escolha seu atendente' (listOnlineAgents)", () => {
   it("o pausado não aparece", async () => {
     const t = tables({ agent_pauses: [pause("u1")] });

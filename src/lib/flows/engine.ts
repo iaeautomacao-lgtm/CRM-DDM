@@ -45,6 +45,9 @@ import {
 } from "./agent-picker";
 import { filterAvailableAgents, isAgentPaused } from "@/lib/pausas/availability";
 import { hasMentionReservation } from "@/lib/inbox/agent-mention-server";
+import { preferredContactOwner, type OwnerPreferenceInput } from "@/lib/carteira/owner-preference";
+
+type OwnerContext = Pick<OwnerPreferenceInput, "contactId" | "conversationId">;
 import { maskPiiArgs } from "@/lib/privacy/mask";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
@@ -1520,7 +1523,11 @@ export async function selectAgentForTeam(
   db: AdminClient,
   teamId: string,
   accountId: string,
+  owner?: OwnerContext,
 ): Promise<string | null> {
+  // Carteira fixa (fase 2): o dono do contato vai na frente quando elegível; senão segue o rodízio abaixo, igual a antes.
+  const ownerId = await preferredContactOwner(db, { accountId, teamId, ...owner });
+  if (ownerId) return ownerId;
   const { data: members, error: membersError } = await db
     .from("team_members")
     .select("user_id")
@@ -1643,7 +1650,11 @@ export async function selectAgentForTeam(
 export async function selectAnyAgentForAccount(
   db: AdminClient,
   accountId: string,
+  owner?: OwnerContext,
 ): Promise<string | null> {
+  // Carteira fixa (fase 2): conversa sem equipe — o dono (operador ativo, online, fora de pausa e abaixo do limite) vai na frente.
+  const ownerId = await preferredContactOwner(db, { accountId, ...owner });
+  if (ownerId) return ownerId;
   // Busca todos os Operadores da conta (account_role = 'agent')
   const { data: agents } = await db
     .from("profiles")
@@ -1755,13 +1766,13 @@ async function executeHandoffTeam(
       // sem escolha de agente e sem gravar a conversa (mantém equipe, status e a reserva)
     } else if (cfg.team_id) {
       convUpdate.team_id = cfg.team_id;
-      selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id);
+      selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id, { contactId: run.contact_id, conversationId: run.conversation_id });
       convUpdate.assigned_agent_id = selectedAgent ?? null;
     } else {
       // Sem team_id configurado — busca qualquer Operador disponível
       // da conta (account_role = 'agent'), por presença e menor carga.
       // Admins nunca recebem atribuições automáticas.
-      selectedAgent = await selectAnyAgentForAccount(db, run.account_id);
+      selectedAgent = await selectAnyAgentForAccount(db, run.account_id, { contactId: run.contact_id, conversationId: run.conversation_id });
       // Sempre seta o campo — null limpa atribuição anterior do BEN
       convUpdate.assigned_agent_id = selectedAgent ?? null;
     }
