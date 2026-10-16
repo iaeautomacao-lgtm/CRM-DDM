@@ -73,6 +73,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import type { AccountMember, MessageTemplate, Tag, Team } from "@/types";
+import { mentionAliasErrorMessage, parseMentionAlias } from "@/lib/members/mention-alias";
 
 /** Replaces {{1}}, {{2}}, ... with the matching sample value — left as
  *  literal "{{n}}" when no sample exists, mirroring template-manager's
@@ -144,6 +145,8 @@ function MemberRoleSection({
   pendingMemberId,
   onToggle,
   onCapacityChange,
+  onAliasChange,
+  aliasResetNonce,
   readOnly,
 }: {
   title: string;
@@ -158,6 +161,10 @@ function MemberRoleSection({
   onToggle: (userId: string, checked: boolean) => void;
   /** Commits on blur — rawValue is the input's raw text ("" = sem limite). */
   onCapacityChange: (userId: string, rawValue: string) => void;
+  /** Apelido @operador (commit no blur). Ausente = campo não aparece (só operadores, só quem tem members.manage edita). */
+  onAliasChange?: (userId: string, rawValue: string) => void;
+  /** Muda quando um salvamento falha, para o campo voltar ao valor salvo. */
+  aliasResetNonce?: number;
   /** Supervisor (admin) view — same data, add/remove controls hidden. */
   readOnly: boolean;
 }) {
@@ -205,6 +212,19 @@ function MemberRoleSection({
                     {displayName}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{roleMeta.label}</span>
+                  {onAliasChange && member.role === "agent" && (
+                    <Input
+                      key={`alias-${member.user_id}-${member.mention_alias ?? ""}-${aliasResetNonce ?? 0}`}
+                      defaultValue={member.mention_alias ? `@${member.mention_alias}` : ""}
+                      onBlur={(e) => onAliasChange(member.user_id, e.target.value)}
+                      placeholder="@apelido"
+                      maxLength={34}
+                      autoComplete="off"
+                      aria-label={`Apelido de atendimento de ${displayName}`}
+                      title="Apelido exclusivo: o cliente que escreve @apelido no início da mensagem cai na fila deste operador"
+                      className="h-7 w-28 px-2 text-xs"
+                    />
+                  )}
                   <div className="flex shrink-0 items-center gap-1" title="Atend. simultâneos">
                     <Input
                       key={`cap-${member.user_id}-${member.max_simultaneous_chats ?? "none"}`}
@@ -329,6 +349,9 @@ export default function EquipeDetailPage({
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState("overview");
   const isReadOnly = !can("teams.manage");
+  // Apelido @operador: o servidor exige members.manage (não teams.manage).
+  const canEditAlias = can("members.manage");
+  const [aliasResetNonce, setAliasResetNonce] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -648,6 +671,41 @@ export default function EquipeDetailPage({
       toast.error(err instanceof Error ? err.message : "Falha ao atualizar membro da equipe");
     } finally {
       setPendingMemberId(null);
+    }
+  }
+
+  async function handleAliasChange(userId: string, rawValue: string) {
+    if (!canEditAlias) return;
+    const previous = allAccountMembers.find((m) => m.user_id === userId)?.mention_alias ?? null;
+    const parsed = parseMentionAlias(rawValue);
+    if (!parsed.ok) {
+      toast.error(parsed.message);
+      setAliasResetNonce((n) => n + 1);
+      return;
+    }
+    const alias = parsed.alias;
+    if (alias === previous) {
+      setAliasResetNonce((n) => n + 1);
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/account/members/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mention_alias: alias }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(mentionAliasErrorMessage(res.status, payload.error));
+      }
+      setAllAccountMembers((prev) =>
+        prev.map((m) => (m.user_id === userId ? { ...m, mention_alias: alias } : m)),
+      );
+      toast.success(alias ? `Apelido @${alias} salvo` : "Apelido removido");
+    } catch (err) {
+      console.error("[EquipeDetail] alias change error:", err);
+      toast.error(err instanceof Error ? err.message : mentionAliasErrorMessage(0));
+      setAliasResetNonce((n) => n + 1);
     }
   }
 
@@ -1069,6 +1127,8 @@ export default function EquipeDetailPage({
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
                 onCapacityChange={handleCapacityChange}
+                onAliasChange={canEditAlias ? handleAliasChange : undefined}
+                aliasResetNonce={aliasResetNonce}
                 readOnly={isReadOnly}
               />
             </>
