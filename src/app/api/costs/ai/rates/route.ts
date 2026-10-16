@@ -96,15 +96,22 @@ export async function PUT(request: Request) {
     }
 
     const db = supabaseAdmin()
-    const found = await db.from('cost_rates').select('id,effective_from').eq('account_id', ctx.accountId).eq('source', 'ai').eq('sku', sku).eq('effective_from', effectiveFrom).limit(1)
+    // Todas as vigências deste modelo (poucas): a regra olha a mesma data E se já há tarifa em vigor (revisão de segurança 16/10, B2).
+    const found = await db.from('cost_rates').select('id,effective_from').eq('account_id', ctx.accountId).eq('source', 'ai').eq('sku', sku).limit(500)
     if (found.error) {
       if (isMissing(found.error)) return bad('Custos de IA indisponíveis: aplique a migration 378', 503)
       console.error('[costs/ai/rates] falha ao consultar:', found.error.code ?? 'unknown')
       return bad('Não foi possível salvar a tarifa.', 500)
     }
-    const existing = ((found.data ?? []) as { id: string; effective_from: string }[])[0]
+    const known = (found.data ?? []) as { id: string; effective_from: string }[]
+    const existing = known.find((r) => r.effective_from === effectiveFrom)
     const conflict = 'Já existe uma tarifa com essa vigência, que já começou e não pode ser alterada. Cadastre uma com data posterior.'
     if (existing && existing.effective_from <= today) return bad(conflict, 409)
+    // Vigência que já começou é imutável: uma tarifa NOVA com data de hoje ou do passado reprecificaria o consumo já medido sob a tarifa em vigor. Só
+    // vale retroagir (dentro do mês atual) quando este modelo ainda não tem tarifa em vigor, ou seja, quando o passado estava "sem preço".
+    if (!existing && effectiveFrom <= today && known.some((r) => r.effective_from <= today)) {
+      return bad('Este modelo já tem uma tarifa em vigor; a nova vigência deve começar depois de hoje para não alterar o custo já medido.', 409)
+    }
 
     const values = { input_per_million: input, cached_input_per_million: cached, output_per_million: output }
     const saved = existing

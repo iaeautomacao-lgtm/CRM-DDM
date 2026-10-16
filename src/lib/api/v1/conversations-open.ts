@@ -4,6 +4,7 @@
 // janela de 24h da Meta para texto livre e blacklist/opt-out (fail-closed). A bifurcação Meta × WAHA NÃO é unificada: cada caminho envia do seu jeito.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError, badRequest, forbidden, notFound, unprocessable } from '@/lib/api/v1/respond';
+import { maskTextForLog } from '@/lib/privacy/mask';
 import {
   CONVERSATION_COLUMNS,
   guardPausedAssignee,
@@ -233,7 +234,10 @@ export async function sendInitialMessage(
       };
       waMessageId = (await sendWahaTextMessage(wahaConfig, phone, message.text)).messageId;
     } catch (err) {
-      throw new ApiError('internal', `Falha no envio pelo WAHA: ${err instanceof Error ? err.message : 'erro desconhecido'}`, 502);
+      // B7 (revisão 16/10): o texto cru do WAHA (pode trazer chatId com telefone e detalhe interno) NÃO vai ao integrador: mensagem fixa e código estável;
+      // o detalhe fica só no log do servidor, sem número de telefone nem CPF.
+      console.error('[API conversations] falha no envio pelo WAHA:', maskTextForLog(err instanceof Error ? err.message : 'erro desconhecido', 200).replace(/\d{8,}/g, '****'));
+      throw new ApiError('internal', 'Não foi possível enviar a mensagem pelo canal WAHA. Tente novamente; se persistir, verifique a sessão do canal.', 502, undefined, undefined, { reason: 'waha_send_failed' });
     }
     contentText = message.text;
     contentType = 'text';

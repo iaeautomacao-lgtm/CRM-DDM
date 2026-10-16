@@ -38,7 +38,7 @@ export function GET(request: Request, context: Params) {
 export function PATCH(request: Request, context: Params) {
   return handle(request, context, "PATCH", ["webhooks:write"], async (ctx, id, logCtx) => {
     const body = await readJsonObject(request);
-    return ok(await updateEndpoint(ctx.supabase, ctx.accountId, id, body), 200, logCtx);
+    return ok(await updateEndpoint(ctx.supabase, ctx.accountId, id, body, { scopes: ctx.scopes, accountId: ctx.accountId, keyId: ctx.keyId }), 200, logCtx);
   });
 }
 

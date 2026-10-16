@@ -1,5 +1,6 @@
 // PRD 15, 15.14 — catálogo dos eventos dos webhooks de saída (API v1). Fonte única: a rota valida contra ele e o OpenAPI o documenta.
 // Os triggers da migration 204 geram exatamente estes tipos; um evento novo = 1 entrada aqui + o trigger/RPC que o emite.
+import type { ApiScope } from "@/lib/api-keys/scopes";
 
 export const WEBHOOK_EVENTS = [
   "message.received", // mensagem de cliente chegou (qualquer canal)
@@ -47,6 +48,30 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   "campaign.reply": "O cliente respondeu a um disparo de campanha: campanha, external_id, destinatário, contato, telefone e o texto da resposta. Carrega dado pessoal.",
   "recipient.funnel": "Destinatário avançou no funil do link rastreado: clicked, closed (fechou acordo) ou paid (pagou, confirmado na DDM), com a atribuição direct, ai ou human. Carrega o telefone; pode ser muito volumoso.",
 };
+
+/**
+ * Escopo de LEITURA que a CHAVE precisa ter para assinar o evento (revisão de segurança 16/10, B8). Eventos que carregam telefone/texto do cliente não podem
+ * ser assinados por uma chave só com `webhooks:write`: o webhook entregaria dado que as rotas de leitura equivalentes negariam à mesma chave.
+ *   conversation.opened / conversation.assigned  → conversations:read  (contato, telefone, canal, equipe e atendente; como GET /conversations)
+ *   campaign.reply                               → messages:read       (texto da resposta do cliente; como GET /messages)
+ * Os eventos que já existiam (message.received, conversation.closed, recipient.*, campaign.*…) ficam como estavam: exigir escopo novo quebraria integrações
+ * em produção; o endurecimento deles é decisão à parte. Só vale na API com chave: o painel (sessão de admin) não usa escopo.
+ */
+export const WEBHOOK_EVENT_READ_SCOPE: Partial<Record<WebhookEvent, ApiScope>> = {
+  "conversation.opened": "conversations:read",
+  "conversation.assigned": "conversations:read",
+  "campaign.reply": "messages:read",
+};
+
+/** Eventos pedidos cujo escopo de leitura a chave não tem (vazio = pode assinar tudo). */
+export function missingEventReadScopes(events: readonly WebhookEvent[], keyScopes: readonly string[]): Array<{ event: WebhookEvent; scope: ApiScope }> {
+  const out: Array<{ event: WebhookEvent; scope: ApiScope }> = [];
+  for (const event of events) {
+    const scope = WEBHOOK_EVENT_READ_SCOPE[event];
+    if (scope && !keyScopes.includes(scope)) out.push({ event, scope });
+  }
+  return out;
+}
 
 export const MAX_ENDPOINTS_PER_ACCOUNT = 10;
 export const MAX_DELIVERY_ATTEMPTS = 12;

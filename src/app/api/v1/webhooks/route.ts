@@ -35,6 +35,7 @@ export async function POST(request: Request) {
     const created = await createEndpoint(ctx.supabase, {
       accountId: ctx.accountId,
       keyId: ctx.keyId,
+      keyAuth: { scopes: ctx.scopes, accountId: ctx.accountId, keyId: ctx.keyId },
       url: body.url,
       events: body.events,
       description: body.description,

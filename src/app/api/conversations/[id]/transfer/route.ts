@@ -3,6 +3,7 @@ import { registerAuditActor } from '@/lib/audit/context'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { pausedAgentIds } from '@/lib/pausas/availability'
+import { completeAssignmentAudit } from '@/lib/conversations/assignment-audit'
 
 // POST /api/conversations/[id]/transfer  { agent_id?, team_id?, reason? }
 //
@@ -102,12 +103,13 @@ export async function POST(
 
     const { data: visible, error: visErr } = await supabase
       .from('conversations')
-      .select('id')
+      .select('id, assigned_agent_id, team_id')
       .eq('id', conversationId)
       .eq('account_id', accountId)
       .limit(1)
     if (visErr) throw visErr
-    if (!visible?.[0]) {
+    const before = (visible?.[0] ?? null) as { id: string; assigned_agent_id: string | null; team_id: string | null } | null
+    if (!before) {
       return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
@@ -115,7 +117,6 @@ export async function POST(
     const auditNote = confirmedPaused ? `(atendente em pausa, confirmado)${reason ? ' ' + reason : ''}`.slice(0, REASON_MAX) : reason
     if (auditNote) await registerAuditActor({ note: auditNote })
     const db = supabaseAdmin()
-    const startedAt = new Date().toISOString()
     const { data: updated, error } = await db
       .from('conversations')
       .update(patch)
@@ -128,22 +129,16 @@ export async function POST(
       return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
-    // A linha que o trigger acabou de gravar (se algo mudou de fato).
-    const { data: rows } = await db
-      .from('conversation_assignments')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .is('actor_id', null)
-      .gte('created_at', startedAt)
-      .order('created_at', { ascending: false })
-      .limit(1)
-    const row = rows?.[0]
-    if (row) {
-      await db
-        .from('conversation_assignments')
-        .update({ actor_id: userId, ...(auditNote ? { reason: auditNote } : {}) })
-        .eq('id', row.id)
-    }
+    // A linha que o trigger acabou de gravar (se algo mudou de fato), achada pelo de→para deste UPDATE e não por relógio (B6).
+    await completeAssignmentAudit(db, {
+      conversationId,
+      fromAgent: before.assigned_agent_id,
+      fromTeam: before.team_id,
+      toAgent: conversation.assigned_agent_id ?? null,
+      toTeam: conversation.team_id ?? null,
+      actorId: userId,
+      reason: auditNote,
+    })
 
     return NextResponse.json({ conversation })
   } catch (err) {
