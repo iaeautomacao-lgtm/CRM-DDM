@@ -34,6 +34,7 @@ import {
   MailX,
   MoreVertical,
   Plus,
+  Pencil,
   Search,
   Trash2,
   Upload,
@@ -172,6 +173,10 @@ export function MembersTab() {
   const [mentionMember, setMentionMember] = useState<Member | null>(null);
   const [mentionDraft, setMentionDraft] = useState('');
   const [savingMention, setSavingMention] = useState(false);
+  const [identityMember, setIdentityMember] = useState<Member | null>(null);
+  const [identityName, setIdentityName] = useState('');
+  const [identityEmail, setIdentityEmail] = useState('');
+  const [savingIdentity, setSavingIdentity] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -265,6 +270,62 @@ export function MembersTab() {
       console.error('[MembersTab] role change error:', err);
       toast.error('Não foi possível conectar ao servidor');
     } finally {
+      setPendingMemberAction(null);
+    }
+  }
+
+  function openIdentityEditor(member: Member) {
+    if (!canManageMembers || !user || member.user_id === user.id ||
+        member.role === 'owner' || (member.role === 'admin' && !isOwner)) return;
+    setIdentityMember(member);
+    setIdentityName(member.full_name);
+    setIdentityEmail(member.email ?? '');
+  }
+
+  async function saveIdentity() {
+    if (!identityMember || savingIdentity || !canManageMembers) return;
+    const fullName = identityName.trim().replace(/\s+/g, ' ');
+    const email = identityEmail.trim().toLowerCase();
+    if (fullName.length < 2 || fullName.length > 120) {
+      toast.error('Informe um nome entre 2 e 120 caracteres');
+      return;
+    }
+    if (!email || email.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) {
+      toast.error('Informe um e-mail válido');
+      return;
+    }
+    if (fullName === identityMember.full_name && email === (identityMember.email ?? '').toLowerCase()) {
+      setIdentityMember(null);
+      return;
+    }
+    setSavingIdentity(true);
+    setPendingMemberAction(identityMember.user_id);
+    try {
+      const res = await apiFetch(`/api/account/members/${identityMember.user_id}/identity`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: fullName, email }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error || 'Falha ao alterar os dados do usuário');
+        return;
+      }
+      const saved = body.member as { full_name: string; email: string };
+      setMembers(prev => prev.map(m =>
+        m.user_id === identityMember.user_id
+          ? { ...m, full_name: saved.full_name, email: saved.email }
+          : m,
+      ));
+      toast.success(body.email_changed
+        ? 'Dados atualizados. O usuário deve entrar com o novo e-mail.'
+        : 'Nome atualizado com sucesso');
+      setIdentityMember(null);
+    } catch (err) {
+      console.error('[MembersTab] failed to edit member identity:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setSavingIdentity(false);
       setPendingMemberAction(null);
     }
   }
@@ -666,6 +727,23 @@ export function MembersTab() {
                       </span>
                     )}
 
+                    {/* Identity editor: never for the owner/self; peer admins
+                        require owner permission to prevent account takeover. */}
+                    {canManageMembers && !isOwnerRow && !isSelf &&
+                      (member.role !== 'admin' || isOwner) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openIdentityEditor(member)}
+                          disabled={isBusy}
+                          aria-label={`Editar nome e e-mail de ${member.full_name || 'usuário'}`}
+                          className="border-border text-muted-foreground hover:bg-muted"
+                        >
+                          <Pencil className="size-4" />
+                          <span className="hidden lg:inline">Editar dados</span>
+                        </Button>
+                      )}
+
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -922,6 +1000,67 @@ export function MembersTab() {
             </Button>
             <Button onClick={() => void saveMention()} disabled={savingMention}>
               {savingMention ? 'Salvando...' : 'Salvar apelido'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={identityMember !== null}
+        onOpenChange={(open) => {
+          if (!open && !savingIdentity) setIdentityMember(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="size-4 text-primary" />
+              Editar dados do usuário
+            </DialogTitle>
+            <DialogDescription>
+              Altere nome completo e e-mail de login de {identityMember?.full_name || 'este usuário'}.
+              O novo e-mail substituirá imediatamente o anterior no Supabase Auth.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="member-full-name">Nome completo</Label>
+              <Input
+                id="member-full-name"
+                autoComplete="off"
+                maxLength={120}
+                value={identityName}
+                onChange={(event) => setIdentityName(event.target.value)}
+                disabled={savingIdentity}
+                placeholder="Nome e sobrenome"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="member-login-email">E-mail de login</Label>
+              <Input
+                id="member-login-email"
+                type="email"
+                autoComplete="off"
+                maxLength={254}
+                value={identityEmail}
+                onChange={(event) => setIdentityEmail(event.target.value)}
+                disabled={savingIdentity}
+                placeholder="usuario@empresa.com.br"
+              />
+              <p className="text-xs text-muted-foreground">
+                Confirme que o usuário tem acesso ao novo e-mail. Após a alteração,
+                ele deverá utilizá-lo no próximo login. A senha não é alterada.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={savingIdentity}
+              onClick={() => setIdentityMember(null)}>
+              Cancelar
+            </Button>
+            <Button disabled={savingIdentity} onClick={() => void saveIdentity()}>
+              {savingIdentity ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+              {savingIdentity ? 'Salvando...' : 'Salvar alterações'}
             </Button>
           </DialogFooter>
         </DialogContent>
