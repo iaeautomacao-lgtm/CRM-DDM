@@ -65,6 +65,8 @@ import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
 import { PageHeader } from '@/components/ddm/page-header';
 
 const PAGE_SIZE = 25;
+const CONTACTS_CACHE_MAX_ENTRIES = 10;
+const CONTACTS_CACHE_MAX_SEARCHES = 2;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
@@ -208,7 +210,12 @@ function ContactsListTab() {
     'contacts.list',
     [page, selectedTagIds.join(','), searchToken],
     () => loadContactsPage(supabase, { page, term, tagIds: selectedTagIds }),
-    { onError: () => toast.error('Falha ao carregar contatos') },
+    {
+      onError: () => toast.error('Falha ao carregar contatos'),
+      // Minimização (LGPD): só a busca atual e a anterior ficam em memória (grupo = token da busca; 'all' = sem busca),
+      // com no máximo 10 páginas/filtros no total. Buscas antigas saem do cache ao trocar o termo.
+      retain: { maxEntries: CONTACTS_CACHE_MAX_ENTRIES, group: searchToken, maxGroups: CONTACTS_CACHE_MAX_SEARCHES },
+    },
   );
   const contactRowsState = listQ.data?.rows ?? EMPTY_ROWS;
   const totalCount = listQ.data?.count ?? 0;

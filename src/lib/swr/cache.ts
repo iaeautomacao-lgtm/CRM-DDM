@@ -9,6 +9,8 @@
  *  - clearSwrCache() esvazia tudo (logout, troca de conta/usuário, sessão expirada).
  */
 
+import { clearRetention } from "./retention";
+
 // O SWR guarda estados internos de tipos variados no mesmo Map.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Store = Map<string, any>;
@@ -25,6 +27,7 @@ export function getSwrCacheStore(): Store {
 /** Esvazia todo o cache em memória (logout, troca de conta/usuário, sessão expirada). */
 export function clearSwrCache(): void {
   browserStore?.clear();
+  clearRetention();
 }
 
 /** Quantas entradas o cache tem agora — só para testes e diagnóstico. */
