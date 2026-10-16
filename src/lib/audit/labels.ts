@@ -41,6 +41,7 @@ export const RESOURCE_LABEL: Record<string, string> = {
   access: "Acesso",
   audit: "Auditoria",
   api_key: "Chave de API",
+  cost_rate: "Tarifa de IA",
 };
 
 export const EVENT_LABEL: Record<AuditLog["event_type"], string> = {
@@ -81,6 +82,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "campaign.status_changed": "Status da campanha",
   "campaign.deleted": "Campanha excluída",
   "campaign.exported": "Exportação de campanha",
+  "cost_rate.saved": "Tarifa de IA salva",
   "flow.created": "Fluxo criado",
   "flow.updated": "Fluxo alterado",
   "flow.status_changed": "Status do fluxo",

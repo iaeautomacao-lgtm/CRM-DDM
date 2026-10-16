@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveActiveApiKey } from '@/lib/ai/llm-shared'
+import { recordAiTokenUsage } from '@/lib/costs/usage'
 import { sanitizeHistory } from '@/lib/ai/acordito/history'
 import { ACORDITO_ERROR_MESSAGE, ACORDITO_UNAVAILABLE_MESSAGE } from '@/lib/ai/acordito/persona'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -129,7 +130,12 @@ export async function POST(request: Request) {
     return intelligenceErrorResponse(err)
   }
 
-  const llm = createOpenAiChatClient({ apiKey, model: intelligenceModel() })
+  const llm = createOpenAiChatClient({
+    apiKey,
+    model: intelligenceModel(),
+    // Custo de IA (migration 378): só contagens de tokens, sem await e sem texto.
+    onUsage: (response) => void recordAiTokenUsage({ accountId: scope.accountId, provider: 'openai', model: intelligenceModel(), feature: 'intelligence', response }),
+  })
   const encoder = new TextEncoder()
   const chatId = chat.id
 
