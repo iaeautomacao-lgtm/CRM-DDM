@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS wacrm.meta_onboarding_drafts (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (account_id,phone_number_id),
+  UNIQUE (account_id,id),
   FOREIGN KEY (account_id,integration_id)
     REFERENCES wacrm.meta_onboarding_integrations(account_id,id) ON DELETE RESTRICT
 );
