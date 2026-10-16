@@ -238,10 +238,6 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   contact?: Contact;
-  /** Reserva por menção @operador (migration 376): o operador que o cliente pediu. Zera ao assumir ou fechar. */
-  requested_agent_id?: string | null;
-  /** Operador reservado, pronto no GET /api/inbox/conversations (no Realtime só chega o id). */
-  requested_agent?: { user_id: string; full_name: string | null; mention_alias: string | null } | null;
   waha_session?: string;
   /** Canal da conversa (migration 127). Ausente = conversa antiga = WhatsApp. */
   channel_type?: 'whatsapp' | 'webchat' | 'instagram' | 'messenger' | 'sms';
