@@ -4,7 +4,9 @@
 // eventos de notificação…) — sem linha no banco vale o padrão abaixo, e quem decide o conteúdo é o dono da conta na tela.
 // Puro (sem I/O): usado pela rota e pelos testes.
 
-export type SettingType = "timezone" | "business_hours" | "notification_preferences";
+import { SLA_RANGE_ERROR, isValidSlaMinutes } from "@/lib/sla/config";
+
+export type SettingType = "timezone" | "business_hours" | "notification_preferences" | "minutes";
 
 export type Validation = { ok: true; value: unknown } | { ok: false; error: string };
 
@@ -88,11 +90,17 @@ export function validateNotificationPreferences(value: unknown): Validation {
   return { ok: true, value: out };
 }
 
+export function validateFirstResponseSla(value: unknown): Validation {
+  return isValidSlaMinutes(value) ? { ok: true, value } : { ok: false, error: SLA_RANGE_ERROR };
+}
+
 /** O fuso padrão é o que o sistema já usa hoje (janelas de envio em Brasília): não muda comportamento algum. */
 export const ACCOUNT_SETTINGS: readonly SettingDef[] = [
   { key: "timezone", label: "Fuso horário da conta", type: "timezone", default: "America/Sao_Paulo", nullable: false, validate: validateTimezone },
   { key: "business_hours", label: "Horário de atendimento", type: "business_hours", default: null, nullable: true, validate: validateBusinessHours },
   { key: "notification_preferences", label: "Preferências de notificação", type: "notification_preferences", default: {}, nullable: false, validate: validateNotificationPreferences },
+  // SLA de primeira resposta padrão da conta (minutos, 1..1440). Sem valor (null) vale 15, o fixo de antes; cada equipe pode ter o seu (teams.first_response_sla_min, migration 381).
+  { key: "first_response_sla_min", label: "SLA da primeira resposta (padrão da conta)", type: "minutes", default: null, nullable: true, validate: validateFirstResponseSla },
 ];
 
 export function settingDef(key: string): SettingDef | null {

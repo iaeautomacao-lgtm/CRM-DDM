@@ -601,6 +601,10 @@
     {
       "version": "380_ai_costs_by_feature",
       "kind": "registry"
+    },
+    {
+      "version": "381_teams_first_response_sla",
+      "kind": "registry"
     }
   ]
 }

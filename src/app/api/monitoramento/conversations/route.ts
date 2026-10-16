@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { cappedTotal } from '@/lib/reports/capped-count'
+import { effectiveSlaMinutes } from '@/lib/sla/config'
+import { loadSlaConfig } from '@/lib/sla/load'
+import { supabaseAdmin } from '@/lib/account/admin-client'
 
 // GET /api/monitoramento/conversations — as conversas por trás de um número
 // das abas Hoje e SLA (clicar num KPI ou numa célula da tabela).
@@ -110,6 +113,7 @@ export async function GET(request: Request) {
       for (const pr of profiles ?? []) names.set(pr.user_id, pr.full_name)
     }
 
+    const slaConfig = await loadSlaConfig(supabaseAdmin(), accountId) // meta por equipe (migration 381); sem ela, 15
     const rows = (data ?? []).map((c) => {
       const contact = Array.isArray(c.contact) ? c.contact[0] : c.contact
       return {
@@ -128,6 +132,7 @@ export async function GET(request: Request) {
             ? Math.max(0, Math.round((Date.now() - Date.parse(c.last_customer_message_at)) / 60_000))
             : null,
         closed_at: c.closed_at,
+        sla_target_min: effectiveSlaMinutes(slaConfig, c.team_id),
       }
     })
     return NextResponse.json({ rows, ...totals, page, pageSize: PAGE })

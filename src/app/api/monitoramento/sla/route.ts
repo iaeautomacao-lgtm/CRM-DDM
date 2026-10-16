@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
-import { computeSla, SLA_TARGET_MINUTES, type SlaConversationRow } from '@/lib/monitoramento/sla'
+import { computeSla, type SlaConversationRow } from '@/lib/monitoramento/sla'
+import { loadSlaConfig } from '@/lib/sla/load'
+import { supabaseAdmin } from '@/lib/account/admin-client'
 
 // GET /api/monitoramento/sla?days=7 — painel de SLA (owner/admin, como
 // /monitoramento). Conversas criadas no período + todas ainda abertas
@@ -36,11 +38,13 @@ export async function GET(request: Request) {
       if (!data || data.length < PAGE) break
     }
 
+    // Meta por equipe (migration 381): equipe > padrão da conta > 15. Leitura escopada pela conta; sem a migration vale 15.
+    const config = await loadSlaConfig(supabaseAdmin(), accountId)
     return NextResponse.json({
       days,
-      target_minutes: SLA_TARGET_MINUTES,
+      target_minutes: config.defaultMin, // padrão da conta (compatível com o campo antigo); cada linha de byTeam traz a meta da equipe
       truncated: rows.length >= MAX_ROWS,
-      ...computeSla(rows, { sinceMs, nowMs }),
+      ...computeSla(rows, { sinceMs, nowMs, config }),
     })
   } catch (err) {
     return toErrorResponse(err)
