@@ -44,7 +44,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'contacts:read': 'List and read contacts',
   'contacts:write': 'Create and update contacts',
   'conversations:read': 'List and read conversations',
-  'conversations:write': 'Open, close and transfer conversations (assign attendants and teams)',
+  'conversations:write': 'Open, close and transfer conversations (assign attendants and teams). Opening with an initial message also needs messages:send; opening a new contact by phone also needs contacts:write',
   'campaigns:write': 'Create and enqueue Disparador campaigns',
   'campaigns:read': 'Read Disparador campaign status and metrics',
   'reports:read': 'Read aggregated CRM reporting and operational metrics',

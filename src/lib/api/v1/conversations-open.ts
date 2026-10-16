@@ -3,7 +3,7 @@
 // pausa (conversations-control.ts), template Meta (templates.ts: catálogo da WABA, aprovado, variáveis, componentes, qualidade vermelha),
 // janela de 24h da Meta para texto livre e blacklist/opt-out (fail-closed). A bifurcação Meta × WAHA NÃO é unificada: cada caminho envia do seu jeito.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ApiError, badRequest, notFound, unprocessable } from '@/lib/api/v1/respond';
+import { ApiError, badRequest, forbidden, notFound, unprocessable } from '@/lib/api/v1/respond';
 import {
   CONVERSATION_COLUMNS,
   guardPausedAssignee,
@@ -75,7 +75,7 @@ export async function resolveOpenChannel(db: Db, accountId: string, requested: s
   return chosen;
 }
 
-async function resolveContact(db: Db, accountId: string, actor: string, input: OpenInput): Promise<{ id: string; phone: string }> {
+async function resolveContact(db: Db, accountId: string, actor: string, input: OpenInput, canCreateContact: boolean): Promise<{ id: string; phone: string }> {
   if (input.contactId) {
     const { data, error } = await db.from('contacts').select('id, phone').eq('id', input.contactId).eq('account_id', accountId).limit(1);
     if (error) throw unavailable('consultar o contato');
@@ -87,6 +87,8 @@ async function resolveContact(db: Db, accountId: string, actor: string, input: O
   if (!isValidE164(phone)) throw badRequest('Telefone inválido. Use o formato E.164 (ex.: +5527999991212)');
   const existing = (await findExistingContact(db, accountId, phone)) as { id: string; phone: string } | null;
   if (existing) return { id: existing.id, phone: existing.phone };
+  // Criar contato é escrita de contato (escopo contacts:write): conversations:write sozinho só abre atendimento de contato que já existe.
+  if (!canCreateContact) throw forbidden('Este telefone não é um contato cadastrado. Criar contato pela abertura de conversa exige também o escopo contacts:write (ou informe contact_id de um contato existente)');
   const { data, error } = await db.from('contacts').insert({ account_id: accountId, user_id: actor, phone, name: input.name ?? phone }).select('id, phone').limit(1);
   if (error) {
     if (isUniqueViolation(error)) {
@@ -109,7 +111,32 @@ async function findOpenConversation(db: Db, accountId: string, contactId: string
   return ((data ?? [])[0] as ConversationRow | undefined) ?? null;
 }
 
-async function createConversation(db: Db, accountId: string, channel: ChannelRow, contactId: string, assigneeId: string | null, teamId: string | null): Promise<ConversationRow> {
+/**
+ * Abre a conversa SEM duplicar em corrida (migration 383): a RPC serializa por contato+canal (advisory lock de transação), reaproveita a aberta que
+ * outra chamada acabou de criar e devolve `created: false`. Sem a migration (função inexistente) cai no INSERT de sempre.
+ */
+async function createConversation(db: Db, accountId: string, channel: ChannelRow, contactId: string, assigneeId: string | null, teamId: string | null): Promise<{ row: ConversationRow; created: boolean }> {
+  const status = assigneeId ? 'open' : 'pending';
+  const { data: locked, error: lockedError } = await db.rpc('api_open_conversation', {
+    p_account: accountId,
+    p_user: channel.user_id,
+    p_contact: contactId,
+    p_status: status,
+    p_assignee: assigneeId,
+    p_team: teamId,
+    p_waha_session: channel.provider === 'waha' ? channel.waha_session : null,
+    p_config_id: channel.provider === 'waha' ? null : channel.id,
+  });
+  if (!lockedError) {
+    const result = locked as { id?: string; created?: boolean } | null;
+    if (!result?.id) throw unavailable('abrir a conversa');
+    return { row: await loadConversation(db, accountId, result.id), created: result.created === true };
+  }
+  if (lockedError.code !== 'PGRST202' && lockedError.code !== '42883') throw unavailable('abrir a conversa');
+  return { row: await insertConversation(db, accountId, channel, contactId, assigneeId, teamId), created: true };
+}
+
+async function insertConversation(db: Db, accountId: string, channel: ChannelRow, contactId: string, assigneeId: string | null, teamId: string | null): Promise<ConversationRow> {
   const insert: Record<string, unknown> = {
     account_id: accountId,
     user_id: channel.user_id,
@@ -277,45 +304,50 @@ export interface OpenResult {
 
 export async function openConversation(
   db: Db,
-  a: { accountId: string; actorUserId: string; input: OpenInput; onProviderCall: () => void; now?: number },
+  a: { accountId: string; actorUserId: string; input: OpenInput; onProviderCall: () => void; canCreateContact: boolean; now?: number },
 ): Promise<OpenResult> {
   const { input } = a;
   if (input.assigneeId) await validateAssignee(db, a.accountId, input.assigneeId);
   if (input.teamId) await validateTeam(db, a.accountId, input.teamId);
 
   const channel = await resolveOpenChannel(db, a.accountId, input.channel);
-  const contact = await resolveContact(db, a.accountId, a.actorUserId, input);
+  const contact = await resolveContact(db, a.accountId, a.actorUserId, input, a.canCreateContact);
   const wantsOwner = input.assigneeId !== null || input.teamId !== null;
 
   let conversation: ConversationRow | null = null;
   let created = false;
   let transferred = false;
   let viaOwner = false;
+  // Atendimento que já existia (achado na busca ou criado por outra chamada na corrida): confere atendente/equipe pedidos × os atuais.
+  const reconcileExisting = async (): Promise<void> => {
+    if (!conversation) return;
+    const sameAssignee = input.assigneeId === null || input.assigneeId === conversation.assigned_agent_id;
+    const sameTeam = input.teamId === null || input.teamId === conversation.team_id;
+    if (wantsOwner && !(sameAssignee && sameTeam)) {
+      if (!input.forceTransfer) {
+        throw new ApiError('conflict', 'Já existe um atendimento aberto deste contato neste canal com outro atendente/equipe. Use force_transfer: true para transferir.', 409, undefined, undefined, {
+          reason: 'conversation_exists',
+          conversation: toConversationView(conversation),
+        });
+      }
+      const result = await transferConversation(db, {
+        accountId: a.accountId,
+        conversation,
+        assigneeId: input.assigneeId ?? undefined,
+        teamId: input.teamId ?? undefined,
+        confirmPaused: input.confirmPaused,
+        actorUserId: a.actorUserId,
+        reason: input.reason,
+      });
+      conversation = result.conversation;
+      transferred = result.changed;
+    }
+  };
   const ensure = async (): Promise<string> => {
     if (conversation) return conversation.id;
     conversation = await findOpenConversation(db, a.accountId, contact.id, channel);
     if (conversation) {
-      const sameAssignee = input.assigneeId === null || input.assigneeId === conversation.assigned_agent_id;
-      const sameTeam = input.teamId === null || input.teamId === conversation.team_id;
-      if (wantsOwner && !(sameAssignee && sameTeam)) {
-        if (!input.forceTransfer) {
-          throw new ApiError('conflict', 'Já existe um atendimento aberto deste contato neste canal com outro atendente/equipe. Use force_transfer: true para transferir.', 409, undefined, undefined, {
-            reason: 'conversation_exists',
-            conversation: toConversationView(conversation),
-          });
-        }
-        const result = await transferConversation(db, {
-          accountId: a.accountId,
-          conversation,
-          assigneeId: input.assigneeId ?? undefined,
-          teamId: input.teamId ?? undefined,
-          confirmPaused: input.confirmPaused,
-          actorUserId: a.actorUserId,
-          reason: input.reason,
-        });
-        conversation = result.conversation;
-        transferred = result.changed;
-      }
+      await reconcileExisting();
     } else {
       let assignee = input.assigneeId;
       if (assignee) {
@@ -326,10 +358,16 @@ export async function openConversation(
         assignee = await ownerForOpen(db, a.accountId, contact.id);
         viaOwner = assignee !== null;
       }
-      conversation = await createConversation(db, a.accountId, channel, contact.id, assignee, input.teamId);
-      created = true;
+      const made = await createConversation(db, a.accountId, channel, contact.id, assignee, input.teamId);
+      conversation = made.row;
+      created = made.created;
+      if (!made.created) {
+        // Outra chamada abriu o atendimento no mesmo instante (migration 383): vale o dela, tratado como um que já existia.
+        viaOwner = false;
+        await reconcileExisting();
+      }
     }
-    return conversation.id;
+    return (conversation as ConversationRow).id;
   };
 
   let message: SentMessage | null = null;
