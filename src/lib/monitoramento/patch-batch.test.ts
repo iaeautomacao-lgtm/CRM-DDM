@@ -54,6 +54,20 @@ describe("applyPatches", () => {
     expect(applyPatches(board, new Map([["zzz", update("u1")]]))).toBe(board);
     expect(applyPatches(board, new Map())).toBe(board);
   });
+  it("o evento atualiza as datas de espera do cartão (cliente voltou a escrever / atendente respondeu)", () => {
+    const board = new Map([["a", conv("a", { last_message_at: "2026-10-15T12:00:00.000Z", last_customer_message_at: "2026-10-15T12:00:00.000Z" })]]);
+    const patch = {
+      kind: "update" as const,
+      fields: {
+        ...update("u1").fields,
+        last_message_at: "2026-10-15T12:07:00.000Z",
+        last_customer_message_at: "2026-10-15T12:00:00.000Z",
+      },
+    };
+    const got = applyPatches(board, new Map([["a", patch]])).get("a");
+    expect(got?.last_message_at).toBe("2026-10-15T12:07:00.000Z");
+    expect(got?.last_customer_message_at).toBe("2026-10-15T12:00:00.000Z");
+  });
   it("mantém os campos que o evento não traz", () => {
     const board = new Map([["a", conv("a", { contact_id: "k9" })]]);
     expect(applyPatches(board, new Map([["a", update("u1")]])).get("a")?.contact_id).toBe("k9");

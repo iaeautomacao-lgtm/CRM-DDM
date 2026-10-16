@@ -72,6 +72,7 @@ import { pausasApi } from "@/lib/pausas/client";
 import type { PauseReason } from "@/lib/pausas/pause";
 import { PatchQueue, applyPatches } from "@/lib/monitoramento/patch-batch";
 import { ConversationModal } from "@/components/monitoramento/conversation-modal";
+import { useSlaConfig } from "@/hooks/use-sla-config";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 import { ErrorState } from "@/components/dashboard/error-state";
 
@@ -231,6 +232,9 @@ function MonitoramentoBoard() {
             // automation action starts setting it on tracked rows.
             team_id: conv.team_id ?? null,
             updated_at: conv.updated_at,
+            // Nível de espera do cartão: o evento traz a linha inteira, então as datas acompanham sem nova leitura.
+            last_message_at: conv.last_message_at ?? null,
+            last_customer_message_at: conv.last_customer_message_at ?? null,
           },
         });
       } else {
@@ -673,6 +677,8 @@ function MonitoramentoBoard() {
   }, []);
 
   // Conversa aberta em gaveta (o supervisor não sai do painel).
+  // SLA de primeira resposta por equipe (GET /api/sla/config via SWR): cada cartão recebe só o número do limite dele.
+  const slaConfig = useSlaConfig();
   const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const handleOpenClick = useCallback((conversation: MonitorConversation) => {
     setOpenConversationId(conversation.id);
@@ -689,6 +695,7 @@ function MonitoramentoBoard() {
       onOpenClick: handleOpenClick,
       getTeamName,
       getAgentName,
+      getSlaLimit: slaConfig.limitFor,
     };
   }
 

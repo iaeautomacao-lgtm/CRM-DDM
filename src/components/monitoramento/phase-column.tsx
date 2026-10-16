@@ -103,6 +103,7 @@ export function PhaseColumn({
               phase={phase}
               teamName={actions.getTeamName(c.team_id)}
               agentName={actions.getAgentName(c.assigned_agent_id)}
+              slaLimit={actions.getSlaLimit(c.team_id)}
               selected={actions.selectedIds.has(c.id)}
               onToggleSelect={actions.onToggleSelect}
               onTransferClick={actions.onTransferClick}

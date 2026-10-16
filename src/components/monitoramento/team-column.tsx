@@ -158,6 +158,7 @@ export function TeamColumn({
               conversation={c}
               phase={classifyPhase(c.status, c.assigned_agent_id)}
               agentName={actions.getAgentName(c.assigned_agent_id)}
+              slaLimit={actions.getSlaLimit(c.team_id)}
               hideTeam
               selected={actions.selectedIds.has(c.id)}
               onToggleSelect={actions.onToggleSelect}
