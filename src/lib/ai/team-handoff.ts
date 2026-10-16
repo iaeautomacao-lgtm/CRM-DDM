@@ -26,10 +26,12 @@ export async function handOffToTeamQueue(
 ): Promise<TeamQueueHandoff> {
   const { data: convRows } = await db
     .from("conversations")
-    .select("team_id")
+    .select("team_id, contact_id")
     .eq("id", conversationId)
     .limit(1);
-  const teamId = (convRows?.[0] as { team_id?: string | null } | undefined)?.team_id ?? null;
+  const convRow = convRows?.[0] as { team_id?: string | null; contact_id?: string | null } | undefined;
+  const teamId = convRow?.team_id ?? null;
+  const ownerCtx = { contactId: convRow?.contact_id ?? null, conversationId }; // carteira fixa (fase 2)
 
   // Import dinâmico: engine.ts importa o responder (evita ciclo no load).
   const { selectAgentForTeam, selectAnyAgentForAccount } = await import("@/lib/flows/engine");
@@ -37,8 +39,8 @@ export async function handOffToTeamQueue(
   let assignedTo: string | null = null;
   try {
     assignedTo = teamId
-      ? await selectAgentForTeam(engineDb, teamId, accountId)
-      : await selectAnyAgentForAccount(engineDb, accountId);
+      ? await selectAgentForTeam(engineDb, teamId, accountId, ownerCtx)
+      : await selectAnyAgentForAccount(engineDb, accountId, ownerCtx);
   } catch (err) {
     // Sem atendente escolhido a conversa fica na fila (pending, sem dono).
     console.error(`${logPrefix}: falha ao escolher atendente:`, err);
