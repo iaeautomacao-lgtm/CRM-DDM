@@ -1,8 +1,9 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useScopedSWR } from '@/lib/swr';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { cn, normalizeForSearch } from '@/lib/utils';
@@ -73,20 +74,102 @@ interface ContactWithTagIds extends Contact {
   tagIds: string[];
 }
 
+interface ContactsPage {
+  rows: ContactWithTagIds[];
+  count: number;
+}
+
+const EMPTY_ROWS: ContactWithTagIds[] = [];
+const EMPTY_TAGS_MAP: Record<string, Tag> = {};
+const EMPTY_SELECTION: Set<string> = new Set();
+
+type Supabase = ReturnType<typeof createClient>;
+
+async function loadContactsPage(
+  supabase: Supabase,
+  { page, term, tagIds }: { page: number; term: string; tagIds: string[] },
+): Promise<ContactsPage> {
+  const from = page * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+
+  let contactRows: Contact[];
+  let count: number;
+
+  if (tagIds.length > 0) {
+    // Tag filter active — resolve it server-side (join + distinct +
+    // windowed total count + pagination) so a tag covering many
+    // contacts can't silently truncate the result or overflow an IN
+    // clause. See migration 025_filter_contacts_by_tags.
+    const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+      p_tag_ids: tagIds,
+      p_search: term || null,
+      p_limit: PAGE_SIZE,
+      p_offset: from,
+    });
+    if (error) throw error;
+    const rows = (data ?? []) as { contact: Contact; total_count: number }[];
+    contactRows = rows.map((r) => r.contact);
+    count = rows.length > 0 ? Number(rows[0].total_count) : 0;
+  } else {
+    let query = supabase
+      .from('contacts')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (term) {
+      // PostgREST's .or() filter string treats "," "(" ")" as syntax
+      // delimiters, so a raw search term could break out of the intended
+      // ilike clauses and inject extra filter conditions. Wrapping the
+      // value in double quotes (PostgREST's quoted-value syntax) makes
+      // those characters literal — only a `"` or `\` inside the term
+      // needs escaping first.
+      const escaped = term.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const like = `%${escaped}%`;
+      query = query.or(`name.ilike."${like}",phone.ilike."${like}",email.ilike."${like}"`);
+    }
+
+    const { data, count: exactCount, error } = await query;
+    if (error) throw error;
+    contactRows = data ?? [];
+    count = exactCount ?? 0;
+  }
+
+  if (contactRows.length === 0) return { rows: [], count };
+
+  // Fetch tags for these contacts
+  const contactIds = contactRows.map((c) => c.id);
+  const { data: contactTags } = await supabase
+    .from('contact_tags')
+    .select('contact_id, tag_id')
+    .in('contact_id', contactIds);
+
+  const tagsByContact: Record<string, string[]> = {};
+  contactTags?.forEach((ct) => {
+    if (!tagsByContact[ct.contact_id]) tagsByContact[ct.contact_id] = [];
+    tagsByContact[ct.contact_id].push(ct.tag_id);
+  });
+
+  // Guarda só os ids das etiquetas; o mapa id -> etiqueta é aplicado na
+  // renderização (useMemo), então o catálogo de etiquetas carregar depois
+  // não dispara nova busca de contatos.
+  return { rows: contactRows.map((c) => ({ ...c, tagIds: tagsByContact[c.id] ?? [] })), count };
+}
+
 function ContactsListTab() {
   const supabase = createClient();
   const canEdit = usePermission('contacts.edit');
   // Importar cria contatos e etiquetas em lote: o catálogo exige contacts.import (admin+), mais que contacts.edit.
   const canImport = usePermission('contacts.import');
 
-  const [contactRowsState, setContacts] = useState<ContactWithTagIds[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  // Termo de busca é dado pessoal (nome/telefone/e-mail): nunca vai para a chave do cache. A chave leva
+  // este token opaco, trocado a cada nova busca ('all' sem busca), então só a lista sem busca é reaproveitada.
+  const [searchToken, setSearchToken] = useState('all');
   const [page, setPage] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [selectedTagIdsRaw, setSelectedTagIds] = useState<string[]>([]);
   const [tagFilterQuery, setTagFilterQuery] = useState('');
 
   // Modals
@@ -97,22 +180,60 @@ function ContactsListTab() {
   const [detailContactId, setDetailContactId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [loadError, setLoadError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  // Bulk selection (page-scoped — only the loaded rows are selectable)
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  // All tags for display
-  const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
+  // Catálogo de etiquetas em cache (SWR, memória, por conta+usuário).
+  const tagsQ = useScopedSWR<Record<string, Tag>>('contacts.tags', [], async () => {
+    const { data } = await supabase.from('tags').select('*');
+    const map: Record<string, Tag> = {};
+    (data ?? []).forEach((t) => (map[t.id] = t));
+    return map;
+  });
+  const tagsMap = tagsQ.data ?? EMPTY_TAGS_MAP;
+  // Drop any filter selections whose tag no longer exists (e.g. a tag
+  // deleted elsewhere) so it can't linger invisibly in the query.
+  const selectedTagIds = useMemo(
+    () => (tagsQ.data ? selectedTagIdsRaw.filter((id) => tagsQ.data?.[id]) : selectedTagIdsRaw),
+    [selectedTagIdsRaw, tagsQ.data],
+  );
+  const { mutate: mutateTags } = tagsQ;
+  const fetchTags = useCallback(async () => {
+    await mutateTags();
+  }, [mutateTags]);
 
-  // Guards against out-of-order fetch responses: each fetchContacts run
-  // claims a sequence number and only the latest is allowed to commit its
-  // results. Without this, rapidly toggling tag filters could let a slower
-  // earlier request resolve last and render stale rows.
-  const fetchSeq = useRef(0);
+  const term = debouncedSearch.trim();
+  const listQ = useScopedSWR<ContactsPage>(
+    'contacts.list',
+    [page, selectedTagIds.join(','), searchToken],
+    () => loadContactsPage(supabase, { page, term, tagIds: selectedTagIds }),
+    { onError: () => toast.error('Falha ao carregar contatos') },
+  );
+  const contactRowsState = listQ.data?.rows ?? EMPTY_ROWS;
+  const totalCount = listQ.data?.count ?? 0;
+  const loading = listQ.isLoading;
+  const loadError = listQ.error !== undefined && listQ.data === undefined;
+  const { mutate: mutateList } = listQ;
+  const fetchContacts = useCallback(async () => {
+    await mutateList();
+  }, [mutateList]);
+
+  // Bulk selection (page-scoped — only the loaded rows are selectable). The
+  // visible rows are about to change when the page/search/tag filter does — drop
+  // any selection that referred to the old results so the bulk bar can't
+  // act on rows the user can no longer see.
+  const viewKey = `${page}|${selectedTagIds.join(',')}|${searchToken}`;
+  const [selectionState, setSelectionState] = useState<{ key: string; ids: Set<string> }>({
+    key: viewKey,
+    ids: EMPTY_SELECTION,
+  });
+  const selected = selectionState.key === viewKey ? selectionState.ids : EMPTY_SELECTION;
+  const setSelected = (update: Set<string> | ((prev: Set<string>) => Set<string>)) =>
+    setSelectionState((s) => {
+      const prev = s.key === viewKey ? s.ids : EMPTY_SELECTION;
+      return { key: viewKey, ids: typeof update === 'function' ? update(prev) : update };
+    });
 
   const contacts = useMemo<ContactWithTags[]>(
     () =>
@@ -123,143 +244,16 @@ function ContactsListTab() {
     [contactRowsState, tagsMap],
   );
 
-  const fetchTags = useCallback(async () => {
-    const { data } = await supabase.from('tags').select('*');
-    if (data) {
-      const map: Record<string, Tag> = {};
-      data.forEach((t) => (map[t.id] = t));
-      setTagsMap(map);
-      // Drop any filter selections whose tag no longer exists (e.g. a tag
-      // deleted elsewhere) so it can't linger invisibly in the query.
-      setSelectedTagIds((prev) => {
-        const pruned = prev.filter((id) => map[id]);
-        return pruned.length === prev.length ? prev : pruned;
-      });
-    }
-  }, [supabase]);
-
-  const fetchContacts = useCallback(async () => {
-    const seq = ++fetchSeq.current;
-    setLoading(true);
-    setLoadError(false);
-    // The visible rows are about to change — drop any selection that
-    // referred to the old page/search results so the bulk bar can't
-    // act on rows the user can no longer see.
-    setSelected(new Set());
-
-    const from = page * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    const term = debouncedSearch.trim();
-
-    let contactRows: Contact[];
-    let count: number;
-
-    if (selectedTagIds.length > 0) {
-      // Tag filter active — resolve it server-side (join + distinct +
-      // windowed total count + pagination) so a tag covering many
-      // contacts can't silently truncate the result or overflow an IN
-      // clause. See migration 025_filter_contacts_by_tags.
-      const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
-        p_tag_ids: selectedTagIds,
-        p_search: term || null,
-        p_limit: PAGE_SIZE,
-        p_offset: from,
-      });
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
-      if (error) {
-        toast.error('Falha ao carregar contatos');
-        setLoadError(true);
-        setLoading(false);
-        return;
-      }
-      const rows = (data ?? []) as { contact: Contact; total_count: number }[];
-      contactRows = rows.map((r) => r.contact);
-      count = rows.length > 0 ? Number(rows[0].total_count) : 0;
-    } else {
-      let query = supabase
-        .from('contacts')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (term) {
-        // PostgREST's .or() filter string treats "," "(" ")" as syntax
-        // delimiters, so a raw search term could break out of the intended
-        // ilike clauses and inject extra filter conditions. Wrapping the
-        // value in double quotes (PostgREST's quoted-value syntax) makes
-        // those characters literal — only a `"` or `\` inside the term
-        // needs escaping first.
-        const escaped = term.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        const like = `%${escaped}%`;
-        query = query.or(`name.ilike."${like}",phone.ilike."${like}",email.ilike."${like}"`);
-      }
-
-      const { data, count: exactCount, error } = await query;
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
-      if (error) {
-        toast.error('Falha ao carregar contatos');
-        setLoadError(true);
-        setLoading(false);
-        return;
-      }
-      contactRows = data ?? [];
-      count = exactCount ?? 0;
-    }
-
-    setTotalCount(count);
-
-    if (contactRows.length === 0) {
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    // Fetch tags for these contacts
-    const contactIds = contactRows.map((c) => c.id);
-    const { data: contactTags } = await supabase
-      .from('contact_tags')
-      .select('contact_id, tag_id')
-      .in('contact_id', contactIds);
-    if (seq !== fetchSeq.current) return; // superseded by a newer fetch
-
-    const tagsByContact: Record<string, string[]> = {};
-    contactTags?.forEach((ct) => {
-      if (!tagsByContact[ct.contact_id]) tagsByContact[ct.contact_id] = [];
-      tagsByContact[ct.contact_id].push(ct.tag_id);
-    });
-
-    // Guarda só os ids das etiquetas; o mapa id -> etiqueta é aplicado na
-    // renderização (useMemo), então o catálogo de etiquetas carregar depois
-    // não dispara nova busca de contatos.
-    setContacts(
-      contactRows.map((c) => ({ ...c, tagIds: tagsByContact[c.id] ?? [] })),
-    );
-    setLoading(false);
-  }, [supabase, page, debouncedSearch, selectedTagIds]);
-
-  // Load-once-on-mount-ish data fetches. Each setter inside runs
-  // inside an async promise completion (Supabase await), not
-  // synchronously in the effect body, so the cascade the lint rule
-  // warns about doesn't apply here.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTags();
-  }, [fetchTags]);
-
   // Debounce de 300 ms na busca (como no Histórico). Ao mudar o termo
   // a paginação volta à página 0 — a página N pode deixar de existir.
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(search);
+      setSearchToken(search.trim() ? crypto.randomUUID() : 'all');
       setPage(0);
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchContacts();
-  }, [fetchContacts]);
 
   function openAddForm() {
     setEditContact(null);

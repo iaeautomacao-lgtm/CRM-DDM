@@ -1,10 +1,10 @@
 "use client"
 
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { apiFetch } from '@/lib/api-fetch'
+import { useApiSWR, useScopedSWR } from '@/lib/swr'
 import { usePermission } from '@/hooks/use-permission'
 import { useAuth } from '@/hooks/use-auth'
 import {
@@ -16,12 +16,7 @@ import {
   loadAiAnalytics,
 } from '@/lib/dashboard/queries'
 import type {
-  ActivityItem,
   ConversationsSeriesPoint,
-  MetricsBundle,
-  ConversationsStatusData,
-  ResponseTimeSummary,
-  AiAnalyticsData,
 } from '@/lib/dashboard/types'
 import { updatedLabel } from '@/lib/dashboard/view'
 
@@ -54,98 +49,67 @@ type DashboardSection = 'metrics' | 'series' | 'status' | 'responseTime' | 'acti
 const EMPTY_SERIES: Record<RangeDays, ConversationsSeriesPoint[] | null> = { 7: null, 30: null, 90: null }
 
 export default function DashboardPage() {
-  const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [range, setRange] = useState<RangeDays>(30)
-  const [series, setSeries] = useState(EMPTY_SERIES)
-  const [statusData, setStatusData] = useState<ConversationsStatusData | null>(null)
-  const [responseTime, setResponseTime] = useState<ResponseTimeSummary | null>(null)
-  const [activity, setActivity] = useState<ActivityItem[] | null>(null)
-  const [ai, setAi] = useState<AiAnalyticsData | null>(null)
-  const [queue, setQueue] = useState<QueueNow | null>(null)
-
-  const [pending, setPending] = useState<Set<DashboardSection>>(
-    () => new Set(['metrics', 'series', 'status', 'responseTime', 'activity', 'ai']),
-  )
-  const [failed, setFailed] = useState<Set<DashboardSection>>(() => new Set())
   const [updatedAt, setUpdatedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
   const [spin, setSpin] = useState(0)
-  // Geração da carga: respostas de uma carga antiga (Atualizar clicado no
-  // meio) não sobrescrevem a nova.
-  const gen = useRef(0)
+  const [refreshing, setRefreshing] = useState(false)
 
   const canSeeQueue = usePermission('monitoring.view_team')
-  // Conta atual só para o feed de atividade usar o índice por conta; ref para não recarregar o painel quando ela chega.
+  // Conta atual só para o feed de atividade usar o índice por conta.
   const { accountId } = useAuth()
-  const accountIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    accountIdRef.current = accountId
-  }, [accountId])
 
-  const track = useCallback(
-    <T,>(section: DashboardSection, p: Promise<T>, set: (v: T) => void, g: number): Promise<boolean> =>
-      p
-        .then((v) => {
-          if (gen.current === g) set(v)
-          return true
-        })
-        .catch((err) => {
-          console.error(`[dashboard] ${section} failed:`, err)
-          if (gen.current === g) setFailed((prev) => new Set(prev).add(section))
-          return false
-        })
-        .finally(() => {
-          if (gen.current !== g) return
-          setPending((prev) => {
-            const next = new Set(prev)
-            next.delete(section)
-            return next
-          })
-        }),
-    [],
-  )
-
-  // Só dispara as buscas (os setState acontecem nas respostas). Quem
-  // recarrega zera o estado antes, num handler: ver reloadAll.
-  const loadAll = useCallback(
-    (r: RangeDays) => {
-      const g = ++gen.current
-      const db = createClient()
-      return Promise.all([
-        track('metrics', loadMetrics(db), setMetrics, g),
-        track('series', loadConversationsSeries(db, r), (s) => setSeries((prev) => ({ ...prev, [r]: s })), g),
-        track('status', loadConversationsStatusDonut(db), setStatusData, g),
-        track('responseTime', loadResponseTime(db), setResponseTime, g),
-        track('activity', loadActivity(db, 50, accountIdRef.current), setActivity, g),
-        track('ai', loadAiAnalytics(db), setAi, g),
-      ]).then((results) => {
-        if (gen.current === g) setUpdatedAt(Date.now())
-        return results.every(Boolean)
-      })
+  // Cache entre navegações (SWR em memória, chave por conta+usuário — ver src/lib/swr).
+  // Voltar ao Painel mostra o último resultado na hora e revalida em segundo plano.
+  const errorCount = useRef(0)
+  const swrOptions = {
+    onSuccess: () => setUpdatedAt(Date.now()),
+    onError: (err: unknown) => {
+      errorCount.current += 1
+      console.error('[dashboard] falha ao carregar seção:', err)
     },
-    [track],
-  )
-
-  useEffect(() => {
-    void loadAll(30)
-  }, [loadAll])
-
+  }
+  const metricsQ = useScopedSWR('dashboard.metrics', [], () => loadMetrics(createClient()), swrOptions)
+  const seriesQ = useScopedSWR('dashboard.series', [range], () => loadConversationsSeries(createClient(), range), swrOptions)
+  const statusQ = useScopedSWR('dashboard.status', [], () => loadConversationsStatusDonut(createClient()), swrOptions)
+  const responseTimeQ = useScopedSWR('dashboard.response-time', [], () => loadResponseTime(createClient()), swrOptions)
+  const activityQ = useScopedSWR('dashboard.activity', [], () => loadActivity(createClient(), 50, accountId), swrOptions)
+  const aiQ = useScopedSWR('dashboard.ai', [], () => loadAiAnalytics(createClient()), swrOptions)
   // Fila sem atendente (mesma fonte do Monitoramento). Só para quem tem
   // monitoring.view_team; sem a permissão o aviso some do layout.
-  const loadQueue = useCallback(() => {
-    if (!canSeeQueue) return
-    apiFetch('/api/monitoramento/sla?days=1')
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const body = (await res.json()) as { total?: { queued?: number; longestWaitMin?: number | null } }
-        setQueue({ queued: body.total?.queued ?? 0, longestWaitMin: body.total?.longestWaitMin ?? null })
-      })
-      .catch(() => setQueue(null))
-  }, [canSeeQueue])
+  const queueQ = useApiSWR<{ total?: { queued?: number; longestWaitMin?: number | null } }>(
+    '/api/monitoramento/sla?days=1',
+    { enabled: canSeeQueue },
+  )
 
-  useEffect(() => {
-    loadQueue()
-  }, [loadQueue])
+  const metrics = metricsQ.data ?? null
+  const series = useMemo<Record<RangeDays, ConversationsSeriesPoint[] | null>>(
+    () => ({ ...EMPTY_SERIES, [range]: seriesQ.data ?? null }),
+    [range, seriesQ.data],
+  )
+  const statusData = statusQ.data ?? null
+  const responseTime = responseTimeQ.data ?? null
+  const activity = activityQ.data ?? null
+  const ai = aiQ.data ?? null
+  const queue = useMemo<QueueNow | null>(
+    () =>
+      queueQ.data
+        ? { queued: queueQ.data.total?.queued ?? 0, longestWaitMin: queueQ.data.total?.longestWaitMin ?? null }
+        : null,
+    [queueQ.data],
+  )
+
+  const sections: Record<DashboardSection, { isLoading: boolean; error?: Error; data: unknown }> = {
+    metrics: metricsQ,
+    series: seriesQ,
+    status: statusQ,
+    responseTime: responseTimeQ,
+    activity: activityQ,
+    ai: aiQ,
+  }
+  // Só vira erro de tela se não há nem dado antigo para mostrar.
+  const failed = (s: DashboardSection) => sections[s].error !== undefined && sections[s].data === undefined
+  const loading = (s: DashboardSection) => sections[s].isLoading
 
   // Relógio para "Atualizado há N min" e o tempo relativo do feed.
   useEffect(() => {
@@ -153,48 +117,34 @@ export default function DashboardPage() {
     return () => clearInterval(id)
   }, [])
 
-  const reloadAll = useCallback(
-    (r: RangeDays) => {
-      setFailed(new Set())
-      setPending(new Set(['metrics', 'series', 'status', 'responseTime', 'activity', 'ai']))
-      setSeries(EMPTY_SERIES)
-      return loadAll(r)
-    },
-    [loadAll],
-  )
+  const reloadAll = useCallback(async () => {
+    const before = errorCount.current
+    await Promise.all([
+      metricsQ.mutate(),
+      seriesQ.mutate(),
+      statusQ.mutate(),
+      responseTimeQ.mutate(),
+      activityQ.mutate(),
+      aiQ.mutate(),
+      queueQ.mutate(),
+    ])
+    return errorCount.current === before
+  }, [metricsQ, seriesQ, statusQ, responseTimeQ, activityQ, aiQ, queueQ])
 
   const refresh = useCallback(() => {
     setSpin((s) => s + 360)
-    loadQueue()
-    void reloadAll(range).then((ok) => {
-      setNow(Date.now())
-      if (ok) toast.success('Dados atualizados')
-    })
-  }, [reloadAll, loadQueue, range])
-
-  const handleRangeChange = useCallback(
-    (r: RangeDays) => {
-      setRange(r)
-      if (series[r] !== null) return
-      const g = gen.current
-      setPending((prev) => new Set(prev).add('series'))
-      setFailed((prev) => {
-        const next = new Set(prev)
-        next.delete('series')
-        return next
+    setRefreshing(true)
+    void reloadAll()
+      .then((ok) => {
+        setNow(Date.now())
+        if (ok) toast.success('Dados atualizados')
       })
-      void track(
-        'series',
-        loadConversationsSeries(createClient(), r),
-        (s) => setSeries((prev) => ({ ...prev, [r]: s })),
-        g,
-      )
-    },
-    [series, track],
-  )
+      .finally(() => setRefreshing(false))
+  }, [reloadAll])
 
-  const loading = (s: DashboardSection) => pending.has(s)
-  const retry = () => void reloadAll(range)
+  const handleRangeChange = useCallback((r: RangeDays) => setRange(r), [])
+
+  const retry = () => void reloadAll()
 
   return (
     <PageBody className="gap-5">
@@ -209,7 +159,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={refresh}
-            disabled={pending.size > 0}
+            disabled={refreshing || Object.keys(sections).some((s) => loading(s as DashboardSection))}
             title="Atualizar dados"
             className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] border border-border bg-card px-2.5 text-[12.5px] font-medium text-foreground-2 transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-60"
           >
@@ -225,7 +175,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {failed.has('metrics') ? (
+      {failed('metrics') ? (
         <ErrorState className="min-h-0" title="Não foi possível carregar os indicadores" onRetry={retry} />
       ) : (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-3">
@@ -272,7 +222,7 @@ export default function DashboardPage() {
       )}
 
       <Row>
-        {failed.has('series') ? (
+        {failed('series') ? (
           <Failed className="flex-[2_1_560px]" title="Não foi possível carregar o movimento de conversas" onRetry={retry} />
         ) : (
           <ConversationsChart
@@ -282,7 +232,7 @@ export default function DashboardPage() {
             onRangeChange={handleRangeChange}
           />
         )}
-        {failed.has('status') ? (
+        {failed('status') ? (
           <Failed className="flex-[1_1_300px]" title="Não foi possível carregar a situação atual" onRetry={retry} />
         ) : (
           <StatusPanel data={statusData} loading={loading('status')} queue={canSeeQueue ? queue : null} />
@@ -290,12 +240,12 @@ export default function DashboardPage() {
       </Row>
 
       <Row>
-        {failed.has('ai') ? (
+        {failed('ai') ? (
           <Failed className="flex-[2_1_560px]" title="Não foi possível carregar a recuperação financeira" onRetry={retry} />
         ) : (
           <FinancialPerformance data={ai} loading={loading('ai')} />
         )}
-        {failed.has('responseTime') ? (
+        {failed('responseTime') ? (
           <Failed className="flex-[1_1_300px]" title="Não foi possível carregar o tempo de resposta" onRetry={retry} />
         ) : (
           <ResponseTimeChart data={responseTime} loading={loading('responseTime')} />
@@ -303,12 +253,12 @@ export default function DashboardPage() {
       </Row>
 
       <Row>
-        {failed.has('ai') ? (
+        {failed('ai') ? (
           <Failed className="flex-[1_1_300px]" title="Não foi possível carregar o desempenho da IA" onRetry={retry} />
         ) : (
           <AiPerformance data={ai} loading={loading('ai')} />
         )}
-        {failed.has('activity') ? (
+        {failed('activity') ? (
           <Failed className="flex-[2_1_560px]" title="Não foi possível carregar a atividade recente" onRetry={retry} />
         ) : (
           <ActivityFeed items={activity} loading={loading('activity')} nowMs={now} />

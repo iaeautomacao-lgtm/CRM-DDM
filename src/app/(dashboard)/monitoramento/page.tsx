@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api-fetch";
+import { useApiSWR, useScopedSWR } from "@/lib/swr";
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtime } from "@/hooks/use-realtime";
 import { usePresence } from "@/hooks/use-presence";
@@ -75,6 +76,9 @@ import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimel
 import { ErrorState } from "@/components/dashboard/error-state";
 
 type MonitorView = "fases" | "agentes" | "equipes" | "hoje" | "sla";
+
+const EMPTY_MEMBERS: AccountMember[] = [];
+const EMPTY_TEAMS: Team[] = [];
 
 const VIEW_OPTIONS = [
   { value: "fases", label: "Fases" },
@@ -399,35 +403,20 @@ function MonitoramentoBoard() {
   // presence, which now that use-presence.ts subscribes to the right
   // schema, updates without a reload.
   // ----------------------------------------------------------
-  const [members, setMembers] = useState<AccountMember[]>([]);
-  const [membersLoading, setMembersLoading] = useState(true);
-  const [membersError, setMembersError] = useState(false);
-  const [membersTick, setMembersTick] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch("/api/account/members", { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json();
-      })
-      .then((data: { members?: AccountMember[] }) => {
-        if (!cancelled) {
-          setMembers(data.members ?? []);
-          setMembersError(false);
-        }
-      })
-      .catch((err) => {
-        console.error("[monitoramento] failed to load members:", err);
-        if (!cancelled) setMembersError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setMembersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [membersTick]);
+  // Catálogo em cache (SWR, memória, por conta+usuário): voltar à tela mostra a lista na hora e revalida ao fundo.
+  const membersQ = useApiSWR<{ members?: AccountMember[] }>("/api/account/members", {
+    onError: (err) => console.error("[monitoramento] failed to load members:", err),
+  });
+  const members = useMemo(() => membersQ.data?.members ?? EMPTY_MEMBERS, [membersQ.data]);
+  const membersLoading = membersQ.isLoading;
+  const membersError = membersQ.error !== undefined && membersQ.data === undefined;
+  const { mutate: mutateMembers } = membersQ;
+  // Atualização otimista local (arrastar atendente entre equipes), sem revalidar.
+  const setMembers = useCallback(
+    (update: (prev: AccountMember[]) => AccountMember[]) =>
+      mutateMembers((cur) => (cur ? { ...cur, members: update(cur.members ?? []) } : cur), { revalidate: false }),
+    [mutateMembers],
+  );
 
   const { getPresence, getRow, now } = usePresence();
 
@@ -461,9 +450,23 @@ function MonitoramentoBoard() {
   // changes are rare and the panel that edits them already refetches
   // on save.
   // ----------------------------------------------------------
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [teamsLoading, setTeamsLoading] = useState(true);
-  const [teamsError, setTeamsError] = useState(false);
+  const teamsQ = useScopedSWR<Team[]>(
+    "monitoramento.teams",
+    [],
+    async () => {
+      const { data, error } = await createClient()
+        .from("teams")
+        .select("*")
+        .eq("account_id", accountId as string)
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as Team[];
+    },
+    { enabled: !!accountId, onError: (err) => console.error("[monitoramento] failed to load teams:", err) },
+  );
+  const teams = teamsQ.data ?? EMPTY_TEAMS;
+  const teamsLoading = teamsQ.isLoading;
+  const teamsError = teamsQ.error !== undefined && teamsQ.data === undefined;
   // Single dialog instance for both "create" (team=null) and "edit"
   // (team=<the column's team>) — same TeamFormDialog used in
   // teams-panel.tsx (Settings), not a second copy.
@@ -480,33 +483,10 @@ function MonitoramentoBoard() {
     setTeamDialogOpen(true);
   }, []);
 
+  const { mutate: mutateTeams } = teamsQ;
   const fetchTeams = useCallback(async () => {
-    if (!accountId) return;
-    const db = createClient();
-    const { data, error } = await db
-      .from("teams")
-      .select("*")
-      .eq("account_id", accountId)
-      .order("name");
-    if (error) {
-      console.error("[monitoramento] failed to load teams:", error);
-      setTeamsError(true);
-      return;
-    }
-    setTeamsError(false);
-    setTeams((data ?? []) as Team[]);
-  }, [accountId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await fetchTeams();
-      if (!cancelled) setTeamsLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchTeams]);
+    await mutateTeams();
+  }, [mutateTeams]);
 
   // Agent <-> team membership now lives in wacrm.team_members (a
   // many-to-many join, migration 062) instead of the scalar
@@ -819,7 +799,7 @@ function MonitoramentoBoard() {
         toast.error(err instanceof Error ? err.message : "Não foi possível conectar ao servidor");
       }
     },
-    [teams],
+    [teams, setMembers],
   );
 
   const handleAgentDragStart = useCallback((event: DragStartEvent) => {
@@ -986,11 +966,7 @@ function MonitoramentoBoard() {
               className="min-h-0"
               title="Não foi possível carregar os atendentes"
               hint="Verifique sua conexão e tente novamente."
-              onRetry={() => {
-                setMembersLoading(true);
-                setMembersError(false);
-                setMembersTick((n) => n + 1);
-              }}
+              onRetry={() => void mutateMembers()}
             />
           ) : (
             <>
@@ -1063,11 +1039,8 @@ function MonitoramentoBoard() {
               title="Não foi possível carregar as equipes"
               hint="Verifique sua conexão e tente novamente."
               onRetry={() => {
-                setTeamsLoading(true);
-                setMembersLoading(true);
-                setMembersError(false);
-                setMembersTick((n) => n + 1);
-                void fetchTeams().finally(() => setTeamsLoading(false));
+                void mutateMembers();
+                void fetchTeams();
               }}
             />
           ) : teams.length === 0 ? (

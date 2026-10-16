@@ -13,6 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
+import { clearSwrCache } from "@/lib/swr/cache";
 import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
 import {
   DDM_SESSION_STORAGE_KEY,
@@ -368,6 +369,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
         }
       } else {
+        // Sessão acabou (logout, expiração): nada de resposta em memória fica para trás.
+        clearSwrCache();
         fetchProfileCallsRef.current += 1;
         setAuthError(null);
         profileUserIdRef.current = null;
@@ -401,7 +404,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const supabase = createClient();
+    clearSwrCache();
     await supabase.auth.signOut();
+    clearSwrCache();
     setUser(null);
     setProfile(null);
     setAccount(null);
