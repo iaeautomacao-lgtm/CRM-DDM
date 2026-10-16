@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { SwrProvider } from "@/lib/swr";
 import { DDM_SESSION_STORAGE_KEY, trackError, trackPageView } from "@/hooks/use-telemetry";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -177,7 +178,9 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <DashboardShellInner>{children}</DashboardShellInner>
+      <SwrProvider>
+        <DashboardShellInner>{children}</DashboardShellInner>
+      </SwrProvider>
     </AuthProvider>
   );
 }

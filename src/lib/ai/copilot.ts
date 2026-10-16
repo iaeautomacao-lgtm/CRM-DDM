@@ -247,6 +247,8 @@ export async function getCopilotSuggestions(input: CopilotInput, deps: CopilotDe
     raw = await (deps.call ?? callLlmForAnalysis)(key.provider, key.apiKey, prompt, key.model, {
       maxTokens: COPILOT_MAX_OUTPUT_TOKENS,
       timeoutMs: COPILOT_TIMEOUT_MS,
+      accountId,
+      feature: 'copilot',
     })
   } catch (e) {
     // Só o nome/status do erro — nunca o histórico nem a resposta.

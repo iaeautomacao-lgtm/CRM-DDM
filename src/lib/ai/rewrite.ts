@@ -125,6 +125,8 @@ export async function rewriteDraft(
     raw = await (deps.call ?? callLlmForAnalysis)(key.provider, key.apiKey, buildRewritePrompt(draft, tones), key.model, {
       maxTokens: REWRITE_MAX_OUTPUT_TOKENS,
       timeoutMs: REWRITE_TIMEOUT_MS,
+      accountId,
+      feature: 'rewrite',
     })
   } catch (e) {
     // Só o nome/status do erro — nunca o texto do rascunho nem a resposta.

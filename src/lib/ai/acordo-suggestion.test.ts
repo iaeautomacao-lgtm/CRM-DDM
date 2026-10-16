@@ -37,7 +37,7 @@ describe("suggestAcordoRealizado", () => {
     const { db, tables: t } = fakeRowsDb(tables());
     const callLlm = yes();
     expect(await suggestAcordoRealizado(ACC, "conv-1", { db, callLlm })).toBe("suggested");
-    expect(callLlm).toHaveBeenCalledWith("gemini", "k", expect.any(String), "gemini-3.5-flash");
+    expect(callLlm).toHaveBeenCalledWith("gemini", "k", expect.any(String), "gemini-3.5-flash", expect.objectContaining({ feature: "acordo" }));
     expect(t.conversations[0]).toMatchObject({
       outcome_tag_id: null,
       status: "open",

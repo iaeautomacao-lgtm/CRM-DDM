@@ -159,7 +159,7 @@ export async function suggestAcordoRealizado(
 
     const callLlm = deps.callLlm ?? callLlmForAnalysis;
     const isFormalized = await classifyAcordoFormalizado(historyText, (prompt) =>
-      callLlm(provider, apiKey, prompt, model),
+      callLlm(provider, apiKey, prompt, model, { accountId, feature: "acordo" }),
     );
     if (!isFormalized) return "not_formalized";
 

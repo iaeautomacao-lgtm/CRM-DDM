@@ -593,6 +593,10 @@
     {
       "version": "376_agent_mention_queue",
       "kind": "registry"
+    },
+    {
+      "version": "378_ai_costs",
+      "kind": "registry"
     }
   ]
 }
