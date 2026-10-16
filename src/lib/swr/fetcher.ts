@@ -2,7 +2,7 @@
 
 import { apiFetch, isMfaRequiredResponse } from "@/lib/api-fetch";
 import { createClient } from "@/lib/supabase/client";
-import { clearSwrCache } from "./cache";
+import { clearSessionData } from "@/lib/auth/session-cleanup";
 
 export class SwrHttpError extends Error {
   readonly status: number;
@@ -20,7 +20,7 @@ export class SwrHttpError extends Error {
  * isolado com sessão viva não derruba o usuário.
  */
 async function defaultOnUnauthorized(): Promise<void> {
-  clearSwrCache();
+  clearSessionData();
   if (typeof window === "undefined") return;
   const supabase = createClient();
   const { data } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));

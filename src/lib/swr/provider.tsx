@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { useAuth } from "@/hooks/use-auth";
+import { clearSessionData } from "@/lib/auth/session-cleanup";
 import { clearSwrCache, getSwrCacheStore } from "./cache";
 import { scopeId, shouldClearOnScopeChange } from "./scope";
 
@@ -27,7 +28,7 @@ export function SwrProvider({ children }: { children: ReactNode }) {
   const previous = useRef<string | null>(null);
 
   useEffect(() => {
-    if (shouldClearOnScopeChange(previous.current, current)) clearSwrCache();
+    if (shouldClearOnScopeChange(previous.current, current)) clearSessionData();
     previous.current = current;
   }, [current]);
 
