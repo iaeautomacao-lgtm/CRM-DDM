@@ -17,7 +17,10 @@ const TAB = U(51)
 const KEY_CREATOR = U(99)
 
 const h = vi.hoisted(() => ({
-  scopes: ['conversations:write'] as string[],
+  scopes: ['conversations:write', 'contacts:write', 'messages:send'] as string[],
+  lock: 'ok' as 'ok' | 'missing' | 'broken' | 'race',
+  raceAssignee: null as string | null,
+  rpcCalls: [] as any[],
   createdBy: null as string | null,
   rate: true,
   seq: 0,
@@ -80,6 +83,7 @@ class Q {
   then(resolve: (v: unknown) => void) { resolve(this.run()) }
 }
 
+const respond = await import('@/lib/api/v1/respond')
 vi.mock('@/lib/auth/api-context', () => ({
   requireApiKey: async (_r: Request, scope: string | string[]) => {
     const needed = Array.isArray(scope) ? scope : [scope]
@@ -89,8 +93,33 @@ vi.mock('@/lib/auth/api-context', () => ({
     }
     return {
       accountId: A, keyId: 'KEY', scopes: h.scopes, createdBy: h.createdBy, userId: null,
-      supabase: { from: (t: string) => new Q(t), rpc: async () => ({ data: h.blocked, error: null }) },
+      supabase: {
+        from: (t: string) => new Q(t),
+        // api_open_conversation (migration 383): serializa por contato+canal; aqui simula achar a aberta ou criar. Outras RPCs = a lista de bloqueio.
+        rpc: async (name: string, a: Row) => {
+          if (name !== 'api_open_conversation') return { data: h.blocked, error: null }
+          h.rpcCalls.push(a)
+          if (h.lock === 'missing') return { data: null, error: { code: 'PGRST202', message: 'função inexistente' } }
+          if (h.lock === 'broken') return { data: null, error: { code: 'XX000', message: 'boom' } }
+          const rows = (h.db.conversations ??= [])
+          if (h.lock === 'race') {
+            // outra chamada abriu o atendimento entre a busca e a criação (a busca da API não o viu)
+            const other = { id: U(1000 + ++h.seq), created_at: new Date().toISOString(), channel_type: 'whatsapp', account_id: a.p_account, user_id: a.p_user, contact_id: a.p_contact, status: 'open', assigned_agent_id: h.raceAssignee, team_id: null, waha_session: a.p_waha_session, config_id: a.p_config_id }
+            rows.push(other)
+            return { data: { id: other.id, created: false }, error: null }
+          }
+          const found = rows.find((r) => r.account_id === a.p_account && r.contact_id === a.p_contact && ['open', 'pending'].includes(r.status) && (a.p_waha_session ? r.waha_session === a.p_waha_session : r.config_id === a.p_config_id))
+          if (found) return { data: { id: found.id, created: false }, error: null }
+          const row = { id: U(1000 + ++h.seq), created_at: new Date().toISOString(), channel_type: 'whatsapp', account_id: a.p_account, user_id: a.p_user, contact_id: a.p_contact, status: a.p_status, assigned_agent_id: a.p_assignee, team_id: a.p_team, waha_session: a.p_waha_session, config_id: a.p_config_id }
+          rows.push(row)
+          return { data: { id: row.id, created: true }, error: null }
+        },
+      },
     }
+  },
+  // Mesma regra do real (api-context.ts): escopo ADICIONAL ausente = 403, síncrono.
+  assertKeyScope: (ctx: { scopes: string[] }, scope: string, message: string) => {
+    if (!ctx.scopes.includes(scope)) throw respond.forbidden(message)
   },
 }))
 vi.mock('@/lib/api/v1/log', () => ({ logPublicApiCall: () => {} }))
@@ -146,7 +175,7 @@ const WAHA_CH = { id: WAHA, user_id: 'OWNER', provider: 'waha', phone_number_id:
 const TPL = { id: 't1', account_id: A, name: 'lembrete', language: 'pt_BR', category: 'Utility', status: 'APPROVED', waba_id: 'W1', body_text: 'Olá {{1}}', header_type: null, header_content: null, buttons: null }
 
 beforeEach(() => {
-  Object.assign(h, { scopes: ['conversations:write'], createdBy: null, rate: true, seq: 0, sent: [], endedRuns: [], audit: [], providerCalled: 0, ledgerReleased: 0, blocked: [], red: [], sendError: null })
+  Object.assign(h, { scopes: ['conversations:write', 'contacts:write', 'messages:send'], lock: 'ok', rpcCalls: [], createdBy: null, rate: true, seq: 0, sent: [], endedRuns: [], audit: [], providerCalled: 0, ledgerReleased: 0, blocked: [], red: [], sendError: null })
   h.db = {
     profiles: [
       { user_id: AGENT, account_id: A, full_name: 'Ana Souza', account_role: 'agent', deactivated_at: null },
@@ -504,5 +533,78 @@ describe('POST /conversations/{id}/close', () => {
     h.scopes = ['conversations:read']
     expect((await closeCall(CONV, { tabulation_code: 142 })).status).toBe(403)
     expect(h.db.conversations[0].status).toBe('open')
+  })
+})
+
+describe('POST /conversations — escopos adicionais (M1) e corrida (M4) da revisão de segurança 16/10', () => {
+  const withMessage = { phone: '+5527999991212', assignee_id: AGENT, message: { text: 'Olá' } }
+
+  it('M1: com message, conversations:write sozinho não envia — 403 antes de criar, enviar ou registrar a chave de idempotência', async () => {
+    h.scopes = ['conversations:write']
+    const res = await open(withMessage, idem)
+    expect(res.status).toBe(403)
+    expect((await json(res)).error.message).toMatch(/messages:send/)
+    expect(h.sent).toEqual([])
+    expect(h.db.conversations).toEqual([])
+    expect(h.providerCalled).toBe(0)
+    expect(h.ledgerReleased).toBe(0)
+    expect(h.rpcCalls).toEqual([])
+    h.scopes = ['conversations:write', 'messages:send'] // com o escopo, o fluxo segue (WAHA responde sempre)
+    h.db.whatsapp_config = [WAHA_CH]
+    expect((await open(withMessage, idem)).status).toBe(201)
+    expect(h.sent).toHaveLength(1)
+  })
+
+  it('M1: telefone novo exige contacts:write (403, nada criado); contato já cadastrado e contact_id seguem só com conversations:write', async () => {
+    h.scopes = ['conversations:write']
+    const before = h.db.contacts.length
+    const res = await open({ phone: '+5511988880000', assignee_id: AGENT })
+    expect(res.status).toBe(403)
+    expect((await json(res)).error.message).toMatch(/contacts:write/)
+    expect(h.db.contacts).toHaveLength(before)
+    expect(h.db.conversations).toEqual([])
+    expect((await open({ phone: '+5527999991212', assignee_id: AGENT })).status).toBe(201) // já cadastrado
+    h.db.conversations = []
+    expect((await open({ contact_id: CONTACT, assignee_id: AGENT })).status).toBe(201)
+    h.scopes = ['conversations:write', 'contacts:write']
+    expect((await open({ phone: '+5511988880000', assignee_id: AGENT })).status).toBe(201) // com o escopo, cria
+    expect(h.db.contacts).toHaveLength(before + 1)
+  })
+
+  it('M4: a abertura passa pela RPC com trava (conta, contato, canal, status, atendente/equipe) e a conversa nasce uma só', async () => {
+    const res = await open({ contact_id: CONTACT, assignee_id: AGENT })
+    expect(res.status).toBe(201)
+    expect(h.rpcCalls).toEqual([{ p_account: A, p_user: 'OWNER', p_contact: CONTACT, p_status: 'open', p_assignee: AGENT, p_team: null, p_waha_session: null, p_config_id: META }])
+    const again = await open({ contact_id: CONTACT, assignee_id: AGENT })
+    expect(again.status).toBe(200)
+    expect((await json(again)).data.conversation).toMatchObject({ created: false })
+    expect(h.db.conversations).toHaveLength(1)
+  })
+
+  it('M4: perdeu a corrida (a RPC devolve a conversa que outra chamada abriu): sem duplicar, created:false, e o 409 vale se pediu outro atendente', async () => {
+    h.lock = 'race'
+    h.raceAssignee = AGENT
+    const same = await open({ contact_id: CONTACT, assignee_id: AGENT })
+    expect(same.status).toBe(200)
+    expect((await json(same)).data).toMatchObject({ conversation: { created: false, assignee_id: AGENT }, transferred: false, via_owner: false })
+    expect(h.db.conversations).toHaveLength(1)
+
+    h.db.conversations = []
+    h.raceAssignee = AGENT2
+    const other = await open({ contact_id: CONTACT, assignee_id: AGENT })
+    expect(other.status).toBe(409)
+    expect((await json(other)).error.reason).toBe('conversation_exists')
+    expect(h.db.conversations).toHaveLength(1)
+  })
+
+  it('M4: sem a migration 383 a função inexistente é tolerada (INSERT de sempre); erro real da RPC = 503 e nada é criado', async () => {
+    h.lock = 'missing'
+    const res = await open({ contact_id: CONTACT, assignee_id: AGENT })
+    expect(res.status).toBe(201)
+    expect(h.db.conversations).toHaveLength(1)
+    h.db.conversations = []
+    h.lock = 'broken'
+    expect((await open({ contact_id: CONTACT, assignee_id: AGENT })).status).toBe(503)
+    expect(h.db.conversations).toEqual([])
   })
 })

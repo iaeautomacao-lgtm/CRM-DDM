@@ -9,6 +9,7 @@ const TEAM = "00000000-0000-4000-8000-0000000000e1";
 
 const s = vi.hoisted(() => ({
   paused: new Set<string>(),
+  hidePauseFromSession: false,
   pausesError: null as { code?: string; message: string } | null,
   updates: [] as Array<Record<string, unknown>>,
   notes: [] as unknown[],
@@ -25,7 +26,9 @@ function chain(table: string, userScoped: boolean) {
   b.then = (ok: (v: unknown) => unknown) => {
     let result: { data: unknown; error: unknown } = { data: [], error: null };
     if (table === "agent_pauses") {
-      if (s.pausesError) result = { data: null, error: s.pausesError };
+      // RLS da 370 (pause_shares_team): a sessão de quem não compartilha equipe com o atendente não enxerga a linha da pausa.
+      if (userScoped && s.hidePauseFromSession) result = { data: [], error: null };
+      else if (s.pausesError) result = { data: null, error: s.pausesError };
       else {
         const id = filters["in:user_id"] ? [...s.paused].find((u) => Array.isArray(filters["in:user_id"]) && (filters["in:user_id"] as string[]).includes(u)) : [...s.paused].find((u) => u === filters["eq:user_id"]);
         result = { data: id ? [{ user_id: id, reason_name: "Almoço", started_at: "2026-10-15T14:00:00Z" }] : [], error: null };
@@ -62,6 +65,7 @@ const call = (body: unknown) =>
 
 beforeEach(() => {
   s.paused = new Set();
+  s.hidePauseFromSession = false;
   s.pausesError = null;
   s.updates = [];
   s.notes = [];
@@ -81,6 +85,18 @@ describe("transferir para atendente em pausa", () => {
       pause: { reason_name: "Almoço", started_at: "2026-10-15T14:00:00Z" },
     });
     expect(s.updates).toHaveLength(0);
+  });
+
+  it("B9 (revisão 16/10): o motivo e a hora da pausa só vêm se a SESSÃO enxerga a pausa (RLS 370); senão só 'em pausa', e a confirmação segue valendo", async () => {
+    s.paused.add(AGENT);
+    s.hidePauseFromSession = true;
+    const res = await call({ agent_id: AGENT });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "agent_paused", agent: { id: AGENT, name: "Ana Souza" }, pause: null });
+    expect(JSON.stringify(body)).not.toMatch(/Almoço|2026-10-15/);
+    expect(s.updates).toHaveLength(0);
+    expect((await call({ agent_id: AGENT, confirm_paused: true })).status).toBe(200); // quem não vê o motivo ainda pode confirmar
   });
 
   it("confirm_paused:true atribui e a auditoria leva a marca; só `true` confirma", async () => {

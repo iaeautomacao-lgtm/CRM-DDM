@@ -605,6 +605,14 @@
     {
       "version": "381_teams_first_response_sla",
       "kind": "registry"
+    },
+    {
+      "version": "382_seguranca_carteira_mfa_reserva",
+      "kind": "registry"
+    },
+    {
+      "version": "383_api_open_conversation_lock",
+      "kind": "registry"
     }
   ]
 }

@@ -6,6 +6,7 @@
 // conversa/do número, como as travas faziam antes.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { lostToReservation, runUnlessReserved } from "@/lib/inbox/reservation-guard";
 
 type Db = SupabaseClient<any, any, any>;
 
@@ -50,14 +51,20 @@ export async function handOffToTeamQueue(
     console.error(`${logPrefix}: falha ao escolher atendente:`, err);
   }
 
-  const { error } = await db
-    .from("conversations")
-    .update({
-      status: "pending",
-      assigned_agent_id: assignedTo,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", conversationId);
-  if (error) return { ok: false, error: error.message };
+  // Guarda de reserva na própria gravação: uma menção que chegou depois da leitura acima não perde a reserva (a conversa fica na fila dele).
+  const written = await runUnlessReserved<unknown[]>((guard) => {
+    let q = db
+      .from("conversations")
+      .update({
+        status: "pending",
+        assigned_agent_id: assignedTo,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
+    if (guard) q = q.is("requested_agent_id", null);
+    return q.select("id");
+  });
+  if (written.error) return { ok: false, error: written.error.message ?? "erro ao gravar a conversa" };
+  if (lostToReservation(written)) return { ok: true, teamId, assignedTo: null };
   return { ok: true, teamId, assignedTo };
 }
