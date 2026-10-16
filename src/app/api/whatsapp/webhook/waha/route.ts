@@ -30,6 +30,8 @@ import { safeDbError } from '@/lib/privacy/mask'
 // Espera antes de gravar o eco de uma mensagem nossa (ver abaixo).
 const OWN_SEND_ECHO_WAIT_MS = 3000
 
+type WahaConversationRow = { id: string; status: string; unread_count: number | null; assigned_agent_id: string | null; requested_agent_id?: string | null }
+
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_waha).
   await registerAuditActor({ actorType: 'webhook', source: 'webhook_waha' })
@@ -451,12 +453,23 @@ export async function POST(request: Request) {
 
       // 2. Find or create conversation
       let conversationId: string | null = null
-      const { data: convsList, error: convFetchError } = await db
-        .from('conversations')
-        .select('id, status, unread_count, assigned_agent_id, requested_agent_id')
-        .eq('account_id', accountId)
-        .eq('contact_id', contactId!)
-        .eq('waha_session', session)
+      // requested_agent_id é da migration 376 (@operador). Sem ela o select falha por coluna inexistente (42703/PGRST204):
+      // refaz sem a coluna e segue como "sem reserva", para um deploy antes da migration não perder mensagem.
+      const selectConversations = (columns: string) =>
+        db
+          .from('conversations')
+          .select(columns)
+          .eq('account_id', accountId)
+          .eq('contact_id', contactId!)
+          .eq('waha_session', session)
+      let { data: convsList, error: convFetchError } = (await selectConversations(
+        'id, status, unread_count, assigned_agent_id, requested_agent_id',
+      )) as unknown as { data: WahaConversationRow[] | null; error: { code?: string } | null }
+      if (convFetchError && (convFetchError.code === '42703' || convFetchError.code === 'PGRST204')) {
+        ;({ data: convsList, error: convFetchError } = (await selectConversations(
+          'id, status, unread_count, assigned_agent_id',
+        )) as unknown as { data: WahaConversationRow[] | null; error: { code?: string } | null })
+      }
 
       if (convFetchError) {
         console.error('[waha/webhook] Error fetching conversations:', convFetchError)

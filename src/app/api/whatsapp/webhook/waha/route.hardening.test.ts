@@ -26,7 +26,7 @@ type Call = { table: string; method: string; args: unknown[] }
  * Banco falso do fluxo message.any: config do canal, contato e conversa já existentes, nenhuma mensagem gravada e o INSERT em
  * `messages` devolvendo o erro configurado (23505 = outra entrega ganhou a corrida).
  */
-function fakeDb(opts: { insertError?: { code?: string; message: string } | null; existingMessage?: boolean } = {}) {
+function fakeDb(opts: { insertError?: { code?: string; message: string } | null; existingMessage?: boolean; noReservationColumn?: boolean } = {}) {
   const calls: Call[] = []
   const rows: Record<string, unknown[]> = {
     whatsapp_config: [{ id: CHANNEL, account_id: 'conta-a', waha_session: SESSION, provider: 'waha', user_id: 'u1' }],
@@ -35,9 +35,14 @@ function fakeDb(opts: { insertError?: { code?: string; message: string } | null;
   }
   const from = (table: string) => {
     let isInsert = false
+    let selectedColumns = ''
     const resolveResult = () => {
       if (table === 'messages' && isInsert) return { data: null, error: opts.insertError ?? null }
       if (table === 'messages') return { data: opts.existingMessage ? [{ id: 'm-exists' }] : [], error: null }
+      // sem a migration 376 a coluna requested_agent_id não existe: o select que a cita falha com 42703
+      if (table === 'conversations' && opts.noReservationColumn && selectedColumns.includes('requested_agent_id')) {
+        return { data: null, error: { code: '42703', message: 'column conversations.requested_agent_id does not exist' } }
+      }
       return { data: rows[table] ?? [], error: null }
     }
     const builder: Record<string, unknown> = {
@@ -51,6 +56,7 @@ function fakeDb(opts: { insertError?: { code?: string; message: string } | null;
     for (const method of ['select', 'eq', 'in', 'limit', 'update', 'is', 'order', 'gte', 'lte']) {
       builder[method] = (...args: unknown[]) => {
         calls.push({ table, method, args })
+        if (method === 'select') selectedColumns = String(args[0] ?? '')
         return builder
       }
     }
@@ -186,5 +192,26 @@ describe('SW-6: idempotência atômica e por conta', () => {
     expect(res.status).toBe(200)
     expect((await res.json()).message).toBe('Message already synchronized')
     expect(calls.some((c) => c.table === 'messages' && c.method === 'insert')).toBe(false)
+  })
+})
+
+describe('@operador (migration 376): deploy antes da migration não derruba o recebimento', () => {
+  it('select da conversa com requested_agent_id falha (42703): refaz sem a coluna e a mensagem é gravada', async () => {
+    const calls = fakeDb({ noReservationColumn: true })
+    const res = await POST(authed(messageAny('false_5511999990001@c.us_FALLBACK')))
+    expect(res.status).toBe(200)
+    const selects = calls.filter((c) => c.table === 'conversations' && c.method === 'select').map((c) => String(c.args[0]))
+    expect(selects[0]).toContain('requested_agent_id')
+    expect(selects[1]).toBe('id, status, unread_count, assigned_agent_id')
+    // seguiu como "sem reserva": a mensagem do cliente foi inserida
+    expect(calls.some((c) => c.table === 'messages' && c.method === 'insert')).toBe(true)
+  })
+
+  it('com a migration aplicada, uma só consulta com a coluna', async () => {
+    const calls = fakeDb()
+    expect((await POST(authed(messageAny('false_5511999990001@c.us_OK')))).status).toBe(200)
+    const selects = calls.filter((c) => c.table === 'conversations' && c.method === 'select').map((c) => String(c.args[0]))
+    expect(selects.filter((s) => s.includes('requested_agent_id'))).toHaveLength(1)
+    expect(selects.some((s) => s === 'id, status, unread_count, assigned_agent_id')).toBe(false)
   })
 })
