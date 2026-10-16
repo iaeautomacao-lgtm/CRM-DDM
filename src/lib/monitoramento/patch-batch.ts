@@ -10,7 +10,11 @@ import type { MonitorConversation } from "./queries";
 
 export type ConversationPatch =
   | { kind: "drop" }
-  | { kind: "update"; fields: Pick<MonitorConversation, "status" | "assigned_agent_id" | "team_id" | "updated_at"> };
+  | {
+      kind: "update";
+      fields: Pick<MonitorConversation, "status" | "assigned_agent_id" | "team_id" | "updated_at"> &
+        Pick<MonitorConversation, "last_message_at" | "last_customer_message_at">;
+    };
 
 /** Fila de mudanças por conversa: a última de cada id vence. */
 export class PatchQueue {

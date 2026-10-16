@@ -18,6 +18,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permission";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import { PHASE_META, type MonitorPhase } from "@/lib/monitoramento/phases";
+import { cardWaitSince } from "@/lib/monitoramento/card-wait";
+import { WaitBadge } from "./wait-badge";
 
 // React.memo: cada evento realtime re-renderiza a página; cartões com as
 // mesmas props (e handlers estáveis) não precisam renderizar de novo.
@@ -26,6 +28,7 @@ export const ConversationCard = memo(function ConversationCard({
   phase,
   teamName,
   agentName,
+  slaLimit,
   hideTeam = false,
   hideAgent = false,
   selected,
@@ -42,6 +45,8 @@ export const ConversationCard = memo(function ConversationCard({
   teamName?: string | null;
   /** Resolved agent name, if conversation.assigned_agent_id is set. */
   agentName?: string | null;
+  /** SLA de primeira resposta (min) da equipe da conversa; sem equipe = padrão da conta. Só número: o memo vale. */
+  slaLimit: number;
   /** True inside a team column (Equipes tab) — the team badge would
    *  just repeat the column it's already in. */
   hideTeam?: boolean;
@@ -76,6 +81,8 @@ export const ConversationCard = memo(function ConversationCard({
   // hiding the team badge inside the Equipes tab doesn't mean the
   // conversation has no agent, so it must not trigger this fallback.
   const showUnstaffed = !conversation.team_id && !conversation.assigned_agent_id;
+  // Espera = a última mensagem é do cliente. O selo tem o próprio relógio; aqui só vai o número "desde quando".
+  const waitSince = cardWaitSince(conversation);
 
   return (
     <div
@@ -124,6 +131,8 @@ export const ConversationCard = memo(function ConversationCard({
               <PhaseIcon className="size-3" />
               {meta.label}
             </span>
+
+            {waitSince !== null && <WaitBadge sinceMs={waitSince} slaLimitMin={slaLimit} />}
 
             {showTeamBadge && (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
