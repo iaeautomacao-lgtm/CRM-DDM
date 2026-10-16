@@ -2,7 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -49,6 +49,7 @@ import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import { getDisparadorScope } from "@/lib/disparador/scope";
+import { useScopedSWR } from "@/lib/swr";
 import { trackAction } from "@/hooks/use-telemetry";
 import { usePermissions } from "@/hooks/use-permission";
 import { formatBrasilia, WEEKDAY_LABELS } from "@/lib/disparador/send-window";
@@ -385,6 +386,129 @@ function qualityLabel(rating: string | null | undefined): string {
   return QUALITY_LABELS[rating] ?? rating;
 }
 
+// Tudo que a tela de campanhas lê numa carga só (lista, métricas resumidas e catálogos). Fica em cache SWR
+// (memória, por conta+usuário): voltar à tela mostra o último resultado e revalida ao fundo.
+interface CampanhasSnapshot {
+  accountId: string;
+  campaigns: Campaign[];
+  metrics: Record<string, CampaignMetrics>;
+  tags: TagItem[];
+  teams: Team[];
+  sessions: WahaSession[];
+}
+
+const EMPTY_CAMPAIGNS: Campaign[] = [];
+const EMPTY_METRICS: Record<string, CampaignMetrics> = {};
+const EMPTY_TAGS: TagItem[] = [];
+const EMPTY_TEAMS: Team[] = [];
+const EMPTY_SESSIONS: WahaSession[] = [];
+
+async function loadCampanhasSnapshot(): Promise<CampanhasSnapshot> {
+  const supabase = createClient();
+
+  const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
+
+  // Load Campaigns
+  const { data: campaignList, error: campaignsError } = await supabase
+    .from("campaigns")
+    .select("*")
+    .eq("account_id", scopedAccountId)
+    .order("created_at", { ascending: false });
+  // Erro de carga vira ErrorState (antes caía em "Nenhuma campanha cadastrada").
+  if (campaignsError) throw campaignsError;
+
+  // Métricas resumidas por campanha — buscadas junto (1 query pra
+  // todas, não N+1) para que os cards já mostrem
+  // enviados/entregues/lidos/respostas sem precisar abrir "Ver
+  // métricas" primeiro. metricsMap também alimenta a previsão de
+  // término dos cards (dispatch-forecast.ts).
+  const metrics: Record<string, CampaignMetrics> = {};
+  const campaignIds = (campaignList ?? []).map((c) => c.id);
+  if (campaignIds.length > 0) {
+    let { data: metricsList } = await supabase
+      .from("campaign_metrics_live")
+      .select("*")
+      .in("campaign_id", campaignIds);
+
+    // Campanhas antigas em rascunho/agendadas podem não ter a linha de
+    // volume planejado. O servidor faz um backfill limitado e a tela
+    // relê as métricas uma única vez.
+    const haveMetrics = new Set((metricsList ?? []).map((m) => m.campaign_id));
+    const needsPlanned = (campaignList ?? []).some(
+      (c) => ["rascunho", "agendado"].includes(c.status) && !haveMetrics.has(c.id)
+    );
+    if (needsPlanned) {
+      try {
+        const planned = await apiFetch("/api/disparador/campaigns/planned-metrics", {
+          method: "POST",
+        });
+        if (planned.ok) {
+          const refreshed = await supabase
+            .from("campaign_metrics_live")
+            .select("*")
+            .in("campaign_id", campaignIds);
+          metricsList = refreshed.data ?? metricsList;
+        }
+      } catch {
+        // Prévia é melhor esforço; não bloqueia a listagem.
+      }
+    }
+
+    if (metricsList) {
+      for (const m of metricsList) metrics[m.campaign_id] = m;
+    }
+  }
+
+  // Tabulações (tags com kind='outcome') — só essas fazem sentido como
+  // filtro de "contato já teve este desfecho de atendimento"; tags de
+  // contato genéricas (kind='contact') não entram aqui, mesmo padrão de
+  // filtro usado em tabulacoes-manager.tsx.
+  const { data: tagList } = await supabase
+    .from("tags")
+    .select("id, name, color")
+    .eq("kind", "outcome")
+    .order("name");
+
+  // Equipes da conta — só para o filtro "Equipe" do passo Público (ver
+  // filteredSessions); mesmo padrão de fetch usado em /canais e
+  // /equipes.
+  const { data: teamList } = await supabase
+    .from("teams")
+    .select("id, name")
+    .eq("account_id", scopedAccountId)
+    .order("name", { ascending: true });
+
+  // Canais de WhatsApp (WAHA + Meta). Os desabilitados também vêm, só
+  // para identificar (e deixar desmarcar) um canal desabilitado que já
+  // estava numa campanha em edição — a lista oferece só os habilitados
+  // e selecionar um desabilitado é erro (campaign-validation.ts).
+  const { data: configList } = await supabase
+    .from("whatsapp_config")
+    .select("id, waha_session, provider, display_phone_number, waba_id, team_id, habilitado")
+    .eq("account_id", scopedAccountId);
+
+  const wahaSessions = (configList ?? []).map((c) => ({
+    id: c.id,
+    name: (c.provider === "meta"
+      ? `WhatsApp Oficial (Meta)${c.display_phone_number ? ` — ${c.display_phone_number}` : ""}`
+      : (c.waha_session || "Sessão WAHA")) + (c.habilitado === false ? " (desabilitado)" : ""),
+    provider: c.provider,
+    display_phone_number: c.display_phone_number,
+    waba_id: c.waba_id,
+    team_id: c.team_id,
+    habilitado: c.habilitado !== false,
+  }));
+
+  return {
+    accountId: scopedAccountId,
+    campaigns: (campaignList ?? []) as Campaign[],
+    metrics,
+    tags: tagList ?? [],
+    teams: (teamList ?? []) as Team[],
+    sessions: wahaSessions as WahaSession[],
+  };
+}
+
 export default function CampanhasPage() {
   // Pelas permissões do servidor: recalcular = campaigns.manage; iniciar em
   // número vermelho = campaigns.red_quality_override (só proprietário).
@@ -394,16 +518,33 @@ export default function CampanhasPage() {
   // requireDisparadorAccess exige em todas as rotas /api/disparador/campaigns/*.
   const canManage = can("campaigns.manage");
   const canOverrideRed = can("campaigns.red_quality_override");
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const snapshotQ = useScopedSWR("campanhas.lista", [], loadCampanhasSnapshot, {
+    onError: (err) => console.error("Failed to load campaigns metadata:", err),
+  });
+  const snapshot = snapshotQ.data;
+  const { mutate: mutateSnapshot } = snapshotQ;
+  const campaigns = snapshot?.campaigns ?? EMPTY_CAMPAIGNS;
+  const loading = snapshotQ.isLoading;
+  const loadError =
+    snapshotQ.error !== undefined && snapshot === undefined ? "Não foi possível carregar as campanhas." : null;
   const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
-  const [tags, setTags] = useState<TagItem[]>([]);
-  const [sessions, setSessions] = useState<WahaSession[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  const tags = snapshot?.tags ?? EMPTY_TAGS;
+  const sessions = snapshot?.sessions ?? EMPTY_SESSIONS;
+  const teams = snapshot?.teams ?? EMPTY_TEAMS;
   // Resolvida uma vez em loadData() — escopo das consultas e do rascunho
   // local do assistente.
-  const [accountId, setAccountId] = useState<string | null>(null);
+  const accountId = snapshot?.accountId ?? null;
+  // Atualizações locais (poll de 30 s, deltas ao vivo) escrevem no cache sem revalidar.
+  const patchSnapshot = useCallback(
+    (patch: (cur: CampanhasSnapshot) => CampanhasSnapshot) =>
+      mutateSnapshot((cur) => (cur ? patch(cur) : cur), { revalidate: false }),
+    [mutateSnapshot],
+  );
+  const setCampaigns = useCallback(
+    (update: (prev: Campaign[]) => Campaign[]) =>
+      patchSnapshot((cur) => ({ ...cur, campaigns: update(cur.campaigns) })),
+    [patchSnapshot],
+  );
 
   // Assistente "Nova campanha" (src/components/disparador/nova-campanha).
   // editingCampaign = campanha em rascunho ou agendada sendo editada.
@@ -465,7 +606,15 @@ export default function CampanhasPage() {
   // disparar uma query por campanha (evita N+1 na listagem, ver Passo 3).
   // Só tem dado pra campanhas cujo modal de métricas já foi aberto
   // nesta sessão.
-  const [metricsMap, setMetricsMap] = useState<Record<string, CampaignMetrics>>({});
+  const metricsMap = snapshot?.metrics ?? EMPTY_METRICS;
+  const setMetricsMap = useCallback(
+    (update: (prev: Record<string, CampaignMetrics>) => Record<string, CampaignMetrics>) =>
+      patchSnapshot((cur) => {
+        const next = update(cur.metrics);
+        return next === cur.metrics ? cur : { ...cur, metrics: next };
+      }),
+    [patchSnapshot],
+  );
   // Empurrado pelo banco (migration 364): cada envio/entrega/leitura/erro atualiza os cards e o modal na hora; a consulta do modal vira reconciliação (45 s).
   const { connected: liveConnected, latencyMs: liveLatency } = useDisparadorLive((delta) => {
     setMetricsMap((prev) => {
@@ -537,10 +686,6 @@ export default function CampanhasPage() {
     return () => clearTimeout(t);
   }, []);
 
-  // Load Data on Mount
-  useEffect(() => {
-    loadData();
-  }, []);
 
   // Garante que o auto-refresh de métricas pare se o componente
   // desmontar com o modal ainda aberto (ex: navegação para outra rota).
@@ -580,124 +725,10 @@ export default function CampanhasPage() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [campaigns]);
-
-  // Tabulações (tags com kind='outcome') — só essas fazem sentido como
-  // filtro de "contato já teve este desfecho de atendimento"; tags de
-  // contato genéricas (kind='contact') não entram aqui, mesmo padrão de
-  // filtro usado em tabulacoes-manager.tsx.
-  const loadTags = async () => {
-    const supabase = createClient();
-    const { data: tagList } = await supabase
-      .from("tags")
-      .select("id, name, color")
-      .eq("kind", "outcome")
-      .order("name");
-    setTags(tagList ?? []);
-  };
+  }, [campaigns, setCampaigns]);
 
   const loadData = async () => {
-    setLoading(true);
-    try {
-      const supabase = createClient();
-
-      const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
-      setAccountId(scopedAccountId);
-
-      // Load Campaigns
-      const { data: campaignList, error: campaignsError } = await supabase
-        .from("campaigns")
-        .select("*")
-        .eq("account_id", scopedAccountId)
-        .order("created_at", { ascending: false });
-      // Erro de carga vira ErrorState (antes caía em "Nenhuma campanha cadastrada").
-      if (campaignsError) throw campaignsError;
-      setCampaigns(campaignList ?? []);
-      setLoadError(null);
-
-      // Métricas resumidas por campanha — buscadas junto (1 query pra
-      // todas, não N+1) para que os cards já mostrem
-      // enviados/entregues/lidos/respostas sem precisar abrir "Ver
-      // métricas" primeiro. metricsMap também alimenta a previsão de
-      // término dos cards (dispatch-forecast.ts).
-      const campaignIds = (campaignList ?? []).map((c) => c.id);
-      if (campaignIds.length > 0) {
-        let { data: metricsList } = await supabase
-          .from("campaign_metrics_live")
-          .select("*")
-          .in("campaign_id", campaignIds);
-
-        // Campanhas antigas em rascunho/agendadas podem não ter a linha de
-        // volume planejado. O servidor faz um backfill limitado e a tela
-        // relê as métricas uma única vez.
-        const haveMetrics = new Set((metricsList ?? []).map((m) => m.campaign_id));
-        const needsPlanned = (campaignList ?? []).some(
-          (c) => ["rascunho", "agendado"].includes(c.status) && !haveMetrics.has(c.id)
-        );
-        if (needsPlanned) {
-          try {
-            const planned = await apiFetch("/api/disparador/campaigns/planned-metrics", {
-              method: "POST",
-            });
-            if (planned.ok) {
-              const refreshed = await supabase
-                .from("campaign_metrics_live")
-                .select("*")
-                .in("campaign_id", campaignIds);
-              metricsList = refreshed.data ?? metricsList;
-            }
-          } catch {
-            // Prévia é melhor esforço; não bloqueia a listagem.
-          }
-        }
-
-        if (metricsList) {
-          const next: Record<string, CampaignMetrics> = {};
-          for (const m of metricsList) next[m.campaign_id] = m;
-          setMetricsMap(next);
-        }
-      }
-
-      // Load Tags
-      await loadTags();
-
-      // Equipes da conta — só para o filtro "Equipe" do passo Público (ver
-      // filteredSessions); mesmo padrão de fetch usado em /canais e
-      // /equipes.
-      const { data: teamList } = await supabase
-        .from("teams")
-        .select("id, name")
-        .eq("account_id", scopedAccountId)
-        .order("name", { ascending: true });
-      setTeams((teamList ?? []) as Team[]);
-
-      // Canais de WhatsApp (WAHA + Meta). Os desabilitados também vêm, só
-      // para identificar (e deixar desmarcar) um canal desabilitado que já
-      // estava numa campanha em edição — a lista oferece só os habilitados
-      // e selecionar um desabilitado é erro (campaign-validation.ts).
-      const { data: configList } = await supabase
-        .from("whatsapp_config")
-        .select("id, waha_session, provider, display_phone_number, waba_id, team_id, habilitado")
-        .eq("account_id", scopedAccountId);
-
-      const wahaSessions = (configList ?? []).map((c) => ({
-        id: c.id,
-        name: (c.provider === "meta"
-          ? `WhatsApp Oficial (Meta)${c.display_phone_number ? ` — ${c.display_phone_number}` : ""}`
-          : (c.waha_session || "Sessão WAHA")) + (c.habilitado === false ? " (desabilitado)" : ""),
-        provider: c.provider,
-        display_phone_number: c.display_phone_number,
-        waba_id: c.waba_id,
-        team_id: c.team_id,
-        habilitado: c.habilitado !== false,
-      }));
-      setSessions(wahaSessions);
-    } catch (err) {
-      console.error("Failed to load campaigns metadata:", err);
-      setLoadError("Não foi possível carregar as campanhas.");
-    } finally {
-      setLoading(false);
-    }
+    await mutateSnapshot();
   };
 
   // Abre o modal e busca info do canal antes de confirmar. `now` = "Iniciar
