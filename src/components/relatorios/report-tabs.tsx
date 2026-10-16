@@ -12,10 +12,10 @@ const MOVED_REPORTS: readonly string[] = ["/relatorios/conversas"];
 
 export function ReportTabs() {
   const pathname = usePathname();
-  const { canOpen } = usePermissions();
+  const { canOpen, can } = usePermissions();
 
   // Abas que o servidor libera (GET /api/me/permissions, campo pages).
-  const visible = reportNavItems.filter((item) => !MOVED_REPORTS.includes(item.href) && canOpen(item.href));
+  const visible = reportNavItems.filter((item) => !MOVED_REPORTS.includes(item.href) && canOpen(item.href) && (!item.permission || can(item.permission)));
 
   if (visible.length === 0) return null;
 

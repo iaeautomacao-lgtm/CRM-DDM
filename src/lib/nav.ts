@@ -3,6 +3,7 @@ import {
   CalendarClock,
   Bot,
   Download,
+  Coins,
   FileText,
   Gauge,
   Headphones,
@@ -93,6 +94,7 @@ export const reportNavItems: NavItem[] = [
   { href: "/relatorios/tabulacoes", label: "Tabulações", icon: Tags },
   { href: "/relatorios/envio-em-lote", label: "Campanhas", icon: Megaphone },
   { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },
+  { href: "/relatorios/custos-ia", label: "Custos de IA", icon: Coins, permission: "reports.view_all" },
 ];
 
 export const bottomNavItems: NavItem[] = [
