@@ -34,6 +34,7 @@ import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { ErrorState, ForbiddenState, Skeleton } from '@/components/ddm/states';
 import { StatusChip } from '@/components/ddm/status-chip';
 import { SettingsPanelHead } from './settings-panel-head';
+import { SlaDefaultCard } from './sla-default-card';
 
 const MAX_NAME_LEN = 80;
 const NOT_APPLIED_NOTE = 'Ainda não é aplicado em envios e automações.';
@@ -90,6 +91,9 @@ export function OrganizationPanel() {
   const [savingHours, setSavingHours] = useState(false);
   const [hoursError, setHoursError] = useState<string | null>(null);
 
+  // SLA de primeira resposta padrão (migration 381). `null` = o servidor ainda não tem a chave: o card não aparece.
+  const [sla, setSla] = useState<{ value: number | null; source: 'account' | 'default' } | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -111,6 +115,8 @@ export function OrganizationPanel() {
           setSavedTz(s.value);
           setTz(s.value);
           setTzSource(s.source);
+        } else if (s.key === 'first_response_sla_min') {
+          setSla({ value: typeof s.value === 'number' ? s.value : null, source: s.source });
         } else if (s.key === 'business_hours') {
           const f = hoursToForm(s.value);
           setSavedHours(f);
@@ -450,6 +456,16 @@ export function OrganizationPanel() {
           </div>
         )}
       </div>
+
+      {sla && (
+        <SlaDefaultCard
+          key={sla.value ?? 'padrao'}
+          value={sla.value}
+          source={sla.source}
+          canEdit={canEdit}
+          onSaved={(value) => setSla({ value, source: value === null ? 'default' : 'account' })}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmResetTz}

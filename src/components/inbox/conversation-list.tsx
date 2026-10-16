@@ -56,6 +56,7 @@ import { INBOX_QUEUE_LABELS, inboxQueueSection } from "@/lib/inbox/queue-section
 import { reservationBadge } from "@/lib/inbox/reservation";
 import { PushNudge } from "./push-nudge";
 import { awaitingReplySince, formatWait, waitLevel, waitMinutes } from "@/lib/inbox/wait-time";
+import { useSlaConfig } from "@/hooks/use-sla-config";
 
 // Lista do inbox (F2). Os dados vêm de /api/inbox/conversations, paginados
 // e filtrados no servidor (RLS do usuário). Os filtros ficam na URL
@@ -456,6 +457,8 @@ export function ConversationList({
     return (id: string) => byId.get(id);
   }, [options.agents]);
   const teamsById = useMemo(() => new Map(options.teams.map((t) => [t.id, t])), [options.teams]);
+  // SLA de primeira resposta por equipe: cada item recebe só o número do limite dele (o memo do item continua valendo).
+  const sla = useSlaConfig();
   const linesById = useMemo(() => new Map(options.lines.map((l) => [l.id, l.name])), [options.lines]);
   const linesForTab = useMemo(
     () =>
@@ -546,6 +549,7 @@ export function ConversationList({
           team={conv.team_id ? teamsById.get(conv.team_id) ?? null : null}
           lineName={linesById.get(conv.config_id ?? conv.channel_id ?? "") ?? null}
           nowMs={awaitingReplySince(conv) === null ? 0 : nowMs}
+          slaLimit={sla.limitFor(conv.team_id)}
         />
         );
       })}
@@ -1053,6 +1057,8 @@ interface ConversationItemProps {
   lineName: string | null;
   /** Relógio compartilhado da lista (ms), para o tempo de espera andar sozinho. */
   nowMs: number;
+  /** SLA de primeira resposta (min) da equipe da conversa; sem equipe = padrão da conta. */
+  slaLimit: number;
   /** Reserva por menção: texto do selo ("Aguardando @apelido" / "Cliente pediu você"), tooltip e destaque. */
   reservedLabel: string | null;
   reservedTitle: string | null;
@@ -1100,7 +1106,7 @@ const QUEUE_DOT: Record<string, string> = {
 
 // Memoizado: um evento em tempo real numa conversa só renderiza o item dela (props estáveis; o relógio só chega
 // para quem está esperando resposta, então o tick de 30 s não mexe nos demais).
-const ConversationItem = memo(function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs, reservedLabel, reservedTitle, reservedMine }: ConversationItemProps) {
+const ConversationItem = memo(function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team, lineName, nowMs, slaLimit, reservedLabel, reservedTitle, reservedMine }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
@@ -1110,7 +1116,7 @@ const ConversationItem = memo(function ConversationItem({ conversation, isActive
   const waitSince = awaitingReplySince(conversation);
   const waitMin = waitSince === null ? null : waitMinutes(waitSince, nowMs);
   const waiting = waitMin !== null;
-  const level = waitMin === null ? "ok" : waitLevel(waitMin);
+  const level = waitMin === null ? "ok" : waitLevel(waitMin, slaLimit);
   const ChannelIcon = CHANNEL_ICON[conversation.channel_type ?? "whatsapp"] ?? MessageCircle;
   const negative = conversation.sentiment === "negative";
   const queueSection = inboxQueueSection(conversation);
@@ -1174,7 +1180,7 @@ const ConversationItem = memo(function ConversationItem({ conversation, isActive
                   ? "font-semibold text-primary-text"
                   : "text-muted-foreground",
             )}
-            title={waiting ? `Cliente aguardando resposta há ${formatWait(waitMin)}` : timeTitle}
+            title={waiting ? `Cliente aguardando resposta há ${formatWait(waitMin)} (SLA: ${slaLimit} min)` : timeTitle}
           >
             {time}
           </span>

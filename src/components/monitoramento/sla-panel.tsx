@@ -17,13 +17,17 @@ import {
   type DrilldownQuery,
 } from "@/components/monitoramento/conversation-drilldown";
 
+/** Linha da tabela. `target_minutes` = SLA efetivo da equipe (migration 381); ausente = padrão da conta. */
+type SlaRow = SlaStats & { target_minutes?: number };
+
 interface SlaResponse {
   days: number;
+  /** Padrão da conta (efetivo). */
   target_minutes: number;
   truncated: boolean;
   total: SlaStats;
-  byChannel: SlaStats[];
-  byTeam: SlaStats[];
+  byChannel: SlaRow[];
+  byTeam: SlaRow[];
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -126,9 +130,9 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
             />
             <Kpi label="1ª resposta (média)" value={fmtMinutes(data.total.firstResponseAvgMin)} hint={`p90 ${fmtMinutes(data.total.firstResponseP90Min)}`} />
             <Kpi
-              label={`Dentro de ${target} min`}
+              label="Dentro do SLA"
               value={data.total.withinTargetPct === null ? "—" : `${data.total.withinTargetPct}%`}
-              hint={`${data.total.responded} respondidas${
+              hint={`SLA da equipe · padrão ${target} min · ${data.total.responded} respondidas${
                 data.total.withinTargetPct !== null && data.total.withinTargetPct < 80 ? " · abaixo da meta" : ""
               }`}
             />
@@ -154,6 +158,7 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
             rows={data.byTeam}
             labelFor={(k) => (k === "none" ? "Sem equipe" : teamNames[k] ?? "Equipe removida")}
             target={target}
+            showRowTarget
             onOpen={(metric, key, label) =>
               open(metric, `${metric === "queued" ? "Na fila" : "Conversas"} · ${label}`, "team", key)
             }
@@ -204,12 +209,16 @@ function SlaTable({
   rows,
   labelFor,
   target,
+  showRowTarget = false,
   onOpen,
 }: {
   title: string;
-  rows: SlaStats[];
+  rows: SlaRow[];
   labelFor: (key: string) => string;
+  /** Padrão da conta: vale para a linha sem `target_minutes` (e para "Sem equipe"). */
   target: number;
+  /** Mostra a meta de cada linha (tabela por equipe). */
+  showRowTarget?: boolean;
   onOpen: (metric: DrilldownMetric, key: string, label: string) => void;
 }) {
   return (
@@ -222,7 +231,9 @@ function SlaTable({
             <th className="px-3 py-2 font-medium">Conversas</th>
             <th className="px-3 py-2 font-medium">1ª resposta</th>
             <th className="px-3 py-2 font-medium">p90</th>
-            <th className="px-3 py-2 font-medium">≤ {target} min</th>
+            <th className="px-3 py-2 font-medium" title="Respondidas dentro do SLA de primeira resposta da equipe de cada conversa">
+              Dentro do SLA
+            </th>
             <th className="px-3 py-2 font-medium">Na fila</th>
             <th className="px-3 py-2 font-medium">Maior espera</th>
           </tr>
@@ -252,6 +263,11 @@ function SlaTable({
                   {r.withinTargetPct === null ? "—" : `${r.withinTargetPct}%`}
                   {r.withinTargetPct !== null && r.withinTargetPct < 80 && (
                     <span className="ml-1 text-[10px] font-medium">abaixo da meta</span>
+                  )}
+                  {showRowTarget && (
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                      meta {r.target_minutes ?? target} min
+                    </span>
                   )}
                 </td>
                 <td className={cn("px-3 py-2", r.queued > 0 ? "font-semibold text-foreground" : undefined)}>
