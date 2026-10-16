@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import {
+  AtSign,
   KeyRound,
   Loader2,
   Mail,
@@ -84,6 +85,10 @@ import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 import type { AccountRole } from '@/lib/auth/roles';
 import { presenceLabel, summarize } from '@/lib/presence';
 import {
+  mentionAliasErrorMessage,
+  parseMentionAlias,
+} from '@/lib/members/mention-alias';
+import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
 } from '@/components/presence/presence-dot';
@@ -99,6 +104,7 @@ interface Member {
   avatar_url: string | null;
   role: AccountRole;
   joined_at: string;
+  mention_alias?: string | null;
 }
 
 interface Invitation {
@@ -179,6 +185,10 @@ export function MembersTab() {
   const [resetError, setResetError] = useState<
     { field: 'new' | 'confirm' | 'server'; message: string } | null
   >(null);
+  const [mentionMember, setMentionMember] = useState<Member | null>(null);
+  const [mentionDraft, setMentionDraft] = useState('');
+  const [mentionError, setMentionError] = useState<string | null>(null);
+  const [savingMention, setSavingMention] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -299,6 +309,58 @@ export function MembersTab() {
       toast.error('Não foi possível conectar ao servidor');
       throw err;
     } finally {
+      setPendingMemberAction(null);
+    }
+  }
+
+  function openMentionEditor(member: Member) {
+    if (!canManageMembers || member.role !== 'agent') return;
+    setMentionMember(member);
+    setMentionDraft(member.mention_alias ?? '');
+    setMentionError(null);
+  }
+
+  async function saveMention() {
+    if (!mentionMember || savingMention || !canManageMembers) return;
+    const parsed = parseMentionAlias(mentionDraft);
+    if (!parsed.ok) {
+      setMentionError(parsed.message);
+      return;
+    }
+    const alias = parsed.alias;
+    if (alias === (mentionMember.mention_alias ?? null)) {
+      setMentionMember(null);
+      return;
+    }
+
+    setSavingMention(true);
+    setMentionError(null);
+    setPendingMemberAction(mentionMember.user_id);
+    try {
+      const res = await apiFetch(`/api/account/members/${mentionMember.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mention_alias: alias }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        setMentionError(mentionAliasErrorMessage(res.status, payload.error));
+        return;
+      }
+      setMembers((prev) =>
+        prev.map((member) =>
+          member.user_id === mentionMember.user_id
+            ? { ...member, mention_alias: alias }
+            : member,
+        ),
+      );
+      toast.success(alias ? `Apelido @${alias} salvo` : 'Apelido removido');
+      setMentionMember(null);
+    } catch (err) {
+      console.error('[MembersTab] failed to save mention alias:', err);
+      setMentionError('Não foi possível conectar ao servidor');
+    } finally {
+      setSavingMention(false);
       setPendingMemberAction(null);
     }
   }
@@ -559,6 +621,32 @@ export function MembersTab() {
                           {member.email}
                         </p>
                       )}
+                      {member.role === 'agent' &&
+                        (member.mention_alias || canManageMembers) && (
+                          <div className="mt-1 flex items-center gap-2 text-xs">
+                            {member.mention_alias ? (
+                              <span className="font-medium text-foreground">
+                                @{member.mention_alias}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                Sem apelido
+                              </span>
+                            )}
+                            {canManageMembers && (
+                              <button
+                                type="button"
+                                onClick={() => openMentionEditor(member)}
+                                disabled={isBusy}
+                                aria-label={`Editar apelido de ${member.full_name || 'operador'}`}
+                                className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
+                              >
+                                <AtSign className="size-3" aria-hidden="true" />
+                                {member.mention_alias ? 'Editar' : 'Definir apelido'}
+                              </button>
+                            )}
+                          </div>
+                        )}
                     </div>
                   </div>
 
@@ -811,6 +899,75 @@ export function MembersTab() {
           if (revokeInvite) await handleRevoke(revokeInvite);
         }}
       />
+
+      <Dialog
+        open={mentionMember !== null}
+        onOpenChange={(open) => {
+          if (!open && !savingMention) setMentionMember(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-popover-foreground">
+              <AtSign className="size-4 text-primary" />
+              Apelido de atendimento
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Defina um apelido exclusivo para{' '}
+              {mentionMember?.full_name || 'o operador'}. Quando o cliente
+              enviar @apelido no início da mensagem, a IA deixa de atender e a
+              conversa entra na fila de espera deste operador.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="member-mention-alias">Apelido</Label>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">@</span>
+              <Input
+                id="member-mention-alias"
+                autoComplete="off"
+                maxLength={33}
+                value={mentionDraft}
+                onChange={(event) => {
+                  setMentionDraft(event.target.value);
+                  setMentionError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void saveMention();
+                }}
+                placeholder="adriana"
+                aria-invalid={mentionError ? true : undefined}
+                aria-describedby="member-mention-hint"
+                disabled={savingMention}
+              />
+            </div>
+            <p
+              id="member-mention-hint"
+              role={mentionError ? 'alert' : undefined}
+              className={
+                mentionError
+                  ? 'text-xs text-destructive'
+                  : 'text-xs text-muted-foreground'
+              }
+            >
+              {mentionError ??
+                'Letras sem acento, números e _. De 2 a 32 caracteres. Deixe vazio para remover o apelido.'}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMentionMember(null)}
+              disabled={savingMention}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={() => void saveMention()} disabled={savingMention}>
+              {savingMention ? 'Salvando...' : 'Salvar apelido'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={resetPasswordMember !== null}
