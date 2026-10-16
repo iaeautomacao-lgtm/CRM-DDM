@@ -47,6 +47,7 @@ export interface OpenAiChatClientOptions {
   model: string;
   timeoutMs?: number;
   maxTokens?: number;
+  onUsage?: (response: unknown) => Promise<void>;
 }
 
 export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmClient {
@@ -72,11 +73,14 @@ export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmCl
         temperature: 0.1,
         max_tokens: opts.maxTokens ?? 1_500,
         stream: true,
+        stream_options: { include_usage: true },
       });
 
       let content = "";
       const calls = new Map<number, LlmToolCall>();
+      let usageChunk: unknown = null;
       for await (const chunk of stream) {
+        if (chunk.usage) usageChunk = chunk;
         const delta = chunk.choices[0]?.delta;
         if (!delta) continue;
         if (delta.content) {
@@ -92,6 +96,7 @@ export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmCl
         }
       }
 
+      if (usageChunk && opts.onUsage) await opts.onUsage(usageChunk);
       const toolCalls = [...calls.entries()]
         .sort(([a], [b]) => a - b)
         .map(([index, c]) => ({ ...c, id: c.id || `call_${index}` }))

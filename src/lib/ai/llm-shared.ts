@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import { gatedFetch } from "@/lib/ai/llm-gate";
+import { recordAiTokenUsage } from '@/lib/billing/usage';
 import { openAiUrl } from "@/lib/loadtest/gate";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
@@ -136,6 +137,7 @@ export async function callLlmForAnalysis(
   apiKey: string,
   prompt: string,
   model?: string,
+  accountId?: string,
 ): Promise<string> {
   const effectiveModel =
     model ||
@@ -169,6 +171,7 @@ export async function callLlmForAnalysis(
     );
     if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
     const data = await response.json();
+    await recordAiTokenUsage({ accountId, provider: 'openai', model: effectiveModel, feature: 'analysis', response: data });
     return data?.choices?.[0]?.message?.content || "";
   } else if (provider === "claude") {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -187,6 +190,7 @@ export async function callLlmForAnalysis(
     });
     if (!response.ok) throw new Error(`Claude error: ${response.status}`);
     const data = await response.json();
+    await recordAiTokenUsage({ accountId, provider: 'claude', model: effectiveModel, feature: 'analysis', response: data });
     const textBlock = Array.isArray(data?.content)
       ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
       : null;
@@ -211,6 +215,7 @@ export async function callLlmForAnalysis(
     });
     if (!response.ok) throw new Error(`Hermes error: ${response.status}`);
     const data = await response.json();
+    await recordAiTokenUsage({ accountId, provider: 'hermes', model: effectiveModel, feature: 'analysis', response: data });
     return data?.choices?.[0]?.message?.content || "";
   } else {
     // Gemini
@@ -230,6 +235,7 @@ export async function callLlmForAnalysis(
     });
     if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
     const data = await response.json();
+    await recordAiTokenUsage({ accountId, provider: 'gemini', model: effectiveModel, feature: 'analysis', response: data });
     return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   }
 }

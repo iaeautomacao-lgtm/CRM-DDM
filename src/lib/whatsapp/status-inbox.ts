@@ -24,6 +24,10 @@ export interface StatusEventInput {
   /** Conta/canal cujo app_secret validou o HMAC deste POST (nunca vem do corpo). */
   account_id: string
   channel_id: string
+  pricing_category?: string
+  pricing_type?: string
+  pricing_billable?: boolean
+  country_code?: 'BR' | 'UNKNOWN'
 }
 
 interface MetaStatus {
@@ -31,6 +35,8 @@ interface MetaStatus {
   status?: string
   timestamp?: string
   errors?: Array<{ code?: number; title?: string }>
+  recipient_id?: string
+  pricing?: { category?: string; type?: string; billable?: boolean }
 }
 
 interface BodyLike {
@@ -38,6 +44,13 @@ interface BodyLike {
     id?: string
     changes?: Array<{ field?: string; value?: { metadata?: { phone_number_id?: string }; statuses?: MetaStatus[] } }>
   }>
+}
+
+/** Country classification only; never persist the recipient phone in billing. */
+export function recipientCountry(recipient: string | undefined): 'BR' | 'UNKNOWN' {
+  if (!recipient) return 'UNKNOWN'
+  const digits = recipient.replace(/[^0-9]/g, '')
+  return /^55[0-9]{10,11}$/.test(digits) ? 'BR' : 'UNKNOWN'
 }
 
 export function failureReasonOf(errors: MetaStatus['errors']): string | null {
@@ -70,6 +83,10 @@ export function extractStatusEvents(
           ts: Number.isFinite(ts) && ts > 0 ? ts : null,
           account_id: channel.account_id,
           channel_id: channel.id,
+          ...(status.pricing?.category ? { pricing_category: status.pricing.category } : {}),
+          ...(status.pricing?.type ? { pricing_type: status.pricing.type } : {}),
+          ...(typeof status.pricing?.billable === 'boolean' ? { pricing_billable: status.pricing.billable } : {}),
+          ...(status.recipient_id ? { country_code: recipientCountry(status.recipient_id) } : {}),
         })
       }
     }

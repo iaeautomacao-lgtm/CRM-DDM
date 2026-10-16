@@ -55,7 +55,7 @@ ${historyText}
 """`;
 
   try {
-    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt, model);
+    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt, model, accountId);
 
     const cleanJson = stripJsonFences(rawResult);
 

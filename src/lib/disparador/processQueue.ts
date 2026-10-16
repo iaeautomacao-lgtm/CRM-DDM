@@ -714,7 +714,7 @@ export async function processQueueItem(
     // Campanha com IA: mensagem_final é o PROMPT. Falha da IA (429/timeout/sem chave/vazio) NUNCA
     // pode enviar o prompt ao cliente: o item volta para a fila (erro retentável, sem consumir
     // tentativa) e a pausa automática conta estas ocorrências.
-    const generated = await generateDispatchAiText(messageText, item.contacts?.name);
+    const generated = await generateDispatchAiText(messageText, item.contacts?.name, process.env, campaign.account_id);
     if (generated === null) {
       await markQueueError(item.id, AI_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
       void writeLog({

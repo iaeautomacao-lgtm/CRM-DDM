@@ -5,6 +5,7 @@ import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
+import { recordAiTokenUsage } from '@/lib/billing/usage';
 import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
 import {
   getAiModelDefinition,
@@ -1517,13 +1518,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         responseModel,
         // Esperando vaga/429 conta como "IA trabalhando" para o vigia.
         () => tracker?.heartbeat?.beat() ?? Promise.resolve(),
+        accountId,
       );
     } else if (aiConfig.api_provider === "claude") {
-      return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel);
+      return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
     } else if (aiConfig.api_provider === "hermes") {
-      return generateHermesResponse(activeKey, systemPromptWithKb, history, responseModel);
+      return generateHermesResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
     }
-    return generateGeminiResponse(activeKey, systemPromptWithKb, history, responseModel);
+    return generateGeminiResponse(activeKey, systemPromptWithKb, history, responseModel, accountId);
   };
 
   let generatedText = "";
@@ -2103,6 +2105,7 @@ async function generateGeminiResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string,
 ): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -2180,6 +2183,7 @@ async function generateGeminiResponse(
   }
 
   const data = await response.json();
+  await recordAiTokenUsage({ accountId, provider: 'gemini', model, feature: 'responder', response: data });
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
@@ -2199,6 +2203,7 @@ export async function generateOpenAiResponse(
   nodeKey?: string,
   model = "gpt-4o-mini",
   onWaiting?: () => void | Promise<void>,
+  accountId?: string,
 ): Promise<string> {
   const url = openAiUrl("/chat/completions");
 
@@ -2288,6 +2293,7 @@ export async function generateOpenAiResponse(
     }
 
     const data = await response.json();
+    await recordAiTokenUsage({ accountId, provider: 'openai', model, feature: 'responder', response: data });
     const choice = data?.choices?.[0];
     const message = choice?.message;
 
@@ -2531,6 +2537,7 @@ async function generateClaudeResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string,
 ): Promise<string> {
   const url = "https://api.anthropic.com/v1/messages";
   const messages = [];
@@ -2564,6 +2571,7 @@ async function generateClaudeResponse(
   }
 
   const data = await response.json();
+  await recordAiTokenUsage({ accountId, provider: 'claude', model, feature: 'responder', response: data });
   const textBlock = Array.isArray(data?.content)
     ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
     : null;
@@ -2575,6 +2583,7 @@ async function generateHermesResponse(
   systemPrompt: string,
   history: any[],
   model: string,
+  accountId?: string,
 ): Promise<string> {
   const url = "https://openrouter.ai/api/v1/chat/completions";
   const messages = [];
@@ -2613,5 +2622,6 @@ async function generateHermesResponse(
   }
 
   const data = await response.json();
+  await recordAiTokenUsage({ accountId, provider: 'hermes', model, feature: 'responder', response: data });
   return data?.choices?.[0]?.message?.content || "";
 }
