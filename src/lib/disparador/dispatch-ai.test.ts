@@ -13,6 +13,9 @@ vi.mock("openai", () => ({
   },
 }));
 
+const usage = vi.hoisted(() => ({ record: vi.fn(async (_p: unknown) => undefined) }));
+vi.mock("@/lib/costs/usage", () => ({ recordAiTokenUsage: usage.record }));
+
 import { generateDispatchAiText, resetDispatchOpenAiClient } from "./dispatch-ai";
 
 const env = { OPENAI_API_KEY: "sk-test" };
@@ -42,5 +45,15 @@ describe("generateDispatchAiText (P0-2 / F1)", () => {
     expect(await generateDispatchAiText("PROMPT SECRETO", "Ana", env)).toBeNull();
     expect(await generateDispatchAiText("PROMPT SECRETO", "Ana", {})).toBeNull();
     expect(openai.create).toHaveBeenCalledTimes(3); // sem chave nem chama
+  });
+
+  it("custo de IA (378): entrega o uso da conta ao registro, sem esperar e sem o texto gerado", async () => {
+    const completion = { id: "cmpl-1", model: "gpt-4o-mini", choices: [{ message: { content: "Olá Ana" } }], usage: { prompt_tokens: 12, completion_tokens: 3 } };
+    openai.create.mockResolvedValue(completion);
+    expect(await generateDispatchAiText("PROMPT", "Ana", env, "acc-1")).toBe("Olá Ana");
+    expect(usage.record).toHaveBeenCalledWith({ accountId: "acc-1", provider: "openai", model: "gpt-4o-mini", feature: "disparador", response: completion });
+    usage.record.mockClear();
+    await generateDispatchAiText("PROMPT", "Ana", env);
+    expect(usage.record.mock.calls[0][0]).toMatchObject({ accountId: undefined }); // o helper ignora quando não há conta
   });
 });
