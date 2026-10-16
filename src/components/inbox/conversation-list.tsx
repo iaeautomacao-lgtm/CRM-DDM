@@ -7,6 +7,7 @@ import { usePermission } from "@/hooks/use-permission";
 import { memo, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useScopedSWR } from "@/lib/swr";
 import { cn } from "@/lib/utils";
 import type { Conversation } from "@/types";
 import {
@@ -136,68 +137,72 @@ function readSectionPref(key: string): boolean {
 }
 
 /** Opções dos filtros (linhas, atendentes, equipes, clientes, campanhas). */
-function useFilterOptions(accountId: string | null) {
-  const [lines, setLines] = useState<LineOption[]>([]);
-  const [agents, setAgents] = useState<NamedOption[]>([]);
-  const [teams, setTeams] = useState<(NamedOption & { color: string | null })[]>([]);
-  const [clients, setClients] = useState<ClientOption[]>([]);
-  const [campaigns, setCampaigns] = useState<NamedOption[]>([]);
-  const [outcomes, setOutcomes] = useState<ClientOption[]>([]);
+interface FilterOptionsData {
+  lines: LineOption[];
+  agents: NamedOption[];
+  teams: (NamedOption & { color: string | null })[];
+  clients: ClientOption[];
+  campaigns: NamedOption[];
+  outcomes: ClientOption[];
+}
 
-  useEffect(() => {
-    if (!accountId) return;
-    let cancelled = false;
-    const supabase = createClient();
-    (async () => {
-      const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes, outcomesRes] = await Promise.all([
-        apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
-        supabase
-          .from("profiles")
-          .select("user_id, full_name")
-          .eq("account_id", accountId)
-          .in("account_role", ["agent", "supervisor", "admin", "owner"])
-          .order("full_name"),
-        supabase.from("teams").select("id, name, color").eq("account_id", accountId).order("name"),
-        supabase.from("clients").select("id, name, color").eq("account_id", accountId).order("name"),
-        // Campanhas que podem ter originado conversas (as mais recentes).
-        supabase
-          .from("campaigns")
-          .select("id, nome")
-          .eq("account_id", accountId)
-          .order("created_at", { ascending: false })
-          .limit(50),
-        // Tabulações (tags de desfecho) para o filtro do item 11 do PRD 23.
-        supabase.from("tags").select("id, name, color").eq("account_id", accountId).eq("kind", "outcome").order("name"),
-      ]);
-      if (cancelled) return;
-      setLines(linesRes.lines ?? []);
-      setAgents(
-        (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null }) => ({
-          id: p.user_id,
-          name: p.full_name || "Atendente",
-        }))
-      );
-      // teams.color (migration 280) pode ainda não existir no banco: sem ela,
-      // busca de novo só id/nome — o filtro de equipe nunca some por isso.
-      let teamRows = teamsRes.data as (NamedOption & { color?: string | null })[] | null;
-      if (teamsRes.error) {
-        const fallback = await supabase.from("teams").select("id, name").eq("account_id", accountId).order("name");
-        if (cancelled) return;
-        teamRows = (fallback.data ?? []) as NamedOption[];
-      }
-      setTeams((teamRows ?? []).map((t) => ({ ...t, color: t.color ?? null })));
-      setClients((clientsRes.data ?? []) as ClientOption[]);
-      setCampaigns(
-        (campaignsRes.data ?? []).map((c: { id: string; nome: string }) => ({ id: c.id, name: c.nome }))
-      );
-      setOutcomes((outcomesRes.data ?? []) as ClientOption[]);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId]);
+const EMPTY_FILTER_OPTIONS: FilterOptionsData = {
+  lines: [],
+  agents: [],
+  teams: [],
+  clients: [],
+  campaigns: [],
+  outcomes: [],
+};
 
-  return { lines, agents, teams, clients, campaigns, outcomes };
+async function loadFilterOptions(accountId: string): Promise<FilterOptionsData> {
+  const supabase = createClient();
+  const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes, outcomesRes] = await Promise.all([
+    apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
+    supabase
+      .from("profiles")
+      .select("user_id, full_name")
+      .eq("account_id", accountId)
+      .in("account_role", ["agent", "supervisor", "admin", "owner"])
+      .order("full_name"),
+    supabase.from("teams").select("id, name, color").eq("account_id", accountId).order("name"),
+    supabase.from("clients").select("id, name, color").eq("account_id", accountId).order("name"),
+    // Campanhas que podem ter originado conversas (as mais recentes).
+    supabase
+      .from("campaigns")
+      .select("id, nome")
+      .eq("account_id", accountId)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    // Tabulações (tags de desfecho) para o filtro do item 11 do PRD 23.
+    supabase.from("tags").select("id, name, color").eq("account_id", accountId).eq("kind", "outcome").order("name"),
+  ]);
+  // teams.color (migration 280) pode ainda não existir no banco: sem ela,
+  // busca de novo só id/nome — o filtro de equipe nunca some por isso.
+  let teamRows = teamsRes.data as (NamedOption & { color?: string | null })[] | null;
+  if (teamsRes.error) {
+    const fallback = await supabase.from("teams").select("id, name").eq("account_id", accountId).order("name");
+    teamRows = (fallback.data ?? []) as NamedOption[];
+  }
+  return {
+    lines: linesRes.lines ?? [],
+    agents: (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null }) => ({
+      id: p.user_id,
+      name: p.full_name || "Atendente",
+    })),
+    teams: (teamRows ?? []).map((t) => ({ ...t, color: t.color ?? null })),
+    clients: (clientsRes.data ?? []) as ClientOption[],
+    campaigns: (campaignsRes.data ?? []).map((c: { id: string; nome: string }) => ({ id: c.id, name: c.nome })),
+    outcomes: (outcomesRes.data ?? []) as ClientOption[],
+  };
+}
+
+// Catálogos mudam pouco: ficam em cache (memória, por conta+usuário) entre navegações e revalidam em segundo plano.
+function useFilterOptions(accountId: string | null): FilterOptionsData {
+  const { data } = useScopedSWR("inbox.filter-options", [], () => loadFilterOptions(accountId as string), {
+    enabled: !!accountId,
+  });
+  return data ?? EMPTY_FILTER_OPTIONS;
 }
 
 export function ConversationList({
