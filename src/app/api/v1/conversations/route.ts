@@ -1,4 +1,5 @@
-import { requireApiKey } from '@/lib/auth/api-context';
+import { assertKeyScope, requireApiKey } from '@/lib/auth/api-context';
+import { hasScope } from '@/lib/api-keys/scopes';
 import { ok, toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
 import {
   decodeCursor,
@@ -69,13 +70,17 @@ export async function POST(request: Request) {
       const body: unknown = await request.json().catch(() => null);
       const input = parseOpenBody(body);
       const actor = await resolveActorUserId(ctx.supabase, ctx.accountId, ctx.createdBy, ctx.userId);
-      return respond(await openConversation(ctx.supabase, { accountId: ctx.accountId, actorUserId: actor, input, onProviderCall }));
+      // Criar contato pelo telefone é escrita de contato: sem contacts:write só vale contato que já existe (contact_id ou telefone já cadastrado).
+      return respond(await openConversation(ctx.supabase, { accountId: ctx.accountId, actorUserId: actor, input, onProviderCall, canCreateContact: hasScope(ctx.scopes, 'contacts:write') }));
     };
 
     // Com mensagem inicial a idempotência é obrigatória; só dá para saber lendo o corpo, então o corpo é lido dentro do controle.
     const peek: unknown = await request.clone().json().catch(() => null);
     const hasMessage = !!peek && typeof peek === 'object' && !Array.isArray(peek) && (peek as Record<string, unknown>).message != null;
     if (!hasMessage) return await run(() => {});
+    // Enviar mensagem é o escopo messages:send (as rotas /whatsapp/send e /send-template já o exigem): conversations:write sozinho não envia.
+    // Antes do controle de idempotência: nada é registrado nem enviado sem o escopo.
+    assertKeyScope(ctx, 'messages:send', 'Enviar a mensagem inicial exige também o escopo messages:send (ou abra a conversa sem message)');
     return await runIdempotentSend(ctx.accountId, request, async (ctl) => run(() => ctl.providerCalled()), { apiEnvelope: true });
   } catch (err) {
     return toApiErrorResponse(err, logCtx);

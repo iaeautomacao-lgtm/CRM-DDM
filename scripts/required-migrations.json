@@ -601,6 +601,10 @@
     {
       "version": "380_ai_costs_by_feature",
       "kind": "registry"
+    },
+    {
+      "version": "383_api_open_conversation_lock",
+      "kind": "registry"
     }
   ]
 }

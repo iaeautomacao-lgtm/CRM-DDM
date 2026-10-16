@@ -149,3 +149,11 @@ export async function requireApiKey(
     userId: row.user_id ?? null,
   };
 }
+
+/**
+ * Escopo ADICIONAL numa rota que já passou por requireApiKey: o escopo da rota não basta quando a mesma chamada também faz o que outro escopo
+ * governa (ex.: POST /conversations com `message` também precisa de `messages:send`). Falta = 403 com a mensagem dada.
+ */
+export function assertKeyScope(ctx: Pick<ApiKeyContext, 'scopes' | 'accountId' | 'keyId'>, scope: ApiScope, message: string): void {
+  if (!hasScope(ctx.scopes, scope)) throw forbidden(message, { accountId: ctx.accountId, keyId: ctx.keyId });
+}

@@ -74,9 +74,11 @@ export async function POST(
       const admin = supabaseAdmin()
       if ((await pausedAgentIds(admin, [agentId])).has(agentId)) {
         if (body.confirm_paused !== true) {
+          // O motivo e a hora da pausa só aparecem a quem a regra da 370 deixa ver (pause_shares_team): lido com o cliente da SESSÃO (RLS), não com o
+          // service role. Quem não enxerga a pausa recebe só "em pausa" (pause: null). O nome vem da mesma conta (o destino já foi validado acima).
           const [{ data: open }, { data: prof }] = await Promise.all([
-            admin.from('agent_pauses').select('reason_name, started_at').eq('user_id', agentId).is('ended_at', null).limit(1),
-            admin.from('profiles').select('full_name').eq('user_id', agentId).limit(1),
+            supabase.from('agent_pauses').select('reason_name, started_at').eq('user_id', agentId).is('ended_at', null).limit(1),
+            admin.from('profiles').select('full_name').eq('user_id', agentId).eq('account_id', accountId).limit(1),
           ])
           const name = ((prof?.[0] as { full_name?: string | null } | undefined)?.full_name ?? '').trim() || 'O atendente'
           const pause = (open?.[0] as { reason_name: string; started_at: string } | undefined) ?? null
