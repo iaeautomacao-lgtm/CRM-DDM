@@ -155,10 +155,12 @@ describe("migration 204 — webhooks de saída", { timeout: 120_000 }, () => {
       await db.exec(`INSERT INTO wacrm.blacklist (account_id, telefone, motivo) VALUES ('${A}', '5511977777777', 'opt_out') ON CONFLICT (telefone) DO UPDATE SET motivo = 'opt_out'`);
       await db.exec(`UPDATE wacrm.blacklist SET bloqueado_por = 'outro' WHERE telefone = '5511900000000'`); // já era opt_out: sem novo evento
       const rows = await deliveries();
-      expect(rows.map((r) => r.payload.data)).toEqual([
-        { phone: "5521999991234", reason: "opt_out", source: "ai_priority_guard" },
+      // created_at pode empatar entre as escritas (resolução do relógio): compara sem depender da ordem.
+      const byPhone = (a: { phone: string }, b: { phone: string }) => a.phone.localeCompare(b.phone);
+      expect(rows.map((r) => r.payload.data as { phone: string }).sort(byPhone)).toEqual([
         { phone: "5511900000000", reason: "opt_out", source: "ai_priority_guard" },
         { phone: "5511977777777", reason: "opt_out", source: null },
+        { phone: "5521999991234", reason: "opt_out", source: "ai_priority_guard" },
       ]);
     });
 
