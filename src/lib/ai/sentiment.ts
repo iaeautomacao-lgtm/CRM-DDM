@@ -48,7 +48,7 @@ ${historyText}
 """`;
 
   try {
-    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt, model);
+    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt, model, { accountId, feature: "sentiment" });
 
     const cleanJson = stripJsonFences(rawResult);
 
