@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import Link from "next/link";
 
 // ============================================================
 // /canais — table-style view over the existing WhatsApp channel
@@ -119,7 +120,7 @@ function searchHaystack(c: ChannelConfig): string {
 }
 
 export default function CanaisPage() {
-  const { accountId } = useAuth();
+  const { accountId, canEditSettings } = useAuth();
   const [configs, setConfigs] = useState<ChannelConfig[]>([]);
   const [flows, setFlows] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
@@ -355,7 +356,10 @@ export default function CanaisPage() {
             WhatsApp, Instagram e Messenger conectados, com o cliente de cada linha.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {canEditSettings && (
+            <Button asChild variant="outline"><Link href="/canais/integracoes-meta">Integrações Meta</Link></Button>
+          )}
           <Button variant="outline" onClick={() => setClientsOpen(true)}>
             Clientes
           </Button>
