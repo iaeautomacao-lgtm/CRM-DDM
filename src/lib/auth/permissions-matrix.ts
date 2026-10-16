@@ -298,6 +298,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("pausas/relatorio", "GET", "supervisor", "reports.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
+  pg("costs/ai", "GET", "admin", "reports.view_all"), // custo estimado de IA (378); o custo Meta fica na 195
   pg("historico/exports", "POST", "admin", "exports.manage"),
   pg("historico/exports", "GET", "admin", "exports.manage"),
   pg("historico/exports/[id]", "GET", "admin", "exports.manage"),

@@ -74,6 +74,8 @@ export type LlmCaller = (
   apiKey: string,
   prompt: string,
   model?: string,
+  // Só para a telemetria de custo (migration 378): conta e funcionalidade; nunca texto.
+  opts?: { accountId?: string; feature?: string },
 ) => Promise<string>;
 
 /**
@@ -274,6 +276,7 @@ export async function suggestOutcomeTag(
       active.apiKey,
       buildOutcomeSuggestPrompt(tags, historyText),
       active.model,
+      { accountId: conversation.account_id, feature: "tabulacao" },
     );
   } catch (err) {
     // Falha não entra no cache: a próxima abertura tenta de novo.
