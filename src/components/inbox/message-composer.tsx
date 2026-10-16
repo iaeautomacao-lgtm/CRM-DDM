@@ -49,6 +49,7 @@ import type { AcorditoSuggestion } from "@/lib/acordito/client";
 import { QuickReplyMenu, QUICK_REPLY_MENU_ID } from "./quick-reply-menu";
 import { trackQuickReplyUse, useQuickReplies } from "@/hooks/use-quick-replies";
 import { useAuth } from "@/hooks/use-auth";
+import { draftEpoch, readDraft, writeDraft, type DraftScope } from "@/lib/inbox/drafts";
 import {
   filterQuickReplies,
   matchSlashQuery,
@@ -309,7 +310,17 @@ export function MessageComposer({
 
   // Rascunho: grava no navegador 300 ms depois da última tecla (gravar a cada tecla travava a digitação em
   // conversas com texto longo). Sai na hora ao trocar de conversa, ao desmontar e antes de a aba fechar.
-  const pendingDraftRef = useRef<{ id: string; val: string } | null>(null);
+  // LGPD: a chave leva conta + usuário e o rascunho vence em 7 dias; logout/troca de conta apagam tudo (lib/inbox/drafts.ts).
+  const { user: draftUser, accountId: draftAccountId } = useAuth();
+  const draftScope = useMemo<DraftScope | null>(
+    () => (draftUser?.id && draftAccountId ? { userId: draftUser.id, accountId: draftAccountId } : null),
+    [draftUser?.id, draftAccountId],
+  );
+  const draftScopeRef = useRef(draftScope);
+  useEffect(() => {
+    draftScopeRef.current = draftScope;
+  }, [draftScope]);
+  const pendingDraftRef = useRef<{ id: string; val: string; scope: DraftScope | null; epoch: number } | null>(null);
   const draftTimerRef = useRef<number | null>(null);
   const flushDraft = useCallback(() => {
     if (draftTimerRef.current !== null) {
@@ -319,12 +330,8 @@ export function MessageComposer({
     const pending = pendingDraftRef.current;
     pendingDraftRef.current = null;
     if (!pending) return;
-    try {
-      if (pending.val) localStorage.setItem(`wacrm:draft:${pending.id}`, pending.val);
-      else localStorage.removeItem(`wacrm:draft:${pending.id}`);
-    } catch (err) {
-      console.error("[Draft] Failed to save draft:", err);
-    }
+    // Sem usuário resolvido, ou com limpeza de sessão depois do agendamento (ex.: pagehide do logout), não grava.
+    writeDraft(pending.scope, pending.id, pending.val, { expectedEpoch: pending.epoch });
   }, []);
   const discardPendingDraft = useCallback(() => {
     if (draftTimerRef.current !== null) {
@@ -335,7 +342,7 @@ export function MessageComposer({
   }, []);
   const saveDraft = useCallback(
     (val: string) => {
-      pendingDraftRef.current = { id: conversationId, val };
+      pendingDraftRef.current = { id: conversationId, val, scope: draftScopeRef.current, epoch: draftEpoch() };
       if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = window.setTimeout(flushDraft, 300);
     },
@@ -359,9 +366,7 @@ export function MessageComposer({
       reportAcorditoSend(trimmed);
       setText("");
       discardPendingDraft();
-      try {
-        localStorage.removeItem(`wacrm:draft:${conversationId}`);
-      } catch {}
+      writeDraft(draftScopeRef.current, conversationId, "");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -480,8 +485,7 @@ export function MessageComposer({
     if (!conversationId) return;
     flushDraft();
     try {
-      const saved = localStorage.getItem(`wacrm:draft:${conversationId}`);
-      setText(saved || "");
+      setText(readDraft(draftScope, conversationId) ?? "");
       setTimeout(() => {
         adjustHeight();
         // Foca o campo ao abrir/trocar de conversa (no-op se desabilitado).
@@ -494,7 +498,7 @@ export function MessageComposer({
     }
     // Rascunho pendente da conversa que está saindo grava antes de a nova abrir.
     return flushDraft;
-  }, [conversationId, adjustHeight, flushDraft]);
+  }, [conversationId, adjustHeight, flushDraft, draftScope]);
 
   // Undo-Send "Editar" recall — restores the text or the staged media draft
   // that was pulled back from a pending (not-yet-sent) message. Runs once
