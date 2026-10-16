@@ -140,6 +140,7 @@ export function AgentColumn({
               conversation={c}
               phase="atendimento"
               teamName={actions.getTeamName(c.team_id)}
+              slaLimit={actions.getSlaLimit(c.team_id)}
               hideAgent
               selected={actions.selectedIds.has(c.id)}
               onToggleSelect={actions.onToggleSelect}

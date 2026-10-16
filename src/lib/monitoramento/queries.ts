@@ -18,12 +18,15 @@ export interface MonitorConversation {
    *  is null for them — not "unknown", genuinely not tracked. */
   waha_session: string | null;
   updated_at: string;
+  /** Última mensagem da conversa e última do cliente (migration 128): base do nível de espera do cartão. */
+  last_message_at?: string | null;
+  last_customer_message_at?: string | null;
   contact_id: string;
   contact: Pick<Contact, "id" | "name" | "phone" | "avatar_url"> | null;
 }
 
 const MONITOR_SELECT =
-  "id, status, assigned_agent_id, team_id, waha_session, updated_at, contact_id, contact:contacts(id, name, phone, avatar_url)";
+  "id, status, assigned_agent_id, team_id, waha_session, updated_at, last_message_at, last_customer_message_at, contact_id, contact:contacts(id, name, phone, avatar_url)";
 
 // Safety cap on the initial catch-up fetch — there's no dedicated
 // count/board RPC yet (see loadMetrics in dashboard/queries.ts for the

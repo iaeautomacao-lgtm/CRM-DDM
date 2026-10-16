@@ -18,4 +18,6 @@ export interface ConversationCardActions {
   onOpenClick: (conversation: MonitorConversation) => void;
   getTeamName: (teamId: string | null) => string | null;
   getAgentName: (agentId: string | null) => string | null;
+  /** SLA de primeira resposta (min) da equipe; sem equipe = padrão da conta (GET /api/sla/config). */
+  getSlaLimit: (teamId: string | null) => number;
 }
